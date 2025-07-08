@@ -1,2 +1,6 @@
 /src/cli/version.rs
 target
+
+# AI code helper stuff
+.claude
+.mcp.json
