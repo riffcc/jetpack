@@ -1,12 +1,12 @@
 [package]
-name = "jetp"
-version = "0.1.1"
+name = "jetpack"
+version = "0.1.2"
 edition = "2021"
 license = "GPL-3.0-or-later"
 description="automation platform"
-homepage="https://www.jetporch.com/"
-documentation="https://www.jetporch.com/"
-repository="https://github.com/jetporch/jetporch"
+homepage="https://riff.cc/jetpack"
+documentation="https://docs.riff.cc/jetpack/"
+repository="https://github.com/riffcc/jetpack"
 readme="README.md"
 keywords=["automation","devops","deployment","ssh"]
 include=["src/","version.sh"]

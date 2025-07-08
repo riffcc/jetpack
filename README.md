@@ -1,11 +1,11 @@
-# Jetporch - the Jet Enterprise Professional Orchestrator
+# Jetpack - the Jet Orchestrator
 
-Jetporch (aka Jet) is a general-purpose, community-driven IT automation platform for configuration management, 
+Jetpack (aka Jet) is a general-purpose, community-driven IT automation platform for configuration management, 
 deployment, orchestration, patching, and arbitrary task execution workflows. 
 
-Jet is a GPLv3 licensed project, created and run by [Michael DeHaan](https://home.laserllama.net). [(<michael@michaeldehaan.net>)](mailto:michael@michaeldehaan.net).
+Jetpack is a GPLv3 licensed project, based on the original [Jetporch](https://github.com/jetporch/jetporch) project created and run by [Michael DeHaan](https://home.laserllama.net). [(<michael@michaeldehaan.net>)](mailto:michael@michaeldehaan.net).
 
-Links
+Links (currently outdated, will be updated soon)
 
 * [All Documentation](https://www.jetporch.com/)
 * [Installation](https://www.jetporch.com/basics/installing-from-source)

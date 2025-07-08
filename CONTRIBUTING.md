@@ -1,1 +1,1 @@
-See https://www.jetporch.com/community/contributing
+See https://github.com/riffcc/jetpack for now
