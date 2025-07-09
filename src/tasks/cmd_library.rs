@@ -166,7 +166,3 @@ pub fn get_arch_command(os_type: HostOSType) -> Result<String,String> {
         _ => { return Ok(String::from("uname -m")) },
     }
 }
-
-
-
-

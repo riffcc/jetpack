@@ -226,3 +226,304 @@ impl Host {
     }
 
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_group(name: &str) -> Arc<RwLock<Group>> {
+        Arc::new(RwLock::new(Group::new(&name.to_string())))
+    }
+
+    #[test]
+    fn test_host_new() {
+        let host = Host::new(&"test-host".to_string());
+        assert_eq!(host.name, "test-host");
+        assert!(host.groups.is_empty());
+        assert!(host.variables.is_empty());
+        assert!(host.os_type.is_none());
+        assert!(host.package_preference.is_none());
+    }
+
+    #[test]
+    fn test_set_os_info_linux() {
+        let mut host = Host::new(&"test-host".to_string());
+        let result = host.set_os_info(&"Linux 5.15.0-58-generic".to_string());
+        assert!(result.is_ok());
+        assert_eq!(host.os_type, Some(HostOSType::Linux));
+    }
+
+    #[test]
+    fn test_set_os_info_macos() {
+        let mut host = Host::new(&"test-host".to_string());
+        let result = host.set_os_info(&"Darwin 21.6.0".to_string());
+        assert!(result.is_ok());
+        assert_eq!(host.os_type, Some(HostOSType::MacOS));
+    }
+
+    #[test]
+    fn test_set_os_info_unknown() {
+        let mut host = Host::new(&"test-host".to_string());
+        let result = host.set_os_info(&"UnknownOS 1.0".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("OS Type could not be detected"));
+    }
+
+    #[test]
+    fn test_notify_and_is_notified() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        // Initially not notified
+        assert!(!host.is_notified(1, &"handler1".to_string()));
+        
+        // Notify handler
+        host.notify(1, &"handler1".to_string());
+        assert!(host.is_notified(1, &"handler1".to_string()));
+        
+        // Different play number
+        assert!(!host.is_notified(2, &"handler1".to_string()));
+        
+        // Multiple handlers in same play
+        host.notify(1, &"handler2".to_string());
+        assert!(host.is_notified(1, &"handler1".to_string()));
+        assert!(host.is_notified(1, &"handler2".to_string()));
+    }
+
+    #[test]
+    fn test_checksum_cache() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        // Initially empty
+        assert!(host.get_checksum_cache(1, &"/path/file".to_string()).is_none());
+        
+        // Set checksum
+        host.set_checksum_cache(&"/path/file".to_string(), &"abc123".to_string());
+        assert_eq!(host.get_checksum_cache(1, &"/path/file".to_string()), Some("abc123".to_string()));
+        
+        // Different task ID clears cache
+        assert!(host.get_checksum_cache(2, &"/path/file".to_string()).is_none());
+        
+        // Set and get multiple checksums
+        host.set_checksum_cache(&"/path/file1".to_string(), &"checksum1".to_string());
+        host.set_checksum_cache(&"/path/file2".to_string(), &"checksum2".to_string());
+        assert_eq!(host.get_checksum_cache(2, &"/path/file1".to_string()), Some("checksum1".to_string()));
+        assert_eq!(host.get_checksum_cache(2, &"/path/file2".to_string()), Some("checksum2".to_string()));
+    }
+
+    #[test]
+    fn test_add_group_and_has_group() {
+        let mut host = Host::new(&"test-host".to_string());
+        let group = create_test_group("web");
+        
+        assert!(!host.has_group(&"web".to_string()));
+        
+        host.add_group(&"web".to_string(), group);
+        assert!(host.has_group(&"web".to_string()));
+        assert!(!host.has_group(&"db".to_string()));
+    }
+
+    #[test]
+    fn test_get_groups_and_group_names() {
+        let mut host = Host::new(&"test-host".to_string());
+        let group1 = create_test_group("web");
+        let group2 = create_test_group("prod");
+        
+        host.add_group(&"web".to_string(), group1);
+        host.add_group(&"prod".to_string(), group2);
+        
+        let groups = host.get_groups();
+        assert_eq!(groups.len(), 2);
+        assert!(groups.contains_key("web"));
+        assert!(groups.contains_key("prod"));
+        
+        let names = host.get_group_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"web".to_string()));
+        assert!(names.contains(&"prod".to_string()));
+    }
+
+    #[test]
+    fn test_has_ancestor_group() {
+        let mut host = Host::new(&"test-host".to_string());
+        let group = create_test_group("web");
+        
+        host.add_group(&"web".to_string(), group.clone());
+        
+        // Direct group membership
+        assert!(host.has_ancestor_group(&"web".to_string()));
+        
+        // Non-existent group
+        assert!(!host.has_ancestor_group(&"nonexistent".to_string()));
+    }
+
+    #[test]
+    fn test_variables() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        // Initially empty
+        assert!(host.get_variables().is_empty());
+        
+        // Set variables
+        let mut vars = serde_yaml::Mapping::new();
+        vars.insert(
+            serde_yaml::Value::String("key1".to_string()),
+            serde_yaml::Value::String("value1".to_string())
+        );
+        host.set_variables(vars.clone());
+        
+        let retrieved = host.get_variables();
+        assert_eq!(retrieved["key1"], "value1");
+    }
+
+    #[test]
+    fn test_update_variables() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        // Set initial variables
+        let mut vars = serde_yaml::Mapping::new();
+        vars.insert(
+            serde_yaml::Value::String("key1".to_string()),
+            serde_yaml::Value::String("value1".to_string())
+        );
+        host.set_variables(vars);
+        
+        // Update with new variables
+        let mut update = serde_yaml::Mapping::new();
+        update.insert(
+            serde_yaml::Value::String("key2".to_string()),
+            serde_yaml::Value::String("value2".to_string())
+        );
+        update.insert(
+            serde_yaml::Value::String("key1".to_string()),
+            serde_yaml::Value::String("updated1".to_string())
+        );
+        host.update_variables(update);
+        
+        let vars = host.get_variables();
+        assert_eq!(vars["key1"], "updated1");
+        assert_eq!(vars["key2"], "value2");
+    }
+
+    #[test]
+    fn test_update_facts() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        let mut facts = serde_yaml::Mapping::new();
+        facts.insert(
+            serde_yaml::Value::String("os_family".to_string()),
+            serde_yaml::Value::String("debian".to_string())
+        );
+        facts.insert(
+            serde_yaml::Value::String("kernel".to_string()),
+            serde_yaml::Value::String("linux".to_string())
+        );
+        
+        host.update_facts2(facts);
+        
+        // Facts should be included in blended variables
+        let blended = host.get_blended_variables();
+        assert_eq!(blended["os_family"], "debian");
+        assert_eq!(blended["kernel"], "linux");
+    }
+
+    #[test]
+    fn test_get_variables_yaml() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        let mut vars = serde_yaml::Mapping::new();
+        vars.insert(
+            serde_yaml::Value::String("key".to_string()),
+            serde_yaml::Value::String("value".to_string())
+        );
+        host.set_variables(vars);
+        
+        let yaml = host.get_variables_yaml().unwrap();
+        assert!(yaml.contains("key: value"));
+    }
+
+    #[test]
+    fn test_get_blended_variables_yaml() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        let mut vars = serde_yaml::Mapping::new();
+        vars.insert(
+            serde_yaml::Value::String("host_var".to_string()),
+            serde_yaml::Value::String("host_value".to_string())
+        );
+        host.set_variables(vars);
+        
+        let yaml = host.get_blended_variables_yaml().unwrap();
+        assert!(yaml.contains("host_var: host_value"));
+    }
+
+    #[test]
+    fn test_package_preference() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        assert!(host.package_preference.is_none());
+        
+        host.package_preference = Some(PackagePreference::Dnf);
+        assert!(matches!(host.package_preference, Some(PackagePreference::Dnf)));
+        
+        host.package_preference = Some(PackagePreference::Yum);
+        assert!(matches!(host.package_preference, Some(PackagePreference::Yum)));
+    }
+
+    #[test]
+    fn test_get_ancestor_groups_and_names() {
+        let mut host = Host::new(&"test-host".to_string());
+        let group1 = create_test_group("web");
+        let group2 = create_test_group("prod");
+        
+        host.add_group(&"web".to_string(), group1);
+        host.add_group(&"prod".to_string(), group2);
+        
+        let ancestors = host.get_ancestor_groups(10);
+        assert!(ancestors.len() >= 2);
+        
+        let names = host.get_ancestor_group_names();
+        assert!(names.contains(&"web".to_string()));
+        assert!(names.contains(&"prod".to_string()));
+    }
+
+    #[test]
+    fn test_blended_variables_with_groups() {
+        let mut host = Host::new(&"test-host".to_string());
+        
+        // Create group with variables
+        let group = create_test_group("web");
+        {
+            let mut group_mut = group.write().unwrap();
+            let mut group_vars = serde_yaml::Mapping::new();
+            group_vars.insert(
+                serde_yaml::Value::String("port".to_string()),
+                serde_yaml::Value::Number(serde_yaml::Number::from(80))
+            );
+            group_vars.insert(
+                serde_yaml::Value::String("service".to_string()),
+                serde_yaml::Value::String("nginx".to_string())
+            );
+            group_mut.set_variables(group_vars);
+        }
+        
+        host.add_group(&"web".to_string(), group);
+        
+        // Set host variables
+        let mut host_vars = serde_yaml::Mapping::new();
+        host_vars.insert(
+            serde_yaml::Value::String("port".to_string()),
+            serde_yaml::Value::Number(serde_yaml::Number::from(8080))
+        );
+        host_vars.insert(
+            serde_yaml::Value::String("hostname".to_string()),
+            serde_yaml::Value::String("webserver1".to_string())
+        );
+        host.set_variables(host_vars);
+        
+        // Test blending - host vars should override group vars
+        let blended = host.get_blended_variables();
+        assert_eq!(blended["port"], 8080); // Host overrides group
+        assert_eq!(blended["service"], "nginx"); // From group
+        assert_eq!(blended["hostname"], "webserver1"); // From host
+    }
+}

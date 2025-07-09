@@ -48,3 +48,73 @@ pub fn captioned_display(caption: &String, body: &String) {
     }
     println!("");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_markdown_print() {
+        // Just verify it doesn't panic
+        let markdown = String::from("# Test Heading\n\nSome **bold** text");
+        markdown_print(&markdown);
+    }
+
+    #[test]
+    fn test_banner() {
+        // Just verify it doesn't panic
+        let msg = String::from("Test Banner Message");
+        banner(&msg);
+    }
+
+    #[test]
+    fn test_two_column_table() {
+        let header_a = String::from("Column A");
+        let header_b = String::from("Column B");
+        let elements = vec![
+            (String::from("Row 1 A"), String::from("Row 1 B")),
+            (String::from("Row 2 A"), String::from("Row 2 B")),
+            (String::from("Row 3 A"), String::from("Row 3 B")),
+        ];
+        
+        // Just verify it doesn't panic
+        two_column_table(&header_a, &header_b, &elements);
+    }
+
+    #[test]
+    fn test_two_column_table_empty() {
+        let header_a = String::from("Empty A");
+        let header_b = String::from("Empty B");
+        let elements: Vec<(String, String)> = vec![];
+        
+        // Should handle empty tables gracefully
+        two_column_table(&header_a, &header_b, &elements);
+    }
+
+    #[test]
+    fn test_captioned_display() {
+        let caption = String::from("Test Caption");
+        let body = String::from("Line 1\nLine 2\nLine 3");
+        
+        // Just verify it doesn't panic
+        captioned_display(&caption, &body);
+    }
+
+    #[test]
+    fn test_captioned_display_multiline() {
+        let caption = String::from("Multi-line Display");
+        let body = String::from("First line\n    Indented line\n\nEmpty line above\nLast line");
+        
+        // Test with various line formats
+        captioned_display(&caption, &body);
+    }
+
+    #[test]
+    fn test_captioned_display_empty_body() {
+        let caption = String::from("Empty Body Test");
+        let body = String::from("");
+        
+        // Should handle empty body gracefully
+        captioned_display(&caption, &body);
+    }
+}

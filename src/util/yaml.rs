@@ -118,3 +118,173 @@ pub fn blend_variables(a: &mut serde_yaml::Value, b: serde_yaml::Value) {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_blend_variables_null_into_mapping() {
+        let mut a = serde_yaml::from_str("key: value").unwrap();
+        let b = serde_yaml::Value::Null;
+        
+        blend_variables(&mut a, b);
+        
+        assert_eq!(a["key"], "value");
+    }
+
+    #[test]
+    fn test_blend_variables_mapping_into_mapping() {
+        let mut a = serde_yaml::from_str("key1: value1").unwrap();
+        let b = serde_yaml::from_str("key2: value2").unwrap();
+        
+        blend_variables(&mut a, b);
+        
+        assert_eq!(a["key1"], "value1");
+        assert_eq!(a["key2"], "value2");
+    }
+
+    #[test]
+    fn test_blend_variables_override_value() {
+        let mut a = serde_yaml::from_str("key: old_value").unwrap();
+        let b = serde_yaml::from_str("key: new_value").unwrap();
+        
+        blend_variables(&mut a, b);
+        
+        assert_eq!(a["key"], "new_value");
+    }
+
+    #[test]
+    fn test_blend_variables_merge_sequences() {
+        let mut a = serde_yaml::from_str("list: [1, 2]").unwrap();
+        let b = serde_yaml::from_str("list: [3, 4]").unwrap();
+        
+        blend_variables(&mut a, b);
+        
+        let list = a["list"].as_sequence().unwrap();
+        assert_eq!(list.len(), 4);
+        assert_eq!(list[0], 1);
+        assert_eq!(list[1], 2);
+        assert_eq!(list[2], 3);
+        assert_eq!(list[3], 4);
+    }
+
+    #[test]
+    fn test_blend_variables_nested_mappings() {
+        let mut a = serde_yaml::from_str("
+parent:
+  child1: value1
+").unwrap();
+        let b = serde_yaml::from_str("
+parent:
+  child2: value2
+").unwrap();
+        
+        blend_variables(&mut a, b);
+        
+        assert_eq!(a["parent"]["child1"], "value1");
+        assert_eq!(a["parent"]["child2"], "value2");
+    }
+
+    #[test]
+    fn test_blend_variables_replace_non_mapping() {
+        // When 'a' is a non-mapping, it gets completely replaced by 'b'
+        let mut a = serde_yaml::Value::String("original".to_string());
+        let b = serde_yaml::from_str("key: value").unwrap();
+        
+        blend_variables(&mut a, b);
+        
+        // 'a' should now be the mapping from 'b'
+        assert!(a.is_mapping());
+        assert_eq!(a["key"], "value");
+    }
+
+    #[test]
+    fn test_show_yaml_error_without_location() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.yaml");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "invalid: yaml: content").unwrap();
+        
+        // Create a YAML error without location info
+        let yaml_content = "invalid: yaml: content";
+        let error = serde_yaml::from_str::<serde_yaml::Value>(yaml_content).unwrap_err();
+        
+        // This should not panic
+        show_yaml_error_in_context(&error, &file_path);
+    }
+
+    #[test]
+    fn test_show_yaml_error_with_location() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.yaml");
+        let mut file = File::create(&file_path).unwrap();
+        
+        // Write a file with multiple lines
+        for i in 1..25 {
+            writeln!(file, "line{}: value{}", i, i).unwrap();
+        }
+        writeln!(file, "invalid: [unclosed").unwrap();
+        
+        // Try to parse the invalid file
+        let content = fs::read_to_string(&file_path).unwrap();
+        let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
+        
+        // This should not panic and should show context
+        show_yaml_error_in_context(&error, &file_path);
+    }
+
+    #[test]
+    fn test_show_yaml_error_near_start() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.yaml");
+        let mut file = File::create(&file_path).unwrap();
+        
+        writeln!(file, "invalid: [unclosed").unwrap();
+        writeln!(file, "line2: value2").unwrap();
+        writeln!(file, "line3: value3").unwrap();
+        
+        let content = fs::read_to_string(&file_path).unwrap();
+        let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
+        
+        // This should handle edge case where error is near start
+        show_yaml_error_in_context(&error, &file_path);
+    }
+
+    #[test]
+    fn test_show_yaml_error_near_end() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.yaml");
+        let mut file = File::create(&file_path).unwrap();
+        
+        writeln!(file, "line1: value1").unwrap();
+        writeln!(file, "line2: value2").unwrap();
+        writeln!(file, "invalid: [unclosed").unwrap();
+        
+        let content = fs::read_to_string(&file_path).unwrap();
+        let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
+        
+        // This should handle edge case where error is near end
+        show_yaml_error_in_context(&error, &file_path);
+    }
+
+    #[test]
+    fn test_show_yaml_error_truncation() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.yaml");
+        let mut file = File::create(&file_path).unwrap();
+        
+        // Create invalid YAML that will generate a long error message
+        let long_content = "a".repeat(200);
+        writeln!(file, "key: [{}unclosed", long_content).unwrap();
+        
+        let content = fs::read_to_string(&file_path).unwrap();
+        let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
+        
+        // This should truncate long error messages - just verify it doesn't panic
+        show_yaml_error_in_context(&error, &file_path);
+    }
+}

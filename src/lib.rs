@@ -14,28 +14,15 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::sync::Arc;
-use crate::tasks::response::TaskResponse;
+pub mod cli;
+pub mod connection;
+pub mod handle;
+pub mod inventory;
+pub mod modules;
+pub mod playbooks;
+pub mod registry;
+pub mod tasks;
+pub mod util;
 
-// details useful for working with commands
-// not much here, see handle/remote.rs for more
-
-#[derive(Clone,Debug)]
-pub struct CommandResult {
-    pub cmd: String,
-    pub out: String,
-    pub rc: i32
-}
-
-#[derive(Debug,Copy,Clone,PartialEq)]
-pub enum Forward {
-    Yes,
-    No
-}
-
-pub fn cmd_info(info: &Arc<TaskResponse>) -> (i32, String) {
-    assert!(info.command_result.is_some(), "called cmd_info on a response that is not a command result");
-    let result = info.command_result.as_ref().as_ref().unwrap();
-    return (result.rc, result.out.clone());
-}
-
+// Re-export commonly used types
+pub use inventory::inventory::Inventory;

@@ -11,6 +11,10 @@ readme="README.md"
 keywords=["automation","devops","deployment","ssh"]
 include=["src/","version.sh"]
 
+[lib]
+name = "jetpack"
+path = "src/lib.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -29,3 +33,6 @@ guid-create="0.3.1"
 expanduser="1.2.2"
 indexmap = {version = "2.1.0", features = ["serde"]}
 chrono="0.4.31"
+
+[dev-dependencies]
+tempfile="3.8.0"

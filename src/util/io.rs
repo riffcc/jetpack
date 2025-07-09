@@ -93,3 +93,203 @@ pub fn is_executable(path: &Path) -> bool {
     }
     return true;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use tempfile::TempDir;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn test_jet_read_dir_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+        
+        // Create some files in the directory
+        File::create(path.join("file1.txt")).unwrap();
+        File::create(path.join("file2.txt")).unwrap();
+        
+        let result = jet_read_dir(path);
+        assert!(result.is_ok());
+        
+        let entries: Vec<_> = result.unwrap().collect();
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_jet_read_dir_failure() {
+        let non_existent = Path::new("/non/existent/directory");
+        let result = jet_read_dir(non_existent);
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to read directory"));
+    }
+
+    #[test]
+    fn test_path_walk_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+        
+        // Create some files
+        File::create(path.join("file1.txt")).unwrap();
+        File::create(path.join("file2.txt")).unwrap();
+        File::create(path.join("file3.txt")).unwrap();
+        
+        let mut count = 0;
+        let result = path_walk(path, |_p| {
+            count += 1;
+            Ok(())
+        });
+        
+        assert!(result.is_ok());
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_path_walk_with_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+        
+        File::create(path.join("file1.txt")).unwrap();
+        File::create(path.join("file2.txt")).unwrap();
+        
+        let mut count = 0;
+        let result = path_walk(path, |_p| {
+            count += 1;
+            if count == 1 {
+                Err("Stop walking".to_string())
+            } else {
+                Ok(())
+            }
+        });
+        
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Stop walking");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_jet_file_open_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        File::create(&file_path).unwrap();
+        
+        let result = jet_file_open(&file_path);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_jet_file_open_failure() {
+        let non_existent = Path::new("/non/existent/file.txt");
+        let result = jet_file_open(non_existent);
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unable to open file"));
+    }
+
+    #[test]
+    fn test_read_local_file_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(file, "Test content").unwrap();
+        writeln!(file, "Second line").unwrap();
+        
+        let result = read_local_file(&file_path);
+        assert!(result.is_ok());
+        
+        let content = result.unwrap();
+        assert!(content.contains("Test content"));
+        assert!(content.contains("Second line"));
+    }
+
+    #[test]
+    fn test_read_local_file_failure() {
+        let non_existent = Path::new("/non/existent/file.txt");
+        let result = read_local_file(non_existent);
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unable to open file"));
+    }
+
+    #[test]
+    fn test_path_basename_as_string() {
+        let path = Path::new("/home/user/documents/file.txt");
+        let basename = path_basename_as_string(path);
+        assert_eq!(basename, "file.txt");
+        
+        let path2 = Path::new("simple.txt");
+        let basename2 = path_basename_as_string(path2);
+        assert_eq!(basename2, "simple.txt");
+    }
+
+    #[test]
+    fn test_path_as_string() {
+        let path = Path::new("/home/user/file.txt");
+        let path_str = path_as_string(path);
+        assert_eq!(path_str, "/home/user/file.txt");
+    }
+
+    #[test]
+    fn test_directory_as_string() {
+        let path = Path::new("/home/user/documents/file.txt");
+        let dir = directory_as_string(path);
+        assert_eq!(dir, "/home/user/documents");
+        
+        let path2 = Path::new("/file.txt");
+        let dir2 = directory_as_string(path2);
+        assert_eq!(dir2, "/");
+    }
+
+    #[test]
+    fn test_is_executable_regular_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("script.sh");
+        let file = File::create(&file_path).unwrap();
+        
+        // Initially not executable
+        assert!(!is_executable(&file_path));
+        
+        // Make it executable
+        let mut perms = file.metadata().unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&file_path, perms).unwrap();
+        
+        assert!(is_executable(&file_path));
+    }
+
+    #[test]
+    fn test_is_executable_non_executable_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("regular.txt");
+        let file = File::create(&file_path).unwrap();
+        
+        // Set permissions to read/write only
+        let mut perms = file.metadata().unwrap().permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&file_path, perms).unwrap();
+        
+        assert!(!is_executable(&file_path));
+    }
+
+    #[test]
+    fn test_is_executable_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir_path = temp_dir.path().join("subdir");
+        fs::create_dir(&dir_path).unwrap();
+        
+        // Directories should return false even with execute bit
+        assert!(!is_executable(&dir_path));
+    }
+
+    #[test]
+    fn test_is_executable_non_existent() {
+        let non_existent = Path::new("/non/existent/file");
+        assert!(!is_executable(non_existent));
+    }
+
+    // Note: test_quit is omitted because it calls process::exit which
+    // interferes with test runners and coverage tools
+}
