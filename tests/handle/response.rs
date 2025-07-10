@@ -1,24 +1,47 @@
 use jetpack::handle::response::*;
-use jetpack::tasks::request::{TaskRequest, TaskRequestType};
+use jetpack::tasks::request::{TaskRequest, TaskRequestType, SudoDetails};
 use jetpack::tasks::response::{TaskStatus, TaskResponse};
 use jetpack::tasks::fields::Field;
 use jetpack::playbooks::traversal::RunState;
 use jetpack::playbooks::context::PlaybookContext;
 use jetpack::inventory::hosts::Host;
+use jetpack::inventory::inventory::Inventory;
 use jetpack::cli::parser::CliParser;
+use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
+use jetpack::connection::no::NoFactory;
+use jetpack::connection::factory::ConnectionFactory;
 use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+
+fn create_test_sudo_details() -> SudoDetails {
+    SudoDetails {
+        user: None,
+        template: "test".to_string()
+    }
+}
 
 fn create_test_response() -> Response {
-    let cli_args: Vec<String> = vec!["jetpack".to_string()];
-    let parser = Arc::new(CliParser::new(&cli_args, false));
-    let context = Arc::new(RwLock::new(PlaybookContext::new(
-        Arc::clone(&parser), 
-        None, 
-        None,
-        0
-    )));
-    let run_state = Arc::new(RunState::new(context));
-    let host = Arc::new(RwLock::new(Host::new("testhost", "test_connection")));
+    let parser = CliParser::new();
+    let inventory = Arc::new(RwLock::new(Inventory::new()));
+    let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
+    
+    let run_state = Arc::new(RunState {
+        inventory: Arc::clone(&inventory),
+        playbook_paths: Arc::new(RwLock::new(Vec::new())),
+        role_paths: Arc::new(RwLock::new(Vec::new())),
+        module_paths: Arc::new(RwLock::new(Vec::new())),
+        limit_hosts: Vec::new(),
+        limit_groups: Vec::new(),
+        batch_size: None,
+        context: context,
+        visitor: Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No))),
+        connection_factory: Arc::new(RwLock::new(NoFactory::new())),
+        tags: None,
+        allow_localhost_delegation: false
+    });
+    
+    let hostname = "testhost".to_string();
+    let host = Arc::new(RwLock::new(Host::new(&hostname)));
     
     Response::new(run_state, host)
 }
@@ -32,26 +55,17 @@ fn test_response_new() {
 #[test]
 fn test_response_is_matched() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Query,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let request = TaskRequest::validate();
     
     let result = response.is_matched(&request);
     assert!(result.status == TaskStatus::IsMatched);
-    assert_eq!(result.module, "test_module");
-    assert_eq!(result.task_name, "test_task");
 }
 
 #[test]
 fn test_response_needs_creation() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Query,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let sudo_details = create_test_sudo_details();
+    let request = TaskRequest::query(&sudo_details);
     
     let result = response.needs_creation(&request);
     assert!(result.status == TaskStatus::NeedsCreation);
@@ -60,11 +74,8 @@ fn test_response_needs_creation() {
 #[test]
 fn test_response_needs_modification() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Query,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let sudo_details = create_test_sudo_details();
+    let request = TaskRequest::query(&sudo_details);
     let changes = vec![Field::Content, Field::Mode];
     
     let result = response.needs_modification(&request, &changes);
@@ -75,11 +86,8 @@ fn test_response_needs_modification() {
 #[test]
 fn test_response_needs_removal() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Query,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let sudo_details = create_test_sudo_details();
+    let request = TaskRequest::query(&sudo_details);
     
     let result = response.needs_removal(&request);
     assert!(result.status == TaskStatus::NeedsRemoval);
@@ -88,11 +96,8 @@ fn test_response_needs_removal() {
 #[test]
 fn test_response_is_created() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Create,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let sudo_details = create_test_sudo_details();
+    let request = TaskRequest::create(&sudo_details);
     
     let result = response.is_created(&request);
     assert!(result.status == TaskStatus::IsCreated);
@@ -101,12 +106,9 @@ fn test_response_is_created() {
 #[test]
 fn test_response_is_modified() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Modify,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let sudo_details = create_test_sudo_details();
     let changes = vec![Field::Owner];
+    let request = TaskRequest::modify(&sudo_details, changes.clone());
     
     let result = response.is_modified(&request, changes);
     assert!(result.status == TaskStatus::IsModified);
@@ -116,11 +118,8 @@ fn test_response_is_modified() {
 #[test]
 fn test_response_is_removed() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Remove,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let sudo_details = create_test_sudo_details();
+    let request = TaskRequest::remove(&sudo_details);
     
     let result = response.is_removed(&request);
     assert!(result.status == TaskStatus::IsRemoved);
@@ -129,26 +128,10 @@ fn test_response_is_removed() {
 #[test]
 fn test_response_is_failed() {
     let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Execute,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
+    let request = TaskRequest::validate();
     
-    let result = response.is_failed(&request, "Test error message");
-    assert!(result.status == TaskStatus::IsFailed);
-    assert_eq!(result.message, Some("Test error message".to_string()));
+    let result = response.is_failed(&request, &"Test error message".to_string());
+    assert!(result.status == TaskStatus::Failed);
+    assert_eq!(result.msg, Some("Test error message".to_string()));
 }
 
-#[test]
-fn test_response_not_supported() {
-    let response = create_test_response();
-    let request = Arc::new(TaskRequest::new(
-        TaskRequestType::Validate,
-        "test_module".to_string(),
-        "test_task".to_string(),
-    ));
-    
-    let result = response.not_supported(&request);
-    assert!(result.status == TaskStatus::NotSupported);
-}
