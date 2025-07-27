@@ -21,3 +21,7 @@ pub mod traversal;
 pub mod templar;
 pub mod task_fsm;
 pub mod t_helpers;
+
+// New library-friendly versions
+pub mod context_new;
+pub mod visitor_new;

@@ -24,5 +24,15 @@ pub mod registry;
 pub mod tasks;
 pub mod util;
 
-// Re-export commonly used types
+// New API modules
+pub mod api;
+pub mod config;
+pub mod error;
+pub mod output;
+
+// Re-export commonly used types for library users
+pub use api::{PlaybookRunner, PlaybookResult, run_playbook};
+pub use config::{JetpackConfig, ConnectionMode};
+pub use error::{JetpackError, Result};
+pub use output::{OutputHandler, OutputHandlerRef, TerminalOutputHandler, NullOutputHandler, LogLevel, RecapData};
 pub use inventory::inventory::Inventory;
