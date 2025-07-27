@@ -133,6 +133,8 @@ impl PlaybookRunner {
             connection_factory,
             tags: self.config.tags.clone(),
             allow_localhost_delegation: self.config.allow_localhost_delegation,
+            is_pull_mode: false,
+            play_groups: None,
         });
         
         // Run the playbooks

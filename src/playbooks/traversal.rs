@@ -55,7 +55,9 @@ pub struct RunState {
     pub visitor: Arc<RwLock<PlaybookVisitor>>,
     pub connection_factory: Arc<RwLock<dyn ConnectionFactory>>,
     pub tags: Option<Vec<String>>,
-    pub allow_localhost_delegation: bool
+    pub allow_localhost_delegation: bool,
+    pub is_pull_mode: bool,
+    pub play_groups: Option<Vec<String>>
 }
 
 // this is the top end traversal function that is called from cli/playbooks.rs
@@ -95,7 +97,10 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
 
         // walk each play in the playbook
         let plays: Vec<Play> = parsed.unwrap();
-        for play in plays.iter() {
+        for (play_index, play) in plays.iter().enumerate() {
+            // Set the play index in context
+            run_state.context.write().unwrap().play_index = play_index;
+            
             match handle_play(&run_state, play) {
                 Ok(_) => {},
                 Err(s) => { return Err(s); }
@@ -431,7 +436,20 @@ fn get_play_hosts(run_state: &Arc<RunState>,play: &Play) -> Vec<Arc<RwLock<Host>
     // be further constrained by the parameters --limit-hosts and limit--groups
     // from the CLI.
     
-    let groups = &play.groups;
+    // In pull mode, always use localhost regardless of what the play specifies
+    // If --groups is specified, use the group for this play index
+    let groups = if run_state.is_pull_mode {
+        &vec!["all".to_string()]
+    } else if let Some(ref play_groups) = run_state.play_groups {
+        let play_index = run_state.context.read().unwrap().play_index;
+        if let Some(group) = play_groups.get(play_index) {
+            &vec![group.clone()]
+        } else {
+            &play.groups
+        }
+    } else {
+        &play.groups
+    };
     let mut results : HashMap<String, Arc<RwLock<Host>>> = HashMap::new();
     
     let has_group_limits = match run_state.limit_groups.len() {
@@ -511,11 +529,27 @@ fn validate_limit_hosts(run_state: &Arc<RunState>, _play: &Play) -> Result<(), S
 
 fn validate_groups(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
 
+    // In pull mode, we don't validate groups since they'll all be mapped to localhost
+    if run_state.is_pull_mode {
+        return Ok(());
+    }
+
+    // If --groups is specified, validate the remapped group instead
+    let groups_to_validate = if let Some(ref play_groups) = run_state.play_groups {
+        let play_index = run_state.context.read().unwrap().play_index;
+        if let Some(group) = play_groups.get(play_index) {
+            vec![group.clone()]
+        } else {
+            play.groups.clone()
+        }
+    } else {
+        play.groups.clone()
+    };
+
     // groups on the play can't mention any groups that aren't in inventory
 
-    let groups = &play.groups;
     let inv = run_state.inventory.read().unwrap();
-    for group_name in groups.iter() {
+    for group_name in groups_to_validate.iter() {
         if !inv.has_group(&group_name.clone()) {
             return Err(format!("at least one referenced group ({}) is not found in inventory", group_name));
         }

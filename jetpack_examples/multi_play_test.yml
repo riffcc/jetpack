@@ -1,0 +1,27 @@
+---
+- name: Deploy first component
+  groups: 
+    - laszoo
+  
+  tasks:
+    - !shell  
+      name: deploy first component
+      cmd: echo "Deploying first component on laszoo group"
+
+- name: Deploy MySQL
+  groups: 
+    - laszoo
+  
+  tasks:
+    - !shell  
+      name: setup mysql
+      cmd: echo "Setting up MySQL on laszoo group"
+
+- name: Deploy Nginx
+  groups: 
+    - laszoo
+  
+  tasks:
+    - !shell  
+      name: setup nginx
+      cmd: echo "Setting up Nginx on laszoo group"

@@ -56,7 +56,7 @@ pub fn playbook_simulate(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser)
 pub fn playbook_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
     // Pull mode is essentially local mode, but designed for external integration
     // It runs playbooks locally on the target host with optional inventory for variables
-    return playbook(inventory, parser, CheckMode::No, ConnectionMode::Local);
+    return playbook_with_pull(inventory, parser, CheckMode::No);
 }
 
 fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode, connection_mode: ConnectionMode) -> i32 {
@@ -80,7 +80,36 @@ fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: 
             ConnectionMode::Simulate => Arc::new(RwLock::new(NoFactory::new()))
         },
         tags: parser.tags.clone(),
-        allow_localhost_delegation: parser.allow_localhost_delegation
+        allow_localhost_delegation: parser.allow_localhost_delegation,
+        is_pull_mode: false,
+        play_groups: parser.play_groups.clone()
+    });
+    return match playbook_traversal(&run_state) {
+        Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),
+        Err(s) => { println!("{}", s); 1 }
+    };
+}
+
+fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode) -> i32 {
+    let run_state = Arc::new(RunState {
+        // every object gets an inventory, though with local modes it's empty.
+        inventory: Arc::clone(inventory),
+        playbook_paths: Arc::clone(&parser.playbook_paths),
+        role_paths: Arc::clone(&parser.role_paths),
+        module_paths: Arc::clone(&parser.module_paths),
+        limit_hosts: parser.limit_hosts.clone(),
+        limit_groups: parser.limit_groups.clone(),
+        batch_size: parser.batch_size.clone(),
+        // the context is constructed with an instance of the parser instead of having a back-reference
+        // to run-state.  Context should mostly *not* get parameters from the parser unless they
+        // are going to appear in variables.
+        context: Arc::new(RwLock::new(PlaybookContext::new(parser))),
+        visitor: Arc::new(RwLock::new(PlaybookVisitor::new(check_mode))),
+        connection_factory: Arc::new(RwLock::new(LocalFactory::new(inventory))),
+        tags: parser.tags.clone(),
+        allow_localhost_delegation: parser.allow_localhost_delegation,
+        is_pull_mode: true,
+        play_groups: parser.play_groups.clone()
     });
     return match playbook_traversal(&run_state) {
         Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),

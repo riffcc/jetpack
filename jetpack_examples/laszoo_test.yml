@@ -1,0 +1,13 @@
+---
+- name: Deploy MooseFS
+  groups: 
+    - laszoo
+  
+  tasks:
+    - !shell  
+      name: print deployment message
+      cmd: echo "Deploying MooseFS on group laszoo"
+      
+    - !shell
+      name: show hostname
+      cmd: hostname

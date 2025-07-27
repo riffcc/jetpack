@@ -46,6 +46,7 @@ pub struct PlaybookContext {
     pub role: Option<Role>,
     pub role_path: Option<String>,
     pub play_count: usize,
+    pub play_index: usize,
     pub role_count: usize,
 
     pub task_count: usize,
@@ -96,6 +97,7 @@ impl PlaybookContext {
             role: None,
             task: None,
             play_count : 0,
+            play_index : 0,
             role_count : 0,
             task_count : 0,
             seen_hosts: HashMap::new(),

@@ -61,6 +61,7 @@ pub struct CliParser {
     pub forward_agent: bool,
     pub login_password: Option<String>,
     pub argument_map: HashMap<String, Arguments>,
+    pub play_groups: Option<Vec<String>>,
 }
 
 // subcommands are usually required
@@ -130,7 +131,8 @@ pub enum Arguments {
     ARGUMENT_EXTRA_VARS_SHORT,
     ARGUMENT_ASK_LOGIN_PASSWORD,
     ARGUMENT_MODULES,
-    ARGUMENT_MODULES_SHORT
+    ARGUMENT_MODULES_SHORT,
+    ARGUMENT_GROUPS
 }
 
 impl Arguments {
@@ -166,6 +168,7 @@ impl Arguments {
             Arguments::ARGUMENT_EXTRA_VARS => "--extra-vars",
             Arguments::ARGUMENT_EXTRA_VARS_SHORT => "-e",
             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => "--ask-login-password",
+            Arguments::ARGUMENT_GROUPS => "--groups",
         }
     }
 }
@@ -203,6 +206,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_EXTRA_VARS, "--extra-vars"),
         (Arguments::ARGUMENT_EXTRA_VARS_SHORT, "-e"),
         (Arguments::ARGUMENT_ASK_LOGIN_PASSWORD, "--ask-login-password"),
+        (Arguments::ARGUMENT_GROUPS, "--groups"),
     ];
     let mut map : HashMap<String, Arguments> = HashMap::new();
     for (e,i) in inputs.iter() {
@@ -278,6 +282,8 @@ fn show_help() {
                        | | --limit-groups group1:group2 | further limits scope for playbook runs\n\
                        | |\n\
                        | | --limit-hosts host1 | further limits scope for playbook runs\n\
+                       | |\n\
+                       | | --groups group1:group2:group3 | (ssh/pull modes) specify groups for each play in order\n\
                        | |\n\
                        | | --port N | use this default port instead of $JET_SSH_PORT or 22\n\
                        | |\n\
@@ -364,6 +370,7 @@ impl CliParser  {
             forward_agent: false,
             login_password: None,
             argument_map: build_argument_map(),
+            play_groups: None,
         };
         return p;
     }
@@ -481,6 +488,7 @@ impl CliParser  {
                                     Arguments::ARGUMENT_PORT              => self.store_port(&args[arg_count]),
                                     Arguments::ARGUMENT_EXTRA_VARS        => self.store_extra_vars(&args[arg_count]),
                                     Arguments::ARGUMENT_EXTRA_VARS_SHORT  => self.store_extra_vars(&args[arg_count]),
+                                    Arguments::ARGUMENT_GROUPS            => self.store_groups(&args[arg_count]),
                                     _  => Err(format!("invalid flag: {}", argument_str)),
                                 };
                             }
@@ -803,6 +811,14 @@ impl CliParser  {
         match io::stdin().read_line(&mut value) {
             Ok(_) => { self.login_password = Some(String::from(value.trim())); }
             Err(e) =>  return Err(format!("failure reading input: {}", e))
+        }
+        return Ok(());
+     }
+
+     fn store_groups(&mut self, value: &String) -> Result<(), String> {
+        match split_string(value) {
+            Ok(values)  =>  { self.play_groups = Some(values); },
+            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_GROUPS.as_str(), err_msg)),
         }
         return Ok(());
      }
