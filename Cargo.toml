@@ -33,6 +33,7 @@ guid-create="0.3.1"
 expanduser="1.2.2"
 indexmap = {version = "2.1.0", features = ["serde"]}
 chrono="0.4.31"
+shlex="1.2.0"
 
 [dev-dependencies]
 tempfile="3.8.0"

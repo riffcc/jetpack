@@ -1,0 +1,13 @@
+---
+- name: Pull mode with inventory variables
+  groups: 
+    - all
+  
+  tasks:
+    - !shell  
+      name: print secret from inventory
+      cmd: echo "Secret key is {{ secret_key }}"
+      
+    - !shell
+      name: print app config
+      cmd: echo "App port is {{ app_config.port }}, debug is {{ app_config.debug }}"

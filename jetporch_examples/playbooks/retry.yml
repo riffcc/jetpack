@@ -16,7 +16,7 @@
     path: "{{ test_file }}"
     remove: true
 
-  - !shell
+  - !command
     cmd: cat '{{ test_file }}'
     and:
        retry: 100

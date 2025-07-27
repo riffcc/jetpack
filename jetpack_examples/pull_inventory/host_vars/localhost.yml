@@ -1,0 +1,4 @@
+secret_key: "my-secret-value-123"
+app_config:
+  port: 8080
+  debug: false

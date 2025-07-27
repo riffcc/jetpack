@@ -1,0 +1,17 @@
+---
+- name: Pull mode test playbook
+  groups: 
+    - all
+  
+  tasks:
+    - !shell  
+      name: print test message
+      cmd: echo "Pull mode is working!"
+      
+    - !shell
+      name: show current user
+      cmd: whoami
+      
+    - !shell
+      name: show hostname
+      cmd: hostname

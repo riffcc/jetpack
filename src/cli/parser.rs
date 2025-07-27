@@ -74,6 +74,7 @@ pub const CLI_MODE_SSH: u32 = 4;
 pub const CLI_MODE_CHECK_SSH: u32 = 5;
 pub const CLI_MODE_SHOW: u32 = 6;
 pub const CLI_MODE_SIMULATE: u32 = 7;
+pub const CLI_MODE_PULL: u32 = 8;
 
 fn is_cli_mode_valid(value: &String) -> bool {
     match cli_mode_from_string(value) {
@@ -90,6 +91,7 @@ fn cli_mode_from_string(s: &String) -> Result<u32, String> {
         "check-ssh"       => Ok(CLI_MODE_CHECK_SSH),
         "__simulate"      => Ok(CLI_MODE_SIMULATE),
         "show-inventory"  => Ok(CLI_MODE_SHOW),
+        "pull"            => Ok(CLI_MODE_PULL),
         _ => Err(format!("invalid mode: {}", s))
     }
 }
@@ -242,6 +244,8 @@ fn show_help() {
                       | | check-local| looks for configuration differences on the local machine\n\
                       | |\n\
                       | | local| manages only the local machine\n\
+                      | |\n\
+                      | | pull| pulls and applies configuration locally with optional inventory for variables\n\
                       | |\n\
                       | --- | --- | ---\n\
                       | remote machine management: |\n\
@@ -502,6 +506,7 @@ impl CliParser  {
             CLI_MODE_CHECK_LOCAL => { self.threads = 1 },
             CLI_MODE_SYNTAX      => { self.threads = 1 },
             CLI_MODE_SHOW        => { self.threads = 1 },
+            CLI_MODE_PULL        => { self.threads = 1 },
             CLI_MODE_UNSET       => { self.needs_help = true; },
             _ => {}
         }
@@ -817,6 +822,7 @@ mod tests {
         assert_eq!(cli_mode_from_string(&"check-ssh".to_string()).unwrap(), CLI_MODE_CHECK_SSH);
         assert_eq!(cli_mode_from_string(&"__simulate".to_string()).unwrap(), CLI_MODE_SIMULATE);
         assert_eq!(cli_mode_from_string(&"show-inventory".to_string()).unwrap(), CLI_MODE_SHOW);
+        assert_eq!(cli_mode_from_string(&"pull".to_string()).unwrap(), CLI_MODE_PULL);
         
         assert!(cli_mode_from_string(&"invalid".to_string()).is_err());
     }
@@ -829,6 +835,7 @@ mod tests {
         assert!(is_cli_mode_valid(&"check-ssh".to_string()));
         assert!(is_cli_mode_valid(&"show-inventory".to_string()));
         assert!(is_cli_mode_valid(&"__simulate".to_string()));
+        assert!(is_cli_mode_valid(&"pull".to_string()));
         
         assert!(!is_cli_mode_valid(&"invalid".to_string()));
         assert!(!is_cli_mode_valid(&"".to_string()));

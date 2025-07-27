@@ -1,0 +1,16 @@
+---
+- name: Test Pull Mode with Variables
+  groups: 
+    - all
+  tasks:
+    - !shell
+      name: Display app information
+      cmd: echo "App Name {{ app_name }} Version {{ app_version }}"
+        
+    - !shell
+      name: Create config file with variables
+      cmd: echo -e "APP_NAME={{ app_name }}\nAPP_VERSION={{ app_version }}\nENVIRONMENT={{ environment }}\nSECRET_KEY={{ secret_key }}" > /tmp/jetpack_app_config.conf
+      
+    - !shell
+      name: Show config file
+      cmd: cat /tmp/jetpack_app_config.conf

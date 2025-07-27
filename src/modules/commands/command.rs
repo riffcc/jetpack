@@ -21,30 +21,31 @@ use serde::{Deserialize};
 use std::sync::{Arc,RwLock};
 use crate::inventory::hosts::Host;
 
-const MODULE: &str = "Shell";
+const MODULE: &str = "Command";
 
 #[derive(Deserialize,Debug)]
 #[serde(deny_unknown_fields)]
-pub struct ShellTask {
+pub struct CommandTask {
     pub name: Option<String>,
     pub cmd: String,
     pub save: Option<String>, 
     pub failed_when: Option<String>, 
     pub changed_when: Option<String>, 
-    pub shell: Option<String>, // optional shell to use (bash, zsh, sh)
+    #[serde(rename = "unsafe")]
+    pub unsafe_: Option<String>, /* FIXME: can use r#unsafe instead */
     pub with: Option<PreLogicInput>,
     pub and: Option<PostLogicInput>,
 }
-struct ShellAction {
+struct CommandAction {
     pub cmd: String,
     pub save: Option<String>, 
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
-    pub shell: String,
+    pub unsafe_: bool,
 }
 
 
-impl IsTask for ShellTask {
+impl IsTask for CommandTask {
 
     fn get_module(&self) -> String { String::from(MODULE) }
     fn get_name(&self) -> Option<String> { self.name.clone() }
@@ -53,15 +54,21 @@ impl IsTask for ShellTask {
     fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         return Ok(
             EvaluatedTask {
-                action: Arc::new(ShellAction {
-                    cmd: handle.template.string_unsafe_for_shell(&request, tm, &String::from("cmd"), &self.cmd)?,
+                action: Arc::new(CommandAction {
+                    unsafe_:  {
+                        if self.cmd.find("{{").is_none() {
+                            // allow all the fancy shell characters unless variables are used, in which case
+                            // do a bit of extra filtering unless users turn it off.
+                            true
+                        } else {
+                            handle.template.boolean_option_default_false(&request, tm, &String::from("unsafe"), &self.unsafe_)?
+                        }
+                    },
+                    cmd:  handle.template.string_unsafe_for_shell(&request, tm, &String::from("cmd"), &self.cmd)?,
                     save: handle.template.string_option_no_spaces(&request, tm, &String::from("save"), &self.save)?,
                     failed_when: handle.template.string_option_unsafe_for_shell(&request, tm, &String::from("failed_when"), &self.failed_when)?,
                     changed_when: handle.template.string_option_unsafe_for_shell(&request, tm, &String::from("changed_when"), &self.changed_when)?,
-                    shell: match &self.shell {
-                        Some(s) => handle.template.string_unsafe_for_shell(&request, tm, &String::from("shell"), s)?,
-                        None => String::from("/bin/bash"),
-                    }
+
                 }),
                 with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
                 and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
@@ -71,7 +78,7 @@ impl IsTask for ShellTask {
 
 }
 
-impl IsAction for ShellAction {
+impl IsAction for CommandAction {
     
     fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
     
@@ -82,12 +89,12 @@ impl IsAction for ShellAction {
             },
 
             TaskRequestType::Execute => {
-                // Unlike the command module, shell module runs commands through an actual shell
-                // This allows for shell features like pipes, redirects, and shell built-ins
-                let shell_cmd = format!("{} -c '{}'", &self.shell, &self.cmd.replace("'", "'\"'\"'"));
-                
-                // Always use run_unsafe since we're explicitly using a shell
-                let task_result = handle.remote.run_unsafe(&request, &shell_cmd, CheckRc::Unchecked)?;
+                let task_result : Arc<TaskResponse>;
+                if self.unsafe_ {
+                    task_result = handle.remote.run_unsafe(&request, &self.cmd.clone(), CheckRc::Unchecked)?;
+                } else {
+                    task_result = handle.remote.run(&request, &self.cmd.clone(), CheckRc::Unchecked)?;
+                }
                 let (rc, out) = cmd_info(&task_result);
                 let map_data = build_results_map(rc, &out);
 
@@ -120,21 +127,21 @@ impl IsAction for ShellAction {
                 };
 
             },
-
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
-        };
-    }
     
+            _ => { return Err(handle.response.not_supported(&request)); }
+    
+        }
+    }
+
 }
 
 fn build_results_map(rc: i32, out: &String) -> serde_yaml::Mapping {
     let mut result = serde_yaml::Mapping::new();
     let num : serde_yaml::Value = serde_yaml::from_str(&format!("{}", rc)).unwrap();
     result.insert(serde_yaml::Value::String(String::from("rc")), num);
+    //result.insert(serde_yaml::Value::String(String::from("rc")),  serde_yaml::Value::String(format!("{}", rc)));
+
     result.insert(serde_yaml::Value::String(String::from("out")), serde_yaml::Value::String(out.clone()));
-    result.insert(serde_yaml::Value::String(String::from("stdout")), serde_yaml::Value::String(out.clone()));
     return result;
 }
 

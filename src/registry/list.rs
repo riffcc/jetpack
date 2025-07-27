@@ -31,6 +31,7 @@ use crate::modules::access::group::GroupTask;
 use crate::modules::access::user::UserTask;
 
 // commands
+use crate::modules::commands::command::CommandTask;
 use crate::modules::commands::external::ExternalTask;
 use crate::modules::commands::shell::ShellTask;
 
@@ -67,6 +68,7 @@ pub enum Task {
     // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
     Apt(AptTask),
     Assert(AssertTask),
+    Command(CommandTask),
     Copy(CopyTask),
     Debug(DebugTask),
     Directory(DirectoryTask),
@@ -112,6 +114,7 @@ impl Task {
             Task::Pacman(x)     => x.get_module(),
             Task::Sd_Service(x) => x.get_module(),
             Task::Set(x)        => x.get_module(), 
+            Task::Command(x)    => x.get_module(),
             Task::Shell(x)      => x.get_module(), 
             Task::Stat(x)       => x.get_module(), 
             Task::Template(x)   => x.get_module(), 
@@ -141,6 +144,7 @@ impl Task {
             Task::Pacman(x)     => x.get_name(),
             Task::Sd_Service(x) => x.get_name(),
             Task::Set(x)        => x.get_name(),
+            Task::Command(x)    => x.get_name(),
             Task::Shell(x)      => x.get_name(), 
             Task::Stat(x)       => x.get_name(),
             Task::Template(x)   => x.get_name(), 
@@ -170,6 +174,7 @@ impl Task {
             Task::Pacman(x)     => x.get_with(),
             Task::Sd_Service(x) => x.get_with(),
             Task::Set(x)        => x.get_with(),
+            Task::Command(x)    => x.get_with(),
             Task::Shell(x)      => x.get_with(), 
             Task::Stat(x)       => x.get_with(), 
             Task::Template(x)   => x.get_with(),
@@ -199,6 +204,7 @@ impl Task {
             Task::Pacman(x)     => x.evaluate(handle, request, tm),
             Task::Sd_Service(x) => x.evaluate(handle, request, tm),
             Task::Set(x)        => x.evaluate(handle, request, tm),
+            Task::Command(x)    => x.evaluate(handle, request, tm),
             Task::Shell(x)      => x.evaluate(handle, request, tm), 
             Task::Stat(x)       => x.evaluate(handle, request, tm),
             Task::Template(x)   => x.evaluate(handle, request, tm), 

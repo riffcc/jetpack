@@ -53,6 +53,12 @@ pub fn playbook_simulate(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser)
     return playbook(inventory, parser, CheckMode::No, ConnectionMode::Simulate);
 }
 
+pub fn playbook_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
+    // Pull mode is essentially local mode, but designed for external integration
+    // It runs playbooks locally on the target host with optional inventory for variables
+    return playbook(inventory, parser, CheckMode::No, ConnectionMode::Local);
+}
+
 fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode, connection_mode: ConnectionMode) -> i32 {
     let run_state = Arc::new(RunState {
         // every object gets an inventory, though with local modes it's empty.

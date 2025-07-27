@@ -19,7 +19,7 @@ use jetpack::inventory::inventory::Inventory;
 use jetpack::inventory::loading::{load_inventory};
 use jetpack::cli::show::{show_inventory_group,show_inventory_host};
 use jetpack::cli::parser::{CliParser};
-use jetpack::cli::playbooks::{playbook_ssh,playbook_local,playbook_check_ssh,playbook_check_local,playbook_simulate};
+use jetpack::cli::playbooks::{playbook_ssh,playbook_local,playbook_check_ssh,playbook_check_local,playbook_simulate,playbook_pull};
 use std::sync::{Arc,RwLock};
 use std::process;
 
@@ -54,6 +54,14 @@ fn liftoff() -> Result<(),String> {
                 return Err(String::from("no hosts found in --inventory"));
             }
         },
+        jetpack::cli::parser::CLI_MODE_PULL => {
+            // In pull mode, inventory is optional. If provided, it's used for variables/secrets
+            if cli_parser.inventory_set {
+                load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
+            }
+            // Always ensure localhost is in the inventory for pull mode
+            inventory.write().expect("inventory write").store_host(&String::from("all"), &String::from("localhost"));
+        },
         _ => {
             inventory.write().expect("inventory write").store_host(&String::from("all"), &String::from("localhost"));
         }
@@ -85,6 +93,7 @@ fn liftoff() -> Result<(),String> {
         jetpack::cli::parser::CLI_MODE_LOCAL       => playbook_local(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => playbook_check_local(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_SIMULATE    => playbook_simulate(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_PULL        => playbook_pull(&inventory, &cli_parser),
 
         _ => { println!("invalid CLI mode"); 1 }
     };

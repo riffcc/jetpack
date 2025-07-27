@@ -1,0 +1,16 @@
+---
+- name: Test Pull Mode Playbook
+  groups: 
+    - all
+  tasks:
+    - !shell
+      name: Create test file and write content
+      cmd: echo "Pull mode is working!" > /tmp/jetpack_pull_test.txt
+        
+    - !shell
+      name: Display test message
+      cmd: echo "Jetpack pull mode executed successfully"
+      
+    - !shell
+      name: Show file content
+      cmd: cat /tmp/jetpack_pull_test.txt
