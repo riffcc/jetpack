@@ -15,20 +15,16 @@
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::util::io::{path_as_string,directory_as_string};
-use crate::playbooks::language::{Play,Role,RoleInvocation};
+use crate::playbooks::language::Role;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use crate::inventory::hosts::Host;
 use std::sync::{Arc,RwLock};
 use crate::connection::cache::ConnectionCache;
-use crate::registry::list::Task;
 use crate::util::yaml::blend_variables;
-use crate::playbooks::templar::{Templar,TemplateMode};
-use crate::handle::template::BlendTarget;
-use std::ops::Deref;
+use crate::playbooks::templar::Templar;
 use std::env;
 use guid_create::GUID;
-use expanduser::expanduser;
 
 pub struct PlaybookContext {
 
@@ -145,7 +141,7 @@ impl PlaybookContext {
     
     pub fn set_playbook_path(&mut self, path: &PathBuf) {
         self.playbook_path = Some(path_as_string(path));
-        self.playbook_directory = directory_as_string(path);
+        self.playbook_directory = Some(directory_as_string(path));
     }
 
     pub fn push_env_variables(&mut self) {
@@ -161,7 +157,12 @@ impl PlaybookContext {
 
     pub fn push_extra_vars(&mut self, vars: serde_yaml::Mapping) {
         let mut vs = self.vars_storage.write().unwrap();
-        blend_variables(&mut vs, vars, BlendTarget::Variables);
+        let vars_value = serde_yaml::Value::Mapping(vars);
+        let mut current_value = serde_yaml::Value::Mapping(vs.clone());
+        blend_variables(&mut current_value, vars_value);
+        if let serde_yaml::Value::Mapping(m) = current_value {
+            *vs = m;
+        }
     }
 
     pub fn is_host_failed(&self, host: &Arc<RwLock<Host>>) -> bool {
@@ -315,5 +316,13 @@ impl PlaybookContext {
 
     pub fn get_hosts_adjusted_count(&self) -> usize {
         return self.adjusted_count_for_host.keys().len();
+    }
+
+    pub fn set_task(&mut self, task: &crate::registry::list::Task) {
+        self.task = Some(format!("{:?}", task));
+    }
+    
+    pub fn increment_task_count(&mut self) {
+        self.task_count += 1;
     }
 }

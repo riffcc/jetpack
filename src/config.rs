@@ -16,7 +16,6 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
 
 /// Configuration for running JetPack playbooks programmatically
 #[derive(Clone, Debug)]
@@ -86,22 +85,22 @@ impl JetpackConfig {
         Self::default()
     }
 
-    pub fn playbook<P: Into<PathBuf>>(mut self, path: P) -> Self {
+    pub fn playbook<P: Into<PathBuf>>(self, path: P) -> Self {
         self.playbook_paths.write().unwrap().push(path.into());
         self
     }
 
-    pub fn inventory<P: Into<PathBuf>>(mut self, path: P) -> Self {
+    pub fn inventory<P: Into<PathBuf>>(self, path: P) -> Self {
         self.inventory_paths.write().unwrap().push(path.into());
         self
     }
 
-    pub fn role_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
+    pub fn role_path<P: Into<PathBuf>>(self, path: P) -> Self {
         self.role_paths.write().unwrap().push(path.into());
         self
     }
 
-    pub fn module_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
+    pub fn module_path<P: Into<PathBuf>>(self, path: P) -> Self {
         self.module_paths.write().unwrap().push(path.into());
         self
     }

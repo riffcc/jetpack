@@ -19,8 +19,8 @@ use crate::error::{JetpackError, Result};
 use crate::output::{OutputHandler, OutputHandlerRef, NullOutputHandler};
 use crate::inventory::inventory::Inventory;
 use crate::inventory::loading::load_inventory;
-use crate::playbooks::context_new::PlaybookContext;
-use crate::playbooks::visitor_new::{PlaybookVisitor, CheckMode};
+use crate::playbooks::context::PlaybookContext;
+use crate::playbooks::visitor::{PlaybookVisitor, CheckMode};
 use crate::playbooks::traversal::{playbook_traversal, RunState};
 use crate::connection::factory::ConnectionFactory;
 use crate::connection::ssh::SshFactory as OldSshFactory;
@@ -98,13 +98,17 @@ impl PlaybookRunner {
             ConnectionMode::Simulate => Arc::new(RwLock::new(OldNoFactory::new())),
         };
         
+        // Create a minimal CLI parser to pass to context
+        // This is a temporary workaround until we refactor context
+        let mut temp_parser = crate::cli::parser::CliParser::new();
+        temp_parser.default_user = self.config.default_user.clone();
+        temp_parser.default_port = self.config.default_port;
+        temp_parser.sudo = self.config.sudo.clone();
+        temp_parser.extra_vars = self.config.extra_vars.clone();
+        temp_parser.verbosity = self.config.verbosity;
+        
         // Create playbook context
-        let context = Arc::new(RwLock::new(PlaybookContext::new(
-            self.config.default_user.clone(),
-            self.config.default_port,
-            self.config.sudo.clone(),
-            self.config.extra_vars.clone(),
-        )));
+        let context = Arc::new(RwLock::new(PlaybookContext::new(&temp_parser)));
         
         // Create visitor with output handler
         let check_mode = if self.config.check_mode {
@@ -113,11 +117,7 @@ impl PlaybookRunner {
             CheckMode::No
         };
         
-        let visitor = Arc::new(RwLock::new(PlaybookVisitor::new(
-            self.config.verbosity,
-            check_mode,
-            self.output_handler.clone(),
-        )));
+        let visitor = Arc::new(RwLock::new(PlaybookVisitor::new(check_mode)));
         
         // Create run state
         let run_state = Arc::new(RunState {

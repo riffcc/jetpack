@@ -122,17 +122,28 @@ impl OutputHandler for TerminalOutputHandler {
         crate::util::terminal::banner(&format!("TASK: {}", task_name));
     }
     
-    fn on_task_host_result(&self, host: &Host, task: &TaskRequest, response: &TaskResponse) {
-        let status = match (response.is_ok(), response.is_changed()) {
-            (true, true) => format!("{color_yellow}CHANGED{color_reset}"),
-            (true, false) => format!("{color_green}OK{color_reset}"),
-            (false, _) => format!("{color_red}FAILED{color_reset}"),
+    fn on_task_host_result(&self, host: &Host, _task: &TaskRequest, response: &TaskResponse) {
+        use crate::tasks::response::TaskStatus;
+        let status = match &response.status {
+            TaskStatus::IsModified | TaskStatus::IsCreated | TaskStatus::IsRemoved | TaskStatus::IsExecuted => {
+                format!("{color_yellow}CHANGED{color_reset}")
+            },
+            TaskStatus::IsPassive | TaskStatus::IsMatched => {
+                format!("{color_green}OK{color_reset}")
+            },
+            TaskStatus::Failed => {
+                format!("{color_red}FAILED{color_reset}")
+            },
+            TaskStatus::IsSkipped => {
+                format!("{color_yellow}SKIPPED{color_reset}")
+            },
+            _ => format!("{color_green}OK{color_reset}")
         };
         
         println!("{} => {}", status, host.name);
         
-        if self.verbosity > 0 || !response.is_ok() {
-            if let Some(msg) = &response.message {
+        if self.verbosity > 0 || response.status == TaskStatus::Failed {
+            if let Some(msg) = &response.msg {
                 println!("  {}", msg);
             }
         }

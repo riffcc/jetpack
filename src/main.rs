@@ -14,22 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-mod cli;
-mod inventory;
-mod util;
-mod playbooks;
-mod registry;
-mod connection;
-mod modules;
-mod tasks;
-mod handle;
-
-use crate::util::io::{quit};
-use crate::inventory::inventory::Inventory;
-use crate::inventory::loading::{load_inventory};
-use crate::cli::show::{show_inventory_group,show_inventory_host};
-use crate::cli::parser::{CliParser};
-use crate::cli::playbooks::{playbook_ssh,playbook_local,playbook_check_ssh,playbook_check_local,playbook_simulate}; // FIXME: check modes coming
+use jetpack::util::io::{quit};
+use jetpack::inventory::inventory::Inventory;
+use jetpack::inventory::loading::{load_inventory};
+use jetpack::cli::show::{show_inventory_group,show_inventory_host};
+use jetpack::cli::parser::{CliParser};
+use jetpack::cli::playbooks::{playbook_ssh,playbook_local,playbook_check_ssh,playbook_check_local,playbook_simulate};
 use std::sync::{Arc,RwLock};
 use std::process;
 
@@ -55,7 +45,7 @@ fn liftoff() -> Result<(),String> {
     let inventory : Arc<RwLock<Inventory>> = Arc::new(RwLock::new(Inventory::new()));
 
     match cli_parser.mode {
-        cli::parser::CLI_MODE_SSH | cli::parser::CLI_MODE_CHECK_SSH | cli::parser::CLI_MODE_SHOW | cli::parser::CLI_MODE_SIMULATE => {
+        jetpack::cli::parser::CLI_MODE_SSH | jetpack::cli::parser::CLI_MODE_CHECK_SSH | jetpack::cli::parser::CLI_MODE_SHOW | jetpack::cli::parser::CLI_MODE_SIMULATE => {
             load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
             if ! cli_parser.inventory_set {
                 return Err(String::from("--inventory is required"));
@@ -70,7 +60,7 @@ fn liftoff() -> Result<(),String> {
     };
 
     match cli_parser.mode {
-        cli::parser::CLI_MODE_SHOW => {},
+        jetpack::cli::parser::CLI_MODE_SHOW => {},
         _ => {
             if ! cli_parser.playbook_set {
                 return Err(String::from("--playbook is required"));
@@ -83,18 +73,18 @@ fn liftoff() -> Result<(),String> {
     };
 
     let exit_status = match cli_parser.mode {
-        cli::parser::CLI_MODE_SHOW   => match handle_show(&inventory, &cli_parser) {
+        jetpack::cli::parser::CLI_MODE_SHOW   => match handle_show(&inventory, &cli_parser) {
             Ok(_) => 0,
             Err(s) => {
                 println!("{}", s);
                 1
             }
         }
-        cli::parser::CLI_MODE_SSH         => playbook_ssh(&inventory, &cli_parser),
-        cli::parser::CLI_MODE_CHECK_SSH   => playbook_check_ssh(&inventory, &cli_parser),
-        cli::parser::CLI_MODE_LOCAL       => playbook_local(&inventory, &cli_parser),
-        cli::parser::CLI_MODE_CHECK_LOCAL => playbook_check_local(&inventory, &cli_parser),
-        cli::parser::CLI_MODE_SIMULATE    => playbook_simulate(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_SSH         => playbook_ssh(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_CHECK_SSH   => playbook_check_ssh(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_LOCAL       => playbook_local(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => playbook_check_local(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_SIMULATE    => playbook_simulate(&inventory, &cli_parser),
 
         _ => { println!("invalid CLI mode"); 1 }
     };
@@ -119,4 +109,3 @@ pub fn handle_show(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> Re
     }
     return Ok(());
 }
-

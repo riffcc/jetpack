@@ -117,7 +117,7 @@ impl PlaybookVisitor {
         }
     }
 
-    pub fn log(&self, context: &Arc<RwLock<PlaybookContext>>, data: LogData) {
+    pub fn log(&self, _context: &Arc<RwLock<PlaybookContext>>, data: LogData) {
         match &self.logfile {
             Some(logfile) => {
                 let record = json!({
@@ -158,7 +158,7 @@ impl PlaybookVisitor {
             self.output_handler.on_playbook_end(path, success);
         }
         
-        let mut entry = self.log_entry(&String::from("playbook/stop"), Arc::clone(context));
+        let entry = self.log_entry(&String::from("playbook/stop"), Arc::clone(context));
         self.log(context, entry);
         
         // Show recap
@@ -184,7 +184,7 @@ impl PlaybookVisitor {
             self.output_handler.on_play_start(play_name, host_names);
         }
         
-        let mut entry = self.log_entry(&String::from("play/start"), Arc::clone(context));
+        let entry = self.log_entry(&String::from("play/start"), Arc::clone(context));
         self.log(context, entry);
     }
 
@@ -194,30 +194,33 @@ impl PlaybookVisitor {
             self.output_handler.on_play_end(play_name);
         }
         
-        let mut entry = self.log_entry(&String::from("play/stop"), Arc::clone(context));
+        let entry = self.log_entry(&String::from("play/stop"), Arc::clone(context));
         self.log(context, entry);
     }
 
     pub fn on_role_start(&self, context: &Arc<RwLock<PlaybookContext>>) {
-        let mut entry = self.log_entry(&String::from("role/start"), Arc::clone(context));
+        let entry = self.log_entry(&String::from("role/start"), Arc::clone(context));
         self.log(context, entry);
     }
 
     pub fn on_role_stop(&self, context: &Arc<RwLock<PlaybookContext>>) {
-        let mut entry = self.log_entry(&String::from("role/stop"), Arc::clone(context));
+        let entry = self.log_entry(&String::from("role/stop"), Arc::clone(context));
         self.log(context, entry);
     }
 
-    pub fn on_task_start(&self, context: &Arc<RwLock<PlaybookContext>>, task: &request::TaskRequest, mode: HandlerMode, count: usize) {
+    pub fn on_task_start(&self, context: &Arc<RwLock<PlaybookContext>>, mode: HandlerMode) {
+        let ctx = context.read().unwrap();
+        let default_name = String::from("unknown");
+        let task_name = ctx.task.as_ref().unwrap_or(&default_name);
         let name = match mode {
-            HandlerMode::Handlers => format!("HANDLER: {}", &task.name),
-            _ => task.name.clone()
+            HandlerMode::Handlers => format!("HANDLER: {}", task_name),
+            _ => task_name.clone()
         };
         
-        self.output_handler.on_task_start(&name, count);
+        self.output_handler.on_task_start(&name, 0);
         
         let mut entry = self.log_entry(&String::from("task/start"), Arc::clone(context));
-        entry.task_ct = Some(count);
+        entry.task_ct = Some(0);
         self.log(context, entry);
     }
 
@@ -230,11 +233,11 @@ impl PlaybookVisitor {
             }
         }
         
-        let mut entry = self.log_entry(&String::from("task/stop"), Arc::clone(context));
+        let entry = self.log_entry(&String::from("task/stop"), Arc::clone(context));
         self.log(context, entry);
     }
 
-    pub fn on_host_task_start(&self, context: &Arc<RwLock<PlaybookContext>>, request: &request::TaskRequest, host: &Host) {
+    pub fn on_host_task_start(&self, context: &Arc<RwLock<PlaybookContext>>, _request: &request::TaskRequest, host: &Host) {
         let mut entry = self.log_entry(&String::from("host/task/start"), Arc::clone(context));
         entry.host = Some(host.name.clone());
         self.log(context, entry);
@@ -247,13 +250,21 @@ impl PlaybookVisitor {
         let mut stats = self.host_stats.write().unwrap();
         let host_stat = stats.entry(host.name.clone()).or_insert_with(HostStats::default);
         
-        if response.is_skipped() {
-            host_stat.skipped += 1;
-        } else if response.is_changed() {
-            host_stat.changed += 1;
-            host_stat.ok += 1;
-        } else {
-            host_stat.ok += 1;
+        use crate::tasks::response::TaskStatus;
+        match &response.status {
+            TaskStatus::IsSkipped => {
+                host_stat.skipped += 1;
+            },
+            TaskStatus::IsModified | TaskStatus::IsCreated | TaskStatus::IsRemoved | TaskStatus::IsExecuted => {
+                host_stat.changed += 1;
+                host_stat.ok += 1;
+            },
+            TaskStatus::IsPassive | TaskStatus::IsMatched => {
+                host_stat.ok += 1;
+            },
+            _ => {
+                host_stat.ok += 1;
+            }
         }
         
         let mut entry = self.log_entry(&String::from("host/task/ok"), Arc::clone(context));
@@ -289,8 +300,7 @@ impl PlaybookVisitor {
             }
         }
         
-        let out = format!("out={}\nerr={}", result.out, result.err);
-        entry.cmd_out = Some(out);
+        entry.cmd_out = Some(result.out.clone());
         self.log(context, entry);
     }
 
