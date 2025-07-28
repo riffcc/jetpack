@@ -62,25 +62,31 @@ impl PlaybookRunner {
         // Create and load inventory
         let inventory = Arc::new(RwLock::new(Inventory::new()));
         
+        // Load inventory for all modes if inventory paths are provided
+        if !self.config.inventory_paths.read().unwrap().is_empty() {
+            load_inventory(&inventory, Arc::clone(&self.config.inventory_paths))
+                .map_err(|e| JetpackError::Inventory(e))?;
+        }
+        
         match self.config.connection_mode {
             ConnectionMode::Local => {
-                // For local mode, just add localhost
-                inventory.write().unwrap().store_host(&String::from("all"), &String::from("localhost"));
+                // For local mode, add localhost if no inventory was loaded
+                if inventory.read().unwrap().hosts.is_empty() {
+                    inventory.write().unwrap().store_host(&String::from("all"), &String::from("localhost"));
+                }
             }
             _ => {
-                // Load inventory from paths
+                // For non-local modes, require inventory
                 if self.config.inventory_paths.read().unwrap().is_empty() {
                     return Err(JetpackError::Config("No inventory paths specified".into()));
                 }
-                
-                load_inventory(&inventory, Arc::clone(&self.config.inventory_paths))
-                    .map_err(|e| JetpackError::Inventory(e))?;
                 
                 if inventory.read().unwrap().hosts.is_empty() {
                     return Err(JetpackError::Inventory("No hosts found in inventory".into()));
                 }
             }
         }
+        
         
         // Check playbook paths
         if self.config.playbook_paths.read().unwrap().is_empty() {
@@ -211,6 +217,11 @@ impl PlaybookRunnerBuilder {
     
     pub fn threads(mut self, threads: usize) -> Self {
         self.config = self.config.threads(threads);
+        self
+    }
+    
+    pub fn verbose(mut self) -> Self {
+        self.config = self.config.verbose();
         self
     }
     

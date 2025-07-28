@@ -213,7 +213,36 @@ fn load_vars_directory(inventory: &Arc<RwLock<Inventory>>, path: &Path, is_group
             }
             false => {
                 let host = inv.get_host(&effective_name);
-                host.write().unwrap().set_variables(yaml_result);
+                
+                // First, collect all group_vars for this host
+                let mut merged_vars = serde_yaml::Mapping::new();
+                
+                // Get all groups this host belongs to
+                let host_groups = {
+                    let h = host.read().unwrap();
+                    h.get_group_names()
+                };
+                
+                // Merge group_vars in order (all group first, then more specific groups)
+                for group_name in &host_groups {
+                    if let Some(group_arc) = inv.groups.get(group_name) {
+                        let group = group_arc.read().unwrap();
+                        let group_vars = group.get_variables();
+                        
+                        // Merge group vars into merged_vars
+                        for (k, v) in group_vars.iter() {
+                            merged_vars.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                
+                // Finally merge the host-specific vars (they override group vars)
+                for (k, v) in yaml_result.iter() {
+                    merged_vars.insert(k.clone(), v.clone());
+                }
+                
+                // Set the merged variables on the host
+                host.write().unwrap().set_variables(merged_vars);
             }
         }
         Ok(())

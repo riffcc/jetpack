@@ -184,4 +184,9 @@ impl JetpackConfig {
         self.connection_mode = ConnectionMode::Simulate;
         self
     }
+    
+    pub fn verbose(mut self) -> Self {
+        self.verbosity = 1;
+        self
+    }
 }
