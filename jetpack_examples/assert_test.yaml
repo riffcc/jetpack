@@ -1,0 +1,23 @@
+---
+- name: Test assert with eq expression
+  hosts: localhost
+  tasks:
+    - !set
+      vars:
+        jet_os_type: "Linux"
+        my_number: 42
+
+    - !assert
+      name: the OS must be Linux
+      true: "(eq jet_os_type \"Linux\")"
+
+    - !assert
+      name: test ne comparison
+      true: "(ne jet_os_type \"Windows\")"
+
+    - !assert
+      name: test numeric comparison
+      true: "(eq my_number 42)"
+
+    - !echo
+      msg: "All assertions passed!"
