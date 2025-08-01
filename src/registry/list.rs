@@ -51,6 +51,9 @@ use crate::modules::files::git::GitTask;
 use crate::modules::files::stat::StatTask;
 use crate::modules::files::template::TemplateTask;
 
+// integrations
+use crate::modules::integrations::github_release::GithubReleaseTask;
+
 // packages
 use crate::modules::packages::apt::AptTask;
 use crate::modules::packages::homebrew::HomebrewTask;
@@ -79,6 +82,7 @@ pub enum Task {
     Fail(FailTask),
     File(FileTask),
     Git(GitTask),
+    Github_Release(GithubReleaseTask),
     Group(GroupTask),
     Homebrew(HomebrewTask),
     Pacman(PacmanTask),
@@ -109,6 +113,7 @@ impl Task {
             Task::Fail(x)       => x.get_module(), 
             Task::File(x)       => x.get_module(),
             Task::Git(x)        => x.get_module(), 
+            Task::Github_Release(x) => x.get_module(),
             Task::Group(x)      => x.get_module(),
             Task::Homebrew(x)   => x.get_module(),
             Task::Pacman(x)     => x.get_module(),
@@ -139,6 +144,7 @@ impl Task {
             Task::Fail(x)       => x.get_name(), 
             Task::File(x)       => x.get_name(), 
             Task::Git(x)        => x.get_name(),
+            Task::Github_Release(x) => x.get_name(),
             Task::Group(x)      => x.get_name(),
             Task::Homebrew(x)   => x.get_name(),
             Task::Pacman(x)     => x.get_name(),
@@ -169,6 +175,7 @@ impl Task {
             Task::Fail(x)       => x.get_with(), 
             Task::File(x)       => x.get_with(),
             Task::Git(x)        => x.get_with(), 
+            Task::Github_Release(x) => x.get_with(),
             Task::Group(x)      => x.get_with(),
             Task::Homebrew(x)   => x.get_with(),
             Task::Pacman(x)     => x.get_with(),
@@ -199,6 +206,7 @@ impl Task {
             Task::Fail(x)       => x.evaluate(handle, request, tm),  
             Task::File(x)       => x.evaluate(handle, request, tm), 
             Task::Git(x)        => x.evaluate(handle, request, tm),
+            Task::Github_Release(x) => x.evaluate(handle, request, tm),
             Task::Group(x)      => x.evaluate(handle, request, tm),
             Task::Homebrew(x)   => x.evaluate(handle, request, tm),
             Task::Pacman(x)     => x.evaluate(handle, request, tm),

@@ -1,0 +1,45 @@
+---
+# Example playbook demonstrating the github_release module
+
+- name: Fetch latest release versions from GitHub
+  hosts: localhost
+  tasks:
+    # Basic usage - get latest stable release
+    - !github_release
+      name: Get latest IPFS release
+      repo: ipfs/kubo
+      save: ipfs_version
+    
+    - !echo
+      msg: "Latest IPFS version: {{ ipfs_version }}"
+    
+    # Get latest release with channel filtering
+    - !github_release
+      name: Get latest Node.js prerelease
+      repo: nodejs/node
+      channel: prerelease
+      save: node_prerelease_version
+    
+    - !echo
+      msg: "Latest Node.js prerelease: {{ node_prerelease_version }}"
+    
+    # Get latest release with semver filtering
+    - !github_release
+      name: Get latest Node.js v18.x release
+      repo: nodejs/node
+      channel: stable
+      version_filter: "^18.0.0"
+      set: node_18_version
+    
+    - !echo
+      msg: "Latest Node.js 18.x version: {{ node_18_version }}"
+    
+    # Example of using the version to download a release
+    - !github_release
+      name: Get latest Go release
+      repo: golang/go
+      channel: stable
+      save: go_version
+    
+    - !echo
+      msg: "Would download: https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz"
