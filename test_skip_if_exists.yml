@@ -1,0 +1,84 @@
+---
+# Test playbook for universal skip_if_exists feature
+
+- name: Test skip_if_exists with various modules
+  connection: local
+  hosts: localhost
+  tasks:
+
+    # Create a test file to check
+    - name: Create marker file
+      !shell:
+        cmd: touch /tmp/marker_file
+
+    # Test with unpack - should skip
+    - name: Unpack archive (should skip)
+      !unpack:
+        src: /tmp/some_archive.tar.gz
+        dest: /tmp/extracted
+      with:
+        skip_if_exists: /tmp/marker_file
+
+    # Test with download - should skip
+    - name: Download file (should skip)
+      !download:
+        url: https://example.com/file.txt
+        dest: /tmp/downloaded.txt
+      with:
+        skip_if_exists: /tmp/marker_file
+
+    # Test with copy - should skip
+    - name: Copy file (should skip)
+      !copy:
+        src: /etc/hosts
+        dest: /tmp/hosts_copy
+      with:
+        skip_if_exists: /tmp/marker_file
+
+    # Test with directory - should skip
+    - name: Create directory (should skip)
+      !directory:
+        path: /tmp/test_dir
+        mode: "0755"
+      with:
+        skip_if_exists: /tmp/marker_file
+
+    # Test with move - should skip
+    - name: Move file (should skip)
+      !move:
+        src: /tmp/source_file
+        dest: /tmp/dest_file
+      with:
+        skip_if_exists: /tmp/marker_file
+
+    # Remove marker and test that tasks run
+    - name: Remove marker file
+      !shell:
+        cmd: rm -f /tmp/marker_file
+
+    # This should execute
+    - name: Create test file (should run)
+      !shell:
+        cmd: echo "test" > /tmp/test_output.txt
+      with:
+        skip_if_exists: /tmp/nonexistent_marker
+
+    # Verify it created the file
+    - name: Check test file exists
+      !shell:
+        cmd: test -f /tmp/test_output.txt && echo "File created successfully"
+
+    # Test with templated path
+    - name: Test with variable path
+      !echo:
+        msg: "This should be skipped"
+      with:
+        skip_if_exists: "{{ test_path }}"
+      and:
+        ignore_errors: true
+      tags: with_vars
+
+    # Cleanup
+    - name: Cleanup test files
+      !shell:
+        cmd: rm -f /tmp/test_output.txt /tmp/marker_file

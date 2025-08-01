@@ -313,6 +313,20 @@ impl Remote {
         return self.run(request, &cmd, CheckRc::Checked);  
     }
 
+    pub fn rename(&self, request: &Arc<TaskRequest>, src: &String, dest: &String, force: bool) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
+        let get_cmd_result = crate::tasks::cmd_library::get_rename_command(self.get_os_type(), src, dest, force);
+        let cmd = self.unwrap_string_result(&request, &get_cmd_result)?;
+        return self.run(request, &cmd, CheckRc::Checked);
+    }
+
+    pub fn file_exists(&self, request: &Arc<TaskRequest>, path: &String) -> Result<bool,Arc<TaskResponse>> {
+        let get_cmd_result = crate::tasks::cmd_library::get_file_exists_command(self.get_os_type(), path);
+        let cmd = self.unwrap_string_result(&request, &get_cmd_result)?;
+        let result = self.run(request, &cmd, CheckRc::Unchecked)?;
+        let (rc, _) = cmd_info(&result);
+        Ok(rc == 0)
+    }
+
     // return the (owner,group) tuple for a remote file.  If the command fails this will instead return None
     // so consider running get_mode first.  See the various file modules for examples.
 

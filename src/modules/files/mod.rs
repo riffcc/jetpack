@@ -18,7 +18,10 @@
 
 pub mod copy;
 pub mod directory;
+pub mod download;
 pub mod file;
 pub mod git;
+pub mod r#move;
 pub mod stat;
 pub mod template;
+pub mod unpack;

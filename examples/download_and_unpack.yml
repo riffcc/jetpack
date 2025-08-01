@@ -1,0 +1,93 @@
+---
+# Example: Download and install IPFS using download and unpack modules
+
+- name: Download and install IPFS
+  hosts: all
+  tasks:
+    # Get the latest IPFS version
+    - !github_release
+      name: Get latest IPFS release
+      repo: ipfs/kubo
+      channel: latest
+      save: ipfs_version
+    
+    - !echo
+      msg: "Installing IPFS version: {{ ipfs_version }}"
+    
+    # Download the IPFS release
+    - !download
+      name: Download IPFS binary archive
+      url: https://github.com/ipfs/kubo/releases/download/v{{ ipfs_version }}/kubo_v{{ ipfs_version }}_linux-amd64.tar.gz
+      dest: /tmp/kubo_v{{ ipfs_version }}_linux-amd64.tar.gz
+      with:
+        sudo: root
+    
+    # Extract the archive
+    - !unpack
+      name: Extract IPFS binary
+      src: /tmp/kubo_v{{ ipfs_version }}_linux-amd64.tar.gz
+      dest: /tmp/
+      with:
+        sudo: root
+        skip_if_exists: /tmp/kubo/ipfs  # Skip if already extracted
+    
+    # Install IPFS binary
+    - !shell
+      name: Install IPFS to /usr/local/bin
+      cmd: |
+        cp /tmp/kubo/ipfs /usr/local/bin/
+        chmod +x /usr/local/bin/ipfs
+      with:
+        sudo: root
+        skip_if_exists: /usr/local/bin/ipfs
+    
+    # Verify installation
+    - !command
+      name: Check IPFS version
+      cmd: ipfs version
+      save: ipfs_check
+    
+    - !echo
+      msg: "IPFS installed: {{ ipfs_check.stdout }}"
+
+# More examples of download and unpack usage
+
+- name: Advanced download and unpack examples
+  hosts: localhost
+  tasks:
+    # Download with custom permissions
+    - !download
+      name: Download file with specific permissions
+      url: https://example.com/script.sh
+      dest: /tmp/script.sh
+      mode: "0755"
+      owner: user
+      group: users
+      force: yes  # Always re-download
+    
+    # Extract different archive formats
+    - !unpack
+      name: Extract tar.gz archive
+      src: /tmp/archive.tar.gz
+      dest: /opt/app
+      mode: "0755"
+      owner: app
+      group: app
+    
+    - !unpack
+      name: Extract zip file
+      src: /tmp/package.zip
+      dest: /opt/package
+      with:
+        skip_if_exists: /opt/package/bin/app  # Idempotency check
+    
+    - !unpack
+      name: Extract tar.xz archive
+      src: /tmp/compressed.tar.xz
+      dest: /var/lib/data
+    
+    - !unpack
+      name: Extract single gzip file
+      src: /tmp/data.json.gz
+      dest: /etc/app/
+      # Creates /etc/app/data.json

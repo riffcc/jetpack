@@ -187,13 +187,16 @@ fn run_task_on_host(
     let evaluated = task.evaluate(&handle, &validate, TemplateMode::Off)?;
 
     if evaluated.with.is_some() {
-        let condition = &evaluated.with.as_ref().as_ref().unwrap().condition; // lol rust
-        if condition.is_some() {
-            let cond = handle.template.test_condition(&validate, TemplateMode::Strict, &condition.as_ref().unwrap())?;
+        let with_ref = evaluated.with.as_ref().as_ref().unwrap();
+        
+        // Check condition
+        if let Some(ref condition) = with_ref.condition {
+            let cond = handle.template.test_condition(&validate, TemplateMode::Strict, condition)?;
             if ! cond {
                 return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
             }
         }
+        
     }
 
     // see if we are iterating over a list of items or not
@@ -221,6 +224,46 @@ fn run_task_on_host(
 
         // re-evaluate the task, allowing the 'items' to be plugged in.
         let evaluated = task.evaluate(&handle, &validate, TemplateMode::Strict)?;
+
+        // Check skip_if_exists AFTER proper templating
+        if let Some(original_with) = task.get_with() {
+            if let Some(ref skip_path_raw) = original_with.skip_if_exists {
+                // Import needed types
+                use crate::handle::template::BlendTarget;
+                
+                // Template the path using the context directly
+                let template_result = handle.run_state.context.read().unwrap()
+                    .render_template(skip_path_raw, &handle.host, BlendTarget::NotTemplateModule, TemplateMode::Strict);
+                
+                match template_result {
+                    Ok(templated) => {
+                        // Check if template was fully resolved
+                        if templated.contains("{{") {
+                            // Template variable not found - FAIL FAST
+                            return Err(handle.response.is_failed(&validate, 
+                                &format!("skip_if_exists: undefined variable in template '{}'", skip_path_raw)));
+                        }
+                        
+                        // Screen the templated result for illegal path characters
+                        let skip_path = match crate::tasks::cmd_library::screen_path(&templated) {
+                            Ok(path) => path,
+                            Err(e) => return Err(handle.response.is_failed(&validate, 
+                                &format!("skip_if_exists path invalid: {}", e)))
+                        };
+                        
+                        use std::path::Path;
+                        if Path::new(&skip_path).exists() {
+                            return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
+                        }
+                    },
+                    Err(e) => {
+                        // Template error - FAIL FAST
+                        return Err(handle.response.is_failed(&validate, 
+                            &format!("skip_if_exists template error: {}", e)));
+                    }
+                }
+            }
+        }
 
         // see if there is any retry or delay logic in the task
         let mut retries = match evaluated.and.as_ref().is_some() {

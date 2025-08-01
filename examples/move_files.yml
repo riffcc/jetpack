@@ -1,0 +1,69 @@
+---
+# Example playbook demonstrating the move module
+
+- name: Examples of the move module
+  connection: local
+  hosts: localhost
+  tasks:
+
+    # Basic file move
+    - name: Move a single file
+      !move:
+        src: /tmp/source_file.txt
+        dest: /tmp/destination_file.txt
+
+    # Move with backup
+    - name: Move file with backup if destination exists
+      !move:
+        src: /tmp/important.conf
+        dest: /etc/myapp/important.conf
+        backup: yes
+
+    # Move with permissions
+    - name: Move and set permissions
+      !move:
+        src: /tmp/script.sh
+        dest: /usr/local/bin/script.sh
+        mode: "0755"
+        owner: root
+        group: root
+
+    # Move directory
+    - name: Move entire directory
+      !move:
+        src: /tmp/old_location
+        dest: /var/lib/new_location
+        owner: app
+        group: app
+
+    # Force move (overwrites destination)
+    - name: Force move even if destination exists
+      !move:
+        src: /tmp/new_version.jar
+        dest: /opt/app/app.jar
+        force: yes
+
+    # Move with creates check
+    - name: Rename configuration directory
+      !move:
+        src: /etc/myapp.old
+        dest: /etc/myapp
+        mode: "0755"
+
+    # Move temporary build artifacts
+    - name: Move build output to final location
+      !move:
+        src: /tmp/build/output/app
+        dest: /usr/local/bin/app
+        mode: "0755"
+        owner: root
+        group: root
+        backup: yes
+
+    # Conditional move with variables
+    - name: Move log files based on date
+      !move:
+        src: "/var/log/app-{{ date }}.log"
+        dest: "/var/log/archive/app-{{ date }}.log"
+      with:
+        date: "{{ lookup('env', 'LOG_DATE') }}"

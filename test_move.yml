@@ -1,0 +1,25 @@
+---
+# Test playbook for move module
+
+- name: Test move module
+  connection: local
+  hosts: localhost
+  tasks:
+
+    # Create test files
+    - name: Create test file
+      !shell:
+        cmd: echo "test content" > /tmp/test_move_src.txt
+
+    - name: Move the test file
+      !move:
+        src: /tmp/test_move_src.txt
+        dest: /tmp/test_move_dest.txt
+
+    - name: Verify file was moved
+      !shell:
+        cmd: cat /tmp/test_move_dest.txt
+
+    - name: Check source doesn't exist
+      !shell:
+        cmd: test ! -e /tmp/test_move_src.txt && echo "Source removed successfully"

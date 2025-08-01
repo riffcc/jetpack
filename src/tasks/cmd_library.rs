@@ -132,6 +132,20 @@ pub fn get_delete_directory_command(_os_type: HostOSType, untrusted_path: &Strin
     }
 }
 
+pub fn get_rename_command(_os_type: HostOSType, untrusted_src: &String, untrusted_dest: &String, force: bool) -> Result<String,String> {
+    let src = screen_path(untrusted_src)?;
+    let dest = screen_path(untrusted_dest)?;
+    match force {
+        true  => { return Ok(format!("mv -f '{}' '{}'", src, dest)); },
+        false => { return Ok(format!("mv '{}' '{}'", src, dest)); }
+    }
+}
+
+pub fn get_file_exists_command(_os_type: HostOSType, untrusted_path: &String) -> Result<String,String> {
+    let path = screen_path(untrusted_path)?;
+    return Ok(format!("test -e '{}'", path));
+}
+
 pub fn set_owner_command(_os_type: HostOSType, untrusted_path: &String, untrusted_owner: &String, recurse: Recurse) -> Result<String,String> {
     let path = screen_path(untrusted_path)?;
     let owner = screen_general_input_strict(untrusted_owner)?;

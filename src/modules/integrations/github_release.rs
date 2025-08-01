@@ -70,7 +70,7 @@ impl IsTask for GithubReleaseTask {
         let repo = handle.template.string(&request, tm, &String::from("repo"), &self.repo)?;
         let channel = match &self.channel {
             Some(c) => handle.template.string(&request, tm, &String::from("channel"), c)?,
-            None => String::from("stable"),
+            None => String::from("latest"), // Default to latest (stable) releases
         };
         let version_filter = match &self.version_filter {
             Some(v) => Some(handle.template.string(&request, tm, &String::from("version_filter"), v)?),
@@ -125,7 +125,7 @@ impl IsAction for GithubReleaseAction {
                     return Err(handle.response.is_failed(&request, &format!("No releases found for {} matching criteria", self.repo)));
                 }
 
-                let best_release = self.find_best_release(&filtered_releases)?;
+                let best_release = self.find_best_release(&filtered_releases, &self.channel)?;
                 
                 let version = best_release.tag_name.trim_start_matches('v');
                 
@@ -190,16 +190,8 @@ impl GithubReleaseAction {
     }
 
     fn filter_releases<'a>(&self, releases: &'a [GithubRelease]) -> Vec<&'a GithubRelease> {
-        releases.iter()
+        let version_filtered: Vec<&GithubRelease> = releases.iter()
             .filter(|r| !r.draft)
-            .filter(|r| {
-                match self.channel.as_str() {
-                    "stable" => !r.prerelease,
-                    "prerelease" | "beta" | "alpha" => r.prerelease,
-                    "any" => true,
-                    _ => !r.prerelease,
-                }
-            })
             .filter(|r| {
                 if let Some(ref filter) = self.version_filter {
                     self.matches_version_filter(&r.tag_name, filter)
@@ -207,7 +199,37 @@ impl GithubReleaseAction {
                     true
                 }
             })
-            .collect()
+            .collect();
+
+        match self.channel.as_str() {
+            "stable" | "latest" => {
+                // Only stable releases (stable and latest are synonyms)
+                version_filtered.into_iter()
+                    .filter(|r| !r.prerelease)
+                    .collect()
+            },
+            "unstable" => {
+                // Only prereleases (RCs, betas, alphas)
+                version_filtered.into_iter()
+                    .filter(|r| r.prerelease)
+                    .collect()
+            },
+            "prerelease" => {
+                // Smart mode: get the absolute latest, but prefer stable over RC of the same version
+                // e.g., prefer 0.36.0 over 0.36.0-rc2, but prefer 0.36.0-rc2 over 0.35.0
+                version_filtered
+            },
+            "any" => {
+                // Return all non-draft releases
+                version_filtered
+            },
+            _ => {
+                // Default to stable for unknown channel values
+                version_filtered.into_iter()
+                    .filter(|r| !r.prerelease)
+                    .collect()
+            }
+        }
     }
 
     fn matches_version_filter(&self, tag: &str, filter: &str) -> bool {
@@ -222,7 +244,7 @@ impl GithubReleaseAction {
         false
     }
 
-    fn find_best_release<'a>(&self, releases: &[&'a GithubRelease]) -> Result<&'a GithubRelease, Arc<TaskResponse>> {
+    fn find_best_release<'a>(&self, releases: &[&'a GithubRelease], _channel: &str) -> Result<&'a GithubRelease, Arc<TaskResponse>> {
         let mut sorted_releases: Vec<&GithubRelease> = releases.to_vec();
         
         sorted_releases.sort_by(|a, b| {
@@ -230,7 +252,10 @@ impl GithubReleaseAction {
             let b_version = Version::parse(b.tag_name.trim_start_matches('v'));
             
             match (a_version, b_version) {
-                (Ok(a_v), Ok(b_v)) => b_v.cmp(&a_v),
+                (Ok(a_v), Ok(b_v)) => {
+                    // Standard semver comparison (0.36.0-rc2 < 0.36.0)
+                    b_v.cmp(&a_v)
+                },
                 (Ok(_), Err(_)) => std::cmp::Ordering::Less,
                 (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
                 (Err(_), Err(_)) => b.tag_name.cmp(&a.tag_name),
@@ -324,7 +349,20 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].tag_name, "v2.0.0");
         
-        // Test prerelease channel
+        // Test unstable channel (only prereleases)
+        let unstable_action = GithubReleaseAction {
+            repo: String::from("test/repo"),
+            channel: String::from("unstable"),
+            version_filter: None,
+            save_var: Some(String::from("version")),
+            set_var: None,
+        };
+        
+        let filtered_unstable = unstable_action.filter_releases(&releases);
+        assert_eq!(filtered_unstable.len(), 1);
+        assert_eq!(filtered_unstable[0].tag_name, "v2.1.0-beta");
+        
+        // Test prerelease channel - returns all releases, sorting will prefer stable of same version
         let prerelease_action = GithubReleaseAction {
             repo: String::from("test/repo"),
             channel: String::from("prerelease"),
@@ -334,8 +372,32 @@ mod tests {
         };
         
         let filtered_prerelease = prerelease_action.filter_releases(&releases);
-        assert_eq!(filtered_prerelease.len(), 1);
-        assert_eq!(filtered_prerelease[0].tag_name, "v2.1.0-beta");
+        assert_eq!(filtered_prerelease.len(), 2); // Gets both stable and prerelease
+        
+        // Test any channel
+        let any_action = GithubReleaseAction {
+            repo: String::from("test/repo"),
+            channel: String::from("any"),
+            version_filter: None,
+            save_var: Some(String::from("version")),
+            set_var: None,
+        };
+        
+        let filtered_any = any_action.filter_releases(&releases);
+        assert_eq!(filtered_any.len(), 2); // Gets both stable and prerelease
+        
+        // Test latest channel (synonym for stable)
+        let latest_action = GithubReleaseAction {
+            repo: String::from("test/repo"),
+            channel: String::from("latest"),
+            version_filter: None,
+            save_var: Some(String::from("version")),
+            set_var: None,
+        };
+        
+        let filtered_latest = latest_action.filter_releases(&releases);
+        assert_eq!(filtered_latest.len(), 1);
+        assert_eq!(filtered_latest[0].tag_name, "v2.0.0"); // Only stable
     }
     
     #[test]
@@ -379,8 +441,71 @@ mod tests {
         };
         
         let releases = vec![&release1, &release2, &release3];
-        let best = action.find_best_release(&releases).unwrap();
+        let best = action.find_best_release(&releases, "stable").unwrap();
         assert_eq!(best.tag_name, "v2.0.0");
+    }
+    
+    #[test]
+    fn test_prerelease_channel_smart_selection() {
+        let action = GithubReleaseAction {
+            repo: String::from("test/repo"),
+            channel: String::from("prerelease"),
+            version_filter: None,
+            save_var: Some(String::from("version")),
+            set_var: None,
+        };
+        
+        // Scenario 1: v0.36.0-rc2 vs v0.35.0 - should pick the newer RC
+        let releases1 = vec![
+            GithubRelease {
+                tag_name: String::from("v0.36.0-rc2"),
+                name: Some(String::from("Release Candidate")),
+                prerelease: true,
+                draft: false,
+                html_url: String::from(""),
+                published_at: Some(String::from("2024-01-02T00:00:00Z")),
+                assets: vec![],
+            },
+            GithubRelease {
+                tag_name: String::from("v0.35.0"),
+                name: Some(String::from("Stable Release")),
+                prerelease: false,
+                draft: false,
+                html_url: String::from(""),
+                published_at: Some(String::from("2024-01-01T00:00:00Z")),
+                assets: vec![],
+            },
+        ];
+        
+        let refs1: Vec<&GithubRelease> = releases1.iter().collect();
+        let best1 = action.find_best_release(&refs1, "prerelease").unwrap();
+        assert_eq!(best1.tag_name, "v0.36.0-rc2"); // Newer version wins
+        
+        // Scenario 2: v0.36.0 vs v0.36.0-rc2 - should pick the stable
+        let releases2 = vec![
+            GithubRelease {
+                tag_name: String::from("v0.36.0"),
+                name: Some(String::from("Stable Release")),
+                prerelease: false,
+                draft: false,
+                html_url: String::from(""),
+                published_at: Some(String::from("2024-01-03T00:00:00Z")),
+                assets: vec![],
+            },
+            GithubRelease {
+                tag_name: String::from("v0.36.0-rc2"),
+                name: Some(String::from("Release Candidate")),
+                prerelease: true,
+                draft: false,
+                html_url: String::from(""),
+                published_at: Some(String::from("2024-01-02T00:00:00Z")),
+                assets: vec![],
+            },
+        ];
+        
+        let refs2: Vec<&GithubRelease> = releases2.iter().collect();
+        let best2 = action.find_best_release(&refs2, "prerelease").unwrap();
+        assert_eq!(best2.tag_name, "v0.36.0"); // Stable of same version wins
     }
     
     #[test]

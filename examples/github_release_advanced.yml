@@ -1,0 +1,146 @@
+---
+# Advanced examples demonstrating github_release module channel semantics
+# Shows real-world deployment scenarios across different environments
+
+- name: Environment-specific deployment strategy
+  hosts: all
+  vars:
+    # Define environment-specific channels
+    deployment_channels:
+      production: stable      # Only stable releases
+      staging: prerelease     # Smart mode - auto-upgrade to stable
+      testing: unstable       # Stay on RCs for validation
+      development: any        # Latest regardless
+  
+  tasks:
+    # Get appropriate version based on environment
+    - !github_release
+      name: Get IPFS version for {{ inventory_hostname }}
+      repo: ipfs/kubo
+      channel: "{{ deployment_channels[environment] | default('stable') }}"
+      save: ipfs_version
+    
+    - !echo
+      msg: "{{ environment }} environment will use IPFS {{ ipfs_version }}"
+
+- name: Continuous deployment with automatic RC to stable promotion
+  hosts: staging_servers
+  tasks:
+    # This task demonstrates the power of 'prerelease' channel:
+    # - Testing v0.36.0-rc2? It keeps using it
+    # - v0.36.0 stable released? Automatically upgrades!
+    # - No config changes needed!
+    
+    - !github_release
+      name: Get Kubernetes version (auto-promote to stable)
+      repo: kubernetes/kubernetes
+      channel: prerelease
+      version_filter: "~1.31.0"  # Stay within 1.31.x
+      save: k8s_version
+    
+    - !echo
+      msg: |
+        Kubernetes {{ k8s_version }} will be deployed.
+        If this was an RC, it will auto-upgrade to stable when available!
+    
+    # Example workflow for a gradual rollout
+    - !set
+      vars:
+        is_rc: "{{ '-rc' in k8s_version or '-beta' in k8s_version or '-alpha' in k8s_version }}"
+    
+    - !echo
+      msg: "Version is release candidate: {{ is_rc }}"
+      when: is_rc
+    
+    - !echo
+      msg: "Version is stable, ready for production promotion!"
+      when: not is_rc
+
+- name: Testing environment - Lock to prereleases
+  hosts: test_servers
+  tasks:
+    # Use 'unstable' channel to ensure we stay on RCs
+    # even when stable versions are released
+    
+    - !github_release
+      name: Get Node.js RC for testing
+      repo: nodejs/node
+      channel: unstable
+      version_filter: "^22.0.0"
+      save: node_test_version
+    
+    - !echo
+      msg: "Test environment locked to: {{ node_test_version }}"
+    
+    # This ensures test environments validate RCs before
+    # staging/production get the stable releases
+
+- name: Multi-component deployment with mixed strategies
+  hosts: localhost
+  tasks:
+    # Different components can use different strategies
+    
+    # Core service - stable only
+    - !github_release
+      name: PostgreSQL - stable only
+      repo: postgres/postgres
+      channel: stable
+      save: postgres_version
+    
+    # Application - smart prerelease mode
+    - !github_release
+      name: Application - auto-upgrade to stable
+      repo: mycompany/app
+      channel: prerelease
+      save: app_version
+    
+    # Monitoring - bleeding edge
+    - !github_release
+      name: Prometheus - latest features
+      repo: prometheus/prometheus
+      channel: any
+      save: prometheus_version
+    
+    # Testing tools - stay on RCs
+    - !github_release
+      name: Test framework - RC validation
+      repo: testframework/core
+      channel: unstable
+      save: test_framework_version
+    
+    - !debug
+      msg:
+        postgres: "{{ postgres_version }} (stable)"
+        application: "{{ app_version }} (smart)"
+        prometheus: "{{ prometheus_version }} (any)"
+        test_framework: "{{ test_framework_version }} (unstable)"
+
+- name: Practical example - IPFS deployment
+  hosts: ipfs_nodes
+  tasks:
+    # Real-world IPFS deployment scenario
+    - !github_release
+      name: Determine IPFS version based on node role
+      repo: ipfs/kubo
+      channel: "{{ 'stable' if inventory_hostname in groups['production'] else 'prerelease' }}"
+      version_filter: "~0.36.0"  # Target 0.36.x series
+      save: ipfs_target_version
+    
+    - !echo
+      msg: |
+        Target IPFS version: {{ ipfs_target_version }}
+        Current channel: {{ 'stable' if inventory_hostname in groups['production'] else 'prerelease' }}
+    
+    # Would continue with actual deployment tasks here...
+    - !shell
+      cmd: |
+        echo "Would download: https://github.com/ipfs/kubo/releases/download/{{ ipfs_target_version }}/kubo_{{ ipfs_target_version }}_linux-amd64.tar.gz"
+    
+    # Example of conditional logic based on version
+    - !set
+      vars:
+        needs_migration: "{{ ipfs_target_version is version('0.36.0', '>=') }}"
+    
+    - !echo
+      msg: "This version requires data migration!"
+      when: needs_migration

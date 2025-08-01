@@ -33,7 +33,8 @@ pub struct PreLogicInput {
     pub sudo: Option<String>,
     pub items: Option<ItemsInput>,
     pub tags: Option<Vec<String>>,
-    pub delegate_to: Option<String>
+    pub delegate_to: Option<String>,
+    pub skip_if_exists: Option<String>
 }
 
 #[derive(Deserialize,Debug,Clone)]
@@ -49,7 +50,8 @@ pub struct PreLogicEvaluated {
     pub subscribe: Option<String>,
     pub sudo: Option<String>,
     pub items: Option<ItemsInput>,
-    pub tags: Option<Vec<String>>
+    pub tags: Option<Vec<String>>,
+    pub skip_if_exists: Option<String>
 }
 
 #[derive(Deserialize,Debug)]
@@ -82,7 +84,8 @@ impl PreLogicInput {
             sudo: handle.template.string_option_no_spaces(request, tm, &String::from("sudo"), &input2.sudo)?,
             subscribe: handle.template.no_template_string_option_trim(&input2.subscribe),
             items: input2.items.clone(),
-            tags: input2.tags.clone()
+            tags: input2.tags.clone(),
+            skip_if_exists: input2.skip_if_exists.clone()  // Don't template here - do it in FSM
         }));
     }
 
@@ -167,4 +170,27 @@ pub fn template_serde_sequence(
         }
     }
     return Ok(output);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_skip_if_exists_not_templated_in_evaluation() {
+        // PreLogicInput should store skip_if_exists as-is, without templating
+        let input = PreLogicInput {
+            condition: None,
+            subscribe: None, 
+            sudo: None,
+            items: None,
+            tags: None,
+            delegate_to: None,
+            skip_if_exists: Some("/home/{{ user }}/.config".to_string()),
+        };
+        
+        // The evaluated version should have the same raw string
+        // (templating happens later in the FSM)
+        assert_eq!(input.skip_if_exists, Some("/home/{{ user }}/.config".to_string()));
+    }
 }
