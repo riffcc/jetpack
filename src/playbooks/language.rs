@@ -42,6 +42,7 @@ pub struct Play {
 pub struct Role {
     pub name: String,
     pub defaults: Option<serde_yaml::Mapping>,
+    pub dependencies: Option<Vec<String>>,
     pub tasks: Option<Vec<String>>,
     pub handlers: Option<Vec<String>>
 }

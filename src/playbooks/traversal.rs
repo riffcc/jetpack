@@ -26,7 +26,7 @@ use crate::inventory::hosts::Host;
 use crate::util::io::{jet_file_open,directory_as_string};
 use crate::util::yaml::{blend_variables,show_yaml_error_in_context};
 use std::path::PathBuf;
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use std::sync::{Arc,RwLock};
 use std::path::Path;
 use std::env;
@@ -57,7 +57,11 @@ pub struct RunState {
     pub tags: Option<Vec<String>>,
     pub allow_localhost_delegation: bool,
     pub is_pull_mode: bool,
-    pub play_groups: Option<Vec<String>>
+    pub play_groups: Option<Vec<String>>,
+    // Role dependency tracking
+    pub processed_role_tasks: Arc<RwLock<HashSet<String>>>,
+    pub processed_role_handlers: Arc<RwLock<HashSet<String>>>,
+    pub role_processing_stack: Arc<RwLock<Vec<String>>>,
 }
 
 // this is the top end traversal function that is called from cli/playbooks.rs
@@ -195,6 +199,11 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
     // assign the batch
     { let mut ctx = run_state.context.write().unwrap(); ctx.set_targetted_hosts(&hosts); }
 
+    // clear role dependency tracking for this batch
+    run_state.processed_role_tasks.write().unwrap().clear();
+    run_state.processed_role_handlers.write().unwrap().clear();
+    run_state.role_processing_stack.write().unwrap().clear();
+
     // handle role tasks
     if play.roles.is_some() {
         let roles = play.roles.as_ref().unwrap();
@@ -212,8 +221,8 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
     if play.roles.is_some() {
         let roles = play.roles.as_ref().unwrap();
         for invocation in roles.iter() { process_role(run_state, &play, &invocation, HandlerMode::Handlers)?; }
-    }   
-    { let mut ctx = run_state.context.write().unwrap(); ctx.unset_role(); }  
+    }
+    { let mut ctx = run_state.context.write().unwrap(); ctx.unset_role(); }
 
     // handle loose play handlers
     if play.handlers.is_some() {
@@ -291,8 +300,47 @@ fn process_role(run_state: &Arc<RunState>, play: &Play, invocation: &RoleInvocat
     // the definition involves all of the role files in the role directory
     let role_name = invocation.role.clone();
 
+    // check if this role has already been processed (via dependency resolution)
+    {
+        let processed = match are_handlers {
+            HandlerMode::NormalTasks => run_state.processed_role_tasks.read().unwrap(),
+            HandlerMode::Handlers => run_state.processed_role_handlers.read().unwrap(),
+        };
+        if processed.contains(&role_name) {
+            return Ok(());
+        }
+    }
+
+    // check for circular dependencies
+    {
+        let stack = run_state.role_processing_stack.read().unwrap();
+        if stack.contains(&role_name) {
+            let cycle: Vec<String> = stack.iter().cloned().collect();
+            return Err(format!("circular role dependency detected: {} -> {}", cycle.join(" -> "), role_name));
+        }
+    }
+
+    // add to processing stack for cycle detection
+    run_state.role_processing_stack.write().unwrap().push(role_name.clone());
+
     // can we find a role directory in the configured role paths?
     let (role, role_path) = find_role(run_state, &play, role_name.clone())?;
+
+    // process dependencies first
+    if role.dependencies.is_some() {
+        for dep_name in role.dependencies.as_ref().unwrap().iter() {
+            // create a synthetic invocation for the dependency
+            let dep_invocation = RoleInvocation {
+                role: dep_name.clone(),
+                vars: None,
+                tags: invocation.tags.clone(),
+            };
+            process_role(run_state, play, &dep_invocation, are_handlers)?;
+        }
+    }
+
+    // remove from processing stack (we're done checking for cycles for this role)
+    run_state.role_processing_stack.write().unwrap().pop();
     {
         // we're good.
         let mut ctx = run_state.context.write().unwrap();
@@ -373,6 +421,17 @@ fn process_role(run_state: &Arc<RunState>, play: &Play, invocation: &RoleInvocat
     }
 
     run_state.visitor.read().unwrap().on_role_stop(&run_state.context);
+
+    // mark role as processed so it won't run again if referenced as a dependency
+    {
+        let role_name = invocation.role.clone();
+        let mut processed = match are_handlers {
+            HandlerMode::NormalTasks => run_state.processed_role_tasks.write().unwrap(),
+            HandlerMode::Handlers => run_state.processed_role_handlers.write().unwrap(),
+        };
+        processed.insert(role_name);
+    }
+
     return Ok(())
 
 }

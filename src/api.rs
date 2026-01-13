@@ -141,6 +141,9 @@ impl PlaybookRunner {
             allow_localhost_delegation: self.config.allow_localhost_delegation,
             is_pull_mode: false,
             play_groups: None,
+            processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         });
         
         // Run the playbooks

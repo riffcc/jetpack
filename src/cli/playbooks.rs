@@ -82,7 +82,10 @@ fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: 
         tags: parser.tags.clone(),
         allow_localhost_delegation: parser.allow_localhost_delegation,
         is_pull_mode: false,
-        play_groups: parser.play_groups.clone()
+        play_groups: parser.play_groups.clone(),
+        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
     });
     return match playbook_traversal(&run_state) {
         Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),
@@ -109,7 +112,10 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
         tags: parser.tags.clone(),
         allow_localhost_delegation: parser.allow_localhost_delegation,
         is_pull_mode: true,
-        play_groups: parser.play_groups.clone()
+        play_groups: parser.play_groups.clone(),
+        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
     });
     return match playbook_traversal(&run_state) {
         Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),
