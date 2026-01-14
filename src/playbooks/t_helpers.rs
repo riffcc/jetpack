@@ -47,6 +47,32 @@ impl HelperDef for IsDefined {
 }
 
 pub fn register_helpers(handlebars: &mut Handlebars) {
+    // Comparison helpers
+    {
+        handlebars_helper!(eq: |a: Json, b: Json| a == b);
+        handlebars.register_helper("eq", Box::new(eq))
+    }
+    {
+        handlebars_helper!(ne: |a: Json, b: Json| a != b);
+        handlebars.register_helper("ne", Box::new(ne))
+    }
+    {
+        handlebars_helper!(gt: |a: i64, b: i64| a > b);
+        handlebars.register_helper("gt", Box::new(gt))
+    }
+    {
+        handlebars_helper!(gte: |a: i64, b: i64| a >= b);
+        handlebars.register_helper("gte", Box::new(gte))
+    }
+    {
+        handlebars_helper!(lt: |a: i64, b: i64| a < b);
+        handlebars.register_helper("lt", Box::new(lt))
+    }
+    {
+        handlebars_helper!(lte: |a: i64, b: i64| a <= b);
+        handlebars.register_helper("lte", Box::new(lte))
+    }
+    // String helpers
     {
         handlebars_helper!(to_lower_case: |v: str| v.to_lowercase());
         handlebars.register_helper("to_lower_case", Box::new(to_lower_case))
