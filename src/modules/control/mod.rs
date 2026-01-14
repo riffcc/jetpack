@@ -22,3 +22,4 @@ pub mod echo;
 pub mod fail;
 pub mod facts;
 pub mod set;
+pub mod wait_for_host;
