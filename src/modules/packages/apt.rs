@@ -120,13 +120,18 @@ impl PackageManagementModule for AptAction {
             .and_then(|s| s.parse().ok())
             .unwrap_or(3600);
 
-        // Check age of apt cache by looking at /var/lib/apt/lists mtime
+        // Check if apt cache needs refresh:
+        // 1. Directory doesn't exist -> stale
+        // 2. Directory is empty (no package lists) -> stale
+        // 3. Directory mtime is older than threshold -> stale
+        // Note: Using && and || instead of if/then because LANG=C prefix only works with simple commands
         let check_cmd = format!(
-            "find /var/lib/apt/lists -maxdepth 0 -mmin +{} 2>/dev/null | grep -q . && echo stale || echo fresh",
+            "test -d /var/lib/apt/lists && test -n \"$(ls /var/lib/apt/lists 2>/dev/null | grep -v -E '^(lock|partial)$')\" && test -z \"$(find /var/lib/apt/lists -maxdepth 0 -mmin +{} 2>/dev/null)\" && echo fresh || echo stale",
             cache_lifetime / 60  // convert seconds to minutes for find -mmin
         );
 
-        let result = handle.remote.run(request, &check_cmd, CheckRc::Unchecked);
+        // Use run_unsafe since the check command contains shell constructs (not user input)
+        let result = handle.remote.run_unsafe(request, &check_cmd, CheckRc::Unchecked);
         if let Ok(response) = result {
             let (_, out) = cmd_info(&response);
             if out.trim() == "stale" {
