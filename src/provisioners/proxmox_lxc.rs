@@ -96,6 +96,17 @@ impl ProxmoxLxcProvisioner {
             wait_delay: config.wait_delay,
             wait_strategy: config.wait_strategy.clone(),
             wait_max_delay: config.wait_max_delay,
+            // Template extra fields (mountpoints, etc.)
+            extra: {
+                let mut templated_extra = std::collections::HashMap::new();
+                for (key, value) in &config.extra {
+                    templated_extra.insert(
+                        key.clone(),
+                        self.template_string(&templar, value, vars)?
+                    );
+                }
+                templated_extra
+            },
         })
     }
 
@@ -332,6 +343,14 @@ impl ProxmoxLxcProvisioner {
             // DNS nameservers
             if let Some(ref nameserver) = config.nameserver {
                 params.insert("nameserver".to_string(), nameserver.clone());
+            }
+
+            // Add extra fields (mountpoints mp0, mp1, etc.)
+            for (key, value) in &config.extra {
+                // Pass through any extra fields to the API
+                // This handles mp0, mp1, mp2, ... mpN for mountpoints
+                // and any other Proxmox LXC parameters
+                params.insert(key.clone(), value.clone());
             }
 
             let response = client.post(&url)

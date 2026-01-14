@@ -36,6 +36,7 @@
 pub mod proxmox_lxc;
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 use crate::dns::DnsConfig;
@@ -43,7 +44,6 @@ use crate::inventory::inventory::Inventory;
 
 /// Configuration for provisioning a host's underlying infrastructure
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProvisionConfig {
     /// The type of provisioner (e.g., "proxmox_lxc", "proxmox_vm", "docker")
     #[serde(rename = "type")]
@@ -117,6 +117,11 @@ pub struct ProvisionConfig {
 
     /// Maximum delay for backoff strategy in seconds (default: 30)
     pub wait_max_delay: Option<u64>,
+
+    /// Additional fields (mountpoints mp0, mp1, etc. and other dynamic options)
+    /// Mountpoint format: "storage:size,mp=/mount/path" e.g. "local-lvm:75,mp=/mnt/data"
+    #[serde(flatten)]
+    pub extra: HashMap<String, String>,
 }
 
 /// Result of a provisioning operation
@@ -305,5 +310,130 @@ pub fn destroy_host(
 
     let provisioner = get_provisioner(&provision_config.provision_type)?;
     provisioner.destroy(provision_config, inventory_name, inventory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provision_config_basic_deserialization() {
+        let yaml = r#"
+type: proxmox_lxc
+cluster: hypervisor1
+hostname: testhost
+memory: "1024"
+cores: "2"
+"#;
+        let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.provision_type, "proxmox_lxc");
+        assert_eq!(config.cluster, "hypervisor1");
+        assert_eq!(config.hostname, Some("testhost".to_string()));
+        assert_eq!(config.memory, Some("1024".to_string()));
+        assert_eq!(config.cores, Some("2".to_string()));
+        assert!(config.extra.is_empty());
+    }
+
+    #[test]
+    fn test_provision_config_with_mountpoints() {
+        let yaml = r#"
+type: proxmox_lxc
+cluster: hypervisor1
+hostname: chunkserver1
+memory: "1024"
+mp0: "local-lvm:75,mp=/mnt/chunk0"
+mp1: "local-lvm:75,mp=/mnt/chunk1"
+"#;
+        let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.provision_type, "proxmox_lxc");
+        assert_eq!(config.cluster, "hypervisor1");
+        assert_eq!(config.extra.len(), 2);
+        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:75,mp=/mnt/chunk0".to_string()));
+        assert_eq!(config.extra.get("mp1"), Some(&"local-lvm:75,mp=/mnt/chunk1".to_string()));
+    }
+
+    #[test]
+    fn test_provision_config_with_many_mountpoints() {
+        let yaml = r#"
+type: proxmox_lxc
+cluster: hypervisor1
+mp0: "local-lvm:100,mp=/mnt/data0"
+mp5: "local-lvm:100,mp=/mnt/data5"
+mp10: "local-lvm:100,mp=/mnt/data10"
+mp50: "local-lvm:100,mp=/mnt/data50"
+"#;
+        let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.extra.len(), 4);
+        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:100,mp=/mnt/data0".to_string()));
+        assert_eq!(config.extra.get("mp5"), Some(&"local-lvm:100,mp=/mnt/data5".to_string()));
+        assert_eq!(config.extra.get("mp10"), Some(&"local-lvm:100,mp=/mnt/data10".to_string()));
+        assert_eq!(config.extra.get("mp50"), Some(&"local-lvm:100,mp=/mnt/data50".to_string()));
+    }
+
+    #[test]
+    fn test_provision_config_extra_fields_passthrough() {
+        // Test that any extra fields are captured, not just mp*
+        let yaml = r#"
+type: proxmox_lxc
+cluster: hypervisor1
+mp0: "local-lvm:75,mp=/mnt/data"
+hookscript: "local:snippets/hookscript.pl"
+tags: "production;database"
+"#;
+        let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.extra.len(), 3);
+        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:75,mp=/mnt/data".to_string()));
+        assert_eq!(config.extra.get("hookscript"), Some(&"local:snippets/hookscript.pl".to_string()));
+        assert_eq!(config.extra.get("tags"), Some(&"production;database".to_string()));
+    }
+
+    #[test]
+    fn test_provision_config_with_all_standard_fields() {
+        let yaml = r#"
+type: proxmox_lxc
+cluster: hypervisor1
+hostname: fulltest
+vmid: "100"
+memory: "2048"
+cores: "4"
+ostemplate: "local:vztmpl/debian-13-standard.tar.zst"
+storage: "local-lvm"
+rootfs_size: "16G"
+net0: "name=eth0,bridge=vmbr0,ip=10.0.0.100/24,gw=10.0.0.1"
+password: "secret"
+unprivileged: "true"
+start_on_create: "true"
+features: "nesting=1"
+nameserver: "1.1.1.1 8.8.8.8"
+mp0: "local-lvm:50,mp=/mnt/extra"
+"#;
+        let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.provision_type, "proxmox_lxc");
+        assert_eq!(config.cluster, "hypervisor1");
+        assert_eq!(config.hostname, Some("fulltest".to_string()));
+        assert_eq!(config.vmid, Some("100".to_string()));
+        assert_eq!(config.memory, Some("2048".to_string()));
+        assert_eq!(config.cores, Some("4".to_string()));
+        assert_eq!(config.ostemplate, Some("local:vztmpl/debian-13-standard.tar.zst".to_string()));
+        assert_eq!(config.storage, Some("local-lvm".to_string()));
+        assert_eq!(config.rootfs_size, Some("16G".to_string()));
+        assert_eq!(config.net0, Some("name=eth0,bridge=vmbr0,ip=10.0.0.100/24,gw=10.0.0.1".to_string()));
+        assert_eq!(config.password, Some("secret".to_string()));
+        assert_eq!(config.unprivileged, Some("true".to_string()));
+        assert_eq!(config.start_on_create, Some("true".to_string()));
+        assert_eq!(config.features, Some("nesting=1".to_string()));
+        assert_eq!(config.nameserver, Some("1.1.1.1 8.8.8.8".to_string()));
+        assert_eq!(config.extra.len(), 1);
+        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:50,mp=/mnt/extra".to_string()));
+    }
+
+    #[test]
+    fn test_wait_strategy_from_str() {
+        assert_eq!(WaitStrategy::from_str("simple"), WaitStrategy::Simple);
+        assert_eq!(WaitStrategy::from_str("Simple"), WaitStrategy::Simple);
+        assert_eq!(WaitStrategy::from_str("SIMPLE"), WaitStrategy::Simple);
+        assert_eq!(WaitStrategy::from_str("backoff"), WaitStrategy::Backoff);
+        assert_eq!(WaitStrategy::from_str("anything_else"), WaitStrategy::Backoff);
+    }
 }
 
