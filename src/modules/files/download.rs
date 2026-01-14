@@ -5,23 +5,20 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::tasks::*;
-use crate::handle::handle::TaskHandle;
+use crate::handle::handle::{TaskHandle, CheckRc};
 use crate::tasks::fields::Field;
 use serde::Deserialize;
 use std::sync::Arc;
-use std::path::Path;
-use std::fs;
-use std::io::Write;
 
 const MODULE: &str = "Download";
 
@@ -56,22 +53,22 @@ impl IsTask for DownloadTask {
     fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let url = handle.template.string(&request, tm, &String::from("url"), &self.url)?;
         let dest = handle.template.path(&request, tm, &String::from("dest"), &self.dest)?;
-        
+
         let mode = match &self.mode {
             Some(m) => Some(handle.template.string(&request, tm, &String::from("mode"), m)?),
             None => None,
         };
-        
+
         let owner = match &self.owner {
             Some(o) => Some(handle.template.string(&request, tm, &String::from("owner"), o)?),
             None => None,
         };
-        
+
         let group = match &self.group {
             Some(g) => Some(handle.template.string(&request, tm, &String::from("group"), g)?),
             None => None,
         };
-        
+
         let force = match &self.force {
             Some(f) => {
                 let force_str = handle.template.string(&request, tm, &String::from("force"), f)?;
@@ -101,9 +98,17 @@ impl IsAction for DownloadAction {
     fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
             TaskRequestType::Query => {
-                let dest_path = Path::new(&self.dest);
-                
-                if dest_path.exists() && !self.force {
+                // Check if file exists on the target host
+                let check_cmd = format!("test -f '{}'", self.dest);
+                let exists = match handle.remote.run(&request, &check_cmd, CheckRc::Unchecked) {
+                    Ok(result) => {
+                        let (rc, _) = cmd_info(&result);
+                        rc == 0
+                    },
+                    Err(_) => false,
+                };
+
+                if exists && !self.force {
                     // File already exists and force is not set
                     return Ok(handle.response.is_matched(&request));
                 } else {
@@ -117,64 +122,43 @@ impl IsAction for DownloadAction {
             },
 
             TaskRequestType::Modify => {
-                // Create parent directory if it doesn't exist
-                if let Some(parent) = Path::new(&self.dest).parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to create parent directory: {}", e)))?;
-                }
-                
-                // Download the file
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| handle.response.is_failed(&request, &format!("Failed to create async runtime: {}", e)))?;
-                
-                rt.block_on(async {
-                    let client = reqwest::Client::builder()
-                        .user_agent("Jetpack/0.1")
-                        .build()
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to create HTTP client: {}", e)))?;
-                    
-                    let response = client.get(&self.url)
-                        .send()
-                        .await
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to download from {}: {}", self.url, e)))?;
-                    
-                    if !response.status().is_success() {
-                        return Err(handle.response.is_failed(&request, &format!("HTTP {} from {}", response.status(), self.url)));
+                // Create parent directory on target if needed
+                if let Some(parent) = std::path::Path::new(&self.dest).parent() {
+                    if let Some(parent_str) = parent.to_str() {
+                        if !parent_str.is_empty() {
+                            let mkdir_cmd = format!("mkdir -p '{}'", parent_str);
+                            handle.remote.run(&request, &mkdir_cmd, CheckRc::Checked)?;
+                        }
                     }
-                    
-                    let bytes = response.bytes()
-                        .await
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to read response body: {}", e)))?;
-                    
-                    // Write to temporary file first
-                    let temp_path = format!("{}.tmp", self.dest);
-                    let mut file = fs::File::create(&temp_path)
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to create file: {}", e)))?;
-                    
-                    file.write_all(&bytes)
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to write file: {}", e)))?;
-                    
-                    file.sync_all()
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to sync file: {}", e)))?;
-                    
-                    drop(file);
-                    
-                    // Move temp file to final destination
-                    fs::rename(&temp_path, &self.dest)
-                        .map_err(|e| handle.response.is_failed(&request, &format!("Failed to move file to destination: {}", e)))?;
-                    
-                    Ok(())
-                })?;
-                
+                }
+
+                // Check if curl is available (required for !download)
+                let has_curl = match handle.remote.run(&request, &String::from("command -v curl"), CheckRc::Unchecked) {
+                    Ok(result) => {
+                        let (rc, _) = cmd_info(&result);
+                        rc == 0
+                    },
+                    Err(_) => false,
+                };
+
+                if !has_curl {
+                    return Err(handle.response.is_failed(&request,
+                        &String::from("curl is required for !download but not found. Install curl first: apt install curl")));
+                }
+
+                // Download using curl on the target host
+                let download_cmd = format!(
+                    "curl -fsSL -o '{}' '{}'",
+                    self.dest, self.url
+                );
+                handle.remote.run(&request, &download_cmd, CheckRc::Checked)?;
+
                 // Apply permissions if specified
                 if let Some(ref mode) = self.mode {
-                    handle.remote.run(&request, 
-                        &format!("chmod {} \"{}\"", mode, self.dest),
-                        crate::handle::handle::CheckRc::Checked)?;
+                    let chmod_cmd = format!("chmod {} '{}'", mode, self.dest);
+                    handle.remote.run(&request, &chmod_cmd, CheckRc::Checked)?;
                 }
-                
+
                 // Apply ownership if specified
                 if self.owner.is_some() || self.group.is_some() {
                     let owner_str = match (&self.owner, &self.group) {
@@ -183,12 +167,10 @@ impl IsAction for DownloadAction {
                         (None, Some(g)) => format!(":{}", g),
                         (None, None) => unreachable!(),
                     };
-                    
-                    handle.remote.run(&request, 
-                        &format!("chown {} \"{}\"", owner_str, self.dest),
-                        crate::handle::handle::CheckRc::Checked)?;
+                    let chown_cmd = format!("chown {} '{}'", owner_str, self.dest);
+                    handle.remote.run(&request, &chown_cmd, CheckRc::Checked)?;
                 }
-                
+
                 let mut changes = vec![Field::Content];
                 if self.mode.is_some() { changes.push(Field::Mode); }
                 if self.owner.is_some() { changes.push(Field::Owner); }
