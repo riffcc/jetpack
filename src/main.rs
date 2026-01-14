@@ -54,12 +54,12 @@ fn liftoff() -> Result<(),String> {
                 return Err(String::from("no hosts found in --inventory"));
             }
         },
-        jetpack::cli::parser::CLI_MODE_PULL => {
-            // In pull mode, inventory is optional. If provided, it's used for variables/secrets
+        jetpack::cli::parser::CLI_MODE_PULL | jetpack::cli::parser::CLI_MODE_LOCAL | jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => {
+            // In pull/local modes, inventory is optional. If provided, it's used for variables/groups
             if cli_parser.inventory_set {
                 load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
             }
-            // Always ensure localhost is in the inventory for pull mode
+            // Ensure localhost is in the inventory for local execution
             inventory.write().expect("inventory write").store_host(&String::from("all"), &String::from("localhost"));
         },
         _ => {

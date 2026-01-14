@@ -42,6 +42,7 @@ use crate::modules::control::echo::EchoTask;
 use crate::modules::control::fail::FailTask;
 use crate::modules::control::facts::FactsTask;
 use crate::modules::control::set::SetTask;
+use crate::modules::control::wait_for_host::WaitForHostTask;
 
 // files
 use crate::modules::files::copy::CopyTask;
@@ -56,6 +57,9 @@ use crate::modules::files::unpack::UnpackTask;
 
 // integrations
 use crate::modules::integrations::github_release::GithubReleaseTask;
+
+// proxmox
+use crate::modules::proxmox::lxc::ProxmoxLxcTask;
 
 // packages
 use crate::modules::packages::apt::AptTask;
@@ -91,6 +95,7 @@ pub enum Task {
     Homebrew(HomebrewTask),
     Move(MoveTask),
     Pacman(PacmanTask),
+    Proxmox_Lxc(ProxmoxLxcTask),
     Sd_Service(SystemdServiceTask),
     Set(SetTask),
     Shell(ShellTask),
@@ -98,6 +103,7 @@ pub enum Task {
     Template(TemplateTask),
     Unpack(UnpackTask),
     User(UserTask),
+    Wait_For_Host(WaitForHostTask),
     Yum(YumDnfTask),
     Zypper(ZypperTask),
 }
@@ -125,6 +131,7 @@ impl Task {
             Task::Homebrew(x)   => x.get_module(),
             Task::Move(x)       => x.get_module(),
             Task::Pacman(x)     => x.get_module(),
+            Task::Proxmox_Lxc(x) => x.get_module(),
             Task::Sd_Service(x) => x.get_module(),
             Task::Set(x)        => x.get_module(), 
             Task::Command(x)    => x.get_module(),
@@ -133,6 +140,7 @@ impl Task {
             Task::Template(x)   => x.get_module(), 
             Task::Unpack(x)     => x.get_module(),
             Task::User(x)       => x.get_module(),
+            Task::Wait_For_Host(x) => x.get_module(),
             Task::Yum(x)        => x.get_module(),
             Task::Zypper(x)     => x.get_module(),
         };
@@ -159,6 +167,7 @@ impl Task {
             Task::Homebrew(x)   => x.get_name(),
             Task::Move(x)       => x.get_name(),
             Task::Pacman(x)     => x.get_name(),
+            Task::Proxmox_Lxc(x) => x.get_name(),
             Task::Sd_Service(x) => x.get_name(),
             Task::Set(x)        => x.get_name(),
             Task::Command(x)    => x.get_name(),
@@ -167,6 +176,7 @@ impl Task {
             Task::Template(x)   => x.get_name(), 
             Task::Unpack(x)     => x.get_name(),
             Task::User(x)       => x.get_name(),
+            Task::Wait_For_Host(x) => x.get_name(),
             Task::Yum(x)        => x.get_name(),
             Task::Zypper(x)     => x.get_name(),
         };
@@ -193,6 +203,7 @@ impl Task {
             Task::Homebrew(x)   => x.get_with(),
             Task::Move(x)       => x.get_with(),
             Task::Pacman(x)     => x.get_with(),
+            Task::Proxmox_Lxc(x) => x.get_with(),
             Task::Sd_Service(x) => x.get_with(),
             Task::Set(x)        => x.get_with(),
             Task::Command(x)    => x.get_with(),
@@ -201,7 +212,8 @@ impl Task {
             Task::Template(x)   => x.get_with(),
             Task::Unpack(x)     => x.get_with(),
             Task::User(x)       => x.get_with(),
-            Task::Yum(x)        => x.get_with(), 
+            Task::Wait_For_Host(x) => x.get_with(),
+            Task::Yum(x)        => x.get_with(),
             Task::Zypper(x)     => x.get_with(),
         };
     }
@@ -227,6 +239,7 @@ impl Task {
             Task::Homebrew(x)   => x.evaluate(handle, request, tm),
             Task::Move(x)       => x.evaluate(handle, request, tm),
             Task::Pacman(x)     => x.evaluate(handle, request, tm),
+            Task::Proxmox_Lxc(x) => x.evaluate(handle, request, tm),
             Task::Sd_Service(x) => x.evaluate(handle, request, tm),
             Task::Set(x)        => x.evaluate(handle, request, tm),
             Task::Command(x)    => x.evaluate(handle, request, tm),
@@ -235,8 +248,9 @@ impl Task {
             Task::Template(x)   => x.evaluate(handle, request, tm), 
             Task::Unpack(x)     => x.evaluate(handle, request, tm),
             Task::User(x)       => x.evaluate(handle, request, tm),
-            Task::Yum(x)        => x.evaluate(handle, request, tm), 
-            Task::Zypper(x)     => x.evaluate(handle, request, tm), 
+            Task::Wait_For_Host(x) => x.evaluate(handle, request, tm),
+            Task::Yum(x)        => x.evaluate(handle, request, tm),
+            Task::Zypper(x)     => x.evaluate(handle, request, tm),
         };
     }
 

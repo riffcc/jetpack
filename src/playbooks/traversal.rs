@@ -23,6 +23,7 @@ use crate::registry::list::Task;
 use crate::playbooks::task_fsm::fsm_run_task;
 use crate::inventory::inventory::Inventory;
 use crate::inventory::hosts::Host;
+use crate::provisioners::ensure_host_provisioned;
 use crate::util::io::{jet_file_open,directory_as_string};
 use crate::util::yaml::{blend_variables,show_yaml_error_in_context};
 use std::path::PathBuf;
@@ -203,6 +204,138 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
     run_state.processed_role_tasks.write().unwrap().clear();
     run_state.processed_role_handlers.write().unwrap().clear();
     run_state.role_processing_stack.write().unwrap().clear();
+
+    // DNS reconciliation - check for drift between zone file and inventory
+    for host_arc in hosts.iter() {
+        let (host_name, host_vars, provision_config) = {
+            let host = host_arc.read().unwrap();
+            (host.name.clone(), host.get_variables(), host.get_provision().cloned())
+        };
+
+        // Parse dns config from host variables
+        let dns_key = serde_yaml::Value::String("dns".to_string());
+        if let Some(dns_config) = host_vars.get(&dns_key)
+            .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok())
+        {
+            // Look up IP from zone file
+            if let Ok(Some(zone_ip)) = dns_config.lookup_ip(&host_name) {
+                if dns_config.is_dns_authoritative() {
+                    // DNS is source of truth - set jet_ssh_hostname from zone
+                    let mut host = host_arc.write().unwrap();
+                    let mut vars = host.get_variables();
+                    let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
+                    let current_ip = vars.get(&key).and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                    if current_ip.as_ref() != Some(&zone_ip) {
+                        vars.insert(key, serde_yaml::Value::String(zone_ip.clone()));
+                        host.set_variables(vars);
+                        eprintln!("  → DNS: {} IP from zone: {}", host_name, zone_ip);
+                    }
+
+                    // TODO: Check if Proxmox container IP differs and update if needed
+                } else {
+                    // Inventory is source of truth - update zone if needed
+                    // Get IP from provision config or existing variables
+                    let inventory_ip = provision_config.as_ref()
+                        .and_then(|cfg| crate::provisioners::get_provisioner(&cfg.provision_type).ok())
+                        .and_then(|p| {
+                            let cfg = provision_config.as_ref().unwrap();
+                            p.get_ip(cfg, &host_name, &run_state.inventory).ok().flatten()
+                        })
+                        .or_else(|| {
+                            host_vars.get(&serde_yaml::Value::String("jet_ssh_hostname".to_string()))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        });
+
+                    if let Some(inv_ip) = inventory_ip {
+                        if inv_ip != zone_ip {
+                            // Drift detected - update zone file
+                            match crate::dns::add_host_record(&dns_config, &host_name, &inv_ip) {
+                                Ok(true) => eprintln!("  → DNS: updated {} {} → {}", host_name, zone_ip, inv_ip),
+                                Ok(false) => {}
+                                Err(e) => eprintln!("  → DNS: warning: {}", e),
+                            }
+                        }
+                    }
+                }
+            } else if !dns_config.is_dns_authoritative() {
+                // No zone record exists - create one from inventory
+                let inventory_ip = provision_config.as_ref()
+                    .and_then(|cfg| crate::provisioners::get_provisioner(&cfg.provision_type).ok())
+                    .and_then(|p| {
+                        let cfg = provision_config.as_ref().unwrap();
+                        p.get_ip(cfg, &host_name, &run_state.inventory).ok().flatten()
+                    });
+
+                if let Some(ip) = inventory_ip {
+                    match crate::dns::add_host_record(&dns_config, &host_name, &ip) {
+                        Ok(true) => eprintln!("  → DNS: added {} → {}", host_name, ip),
+                        Ok(false) => {}
+                        Err(e) => eprintln!("  → DNS: warning: {}", e),
+                    }
+                }
+            }
+        }
+    }
+
+    // Provision hosts that need it before running any tasks
+    for host_arc in hosts.iter() {
+        let (host_name, needs_provision, provision_config, host_vars) = {
+            let host = host_arc.read().unwrap();
+            (
+                host.name.clone(),
+                host.needs_provisioning(),
+                host.get_provision().cloned(),
+                host.get_variables()
+            )
+        };
+
+        if needs_provision {
+            if let Some(ref config) = provision_config {
+                // Parse dns config from host variables (includes group_vars)
+                let dns_key = serde_yaml::Value::String("dns".to_string());
+                let dns_config = host_vars.get(&dns_key)
+                    .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
+
+                match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref()) {
+                    Ok(_result) => {
+                        // Get IP from provisioner and set host variables
+                        let ip = crate::provisioners::get_provisioner(&config.provision_type)
+                            .ok()
+                            .and_then(|p| p.get_ip(config, &host_name, &run_state.inventory).ok().flatten());
+
+                        let mut host = host_arc.write().unwrap();
+                        let mut vars = host.get_variables();
+                        let mut changed = false;
+
+                        if let Some(ref ip_addr) = ip {
+                            let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
+                            if !vars.contains_key(&key) {
+                                vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
+                                changed = true;
+                            }
+                        }
+
+                        if let Some(ref ssh_user) = config.ssh_user {
+                            let key = serde_yaml::Value::String("jet_ssh_user".to_string());
+                            if !vars.contains_key(&key) {
+                                vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
+                                changed = true;
+                            }
+                        }
+
+                        if changed {
+                            host.set_variables(vars);
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to provision host '{}': {}", host_name, e));
+                    }
+                }
+            }
+        }
+    }
 
     // handle role tasks
     if play.roles.is_some() {

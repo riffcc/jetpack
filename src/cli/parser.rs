@@ -594,9 +594,7 @@ impl CliParser  {
     fn append_inventory(&mut self, value: &String) -> Result<(), String> {
 
         self.inventory_set = true;
-        if self.mode == CLI_MODE_LOCAL || self.mode == CLI_MODE_CHECK_LOCAL {
-            return Err(format!("--inventory cannot be specified for local modes"));
-        }
+        // Allow inventory for local modes - useful for getting group_vars/host_vars
 
         match parse_paths(&String::from("-i/--inventory"),value) {
             Ok(paths)  =>  { 

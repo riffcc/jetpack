@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 use crate::util::yaml::blend_variables;
+use crate::provisioners::ProvisionConfig;
 use std::sync::Arc;
 use crate::inventory::groups::Group;
 use std::sync::RwLock;
@@ -45,7 +46,8 @@ pub struct Host {
     checksum_cache_task_id : usize,
     facts                  : serde_yaml::Value,
     pub package_preference : Option<PackagePreference>,
-    notified_handlers      : HashMap<usize, HashSet<String>>
+    notified_handlers      : HashMap<usize, HashSet<String>>,
+    pub provision          : Option<ProvisionConfig>,
 }
 
 impl Host {
@@ -60,8 +62,21 @@ impl Host {
             checksum_cache_task_id: 0,
             facts: serde_yaml::Value::from(serde_yaml::Mapping::new()),
             notified_handlers: HashMap::new(),
-            package_preference: None
+            package_preference: None,
+            provision: None,
         }
+    }
+
+    pub fn set_provision(&mut self, config: ProvisionConfig) {
+        self.provision = Some(config);
+    }
+
+    pub fn get_provision(&self) -> Option<&ProvisionConfig> {
+        self.provision.as_ref()
+    }
+
+    pub fn needs_provisioning(&self) -> bool {
+        self.provision.is_some()
     }
 
     pub fn notify(&mut self, play_number: usize, signal: &String) {
@@ -194,10 +209,24 @@ impl Host {
         let mine = serde_yaml::Value::from(self.get_variables());
         blend_variables(&mut blended, mine);
         blend_variables(&mut blended, self.facts.clone());
-        return match blended {
+
+        // Add magic variables
+        let mut result = match blended {
             serde_yaml::Value::Mapping(x) => x,
             _ => panic!("get_blended_variables produced a non-mapping (1)")
-        }
+        };
+        // Full inventory hostname
+        result.insert(
+            serde_yaml::Value::String("jet_hostname".to_string()),
+            serde_yaml::Value::String(self.name.clone())
+        );
+        // Short hostname (first part before any dot)
+        let short_name = self.name.split('.').next().unwrap_or(&self.name).to_string();
+        result.insert(
+            serde_yaml::Value::String("jet_hostname_short".to_string()),
+            serde_yaml::Value::String(short_name)
+        );
+        return result;
     }
 
     pub fn update_facts(&mut self, mapping: &Arc<RwLock<serde_yaml::Mapping>>) {

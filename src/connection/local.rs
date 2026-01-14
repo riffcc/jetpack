@@ -58,8 +58,19 @@ impl LocalFactory {
     }
 }
 impl ConnectionFactory for LocalFactory {
-    fn get_connection(&self, _context: &Arc<RwLock<PlaybookContext>>, _host: &Arc<RwLock<Host>>) -> Result<Arc<Mutex<dyn Connection>>,String> {
+    fn get_connection(&self, _context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) -> Result<Arc<Mutex<dyn Connection>>,String> {
         // rather than producing new connections, this always returns a clone of the already established local connection from the constructor
+        // In local mode, all hosts are actually localhost, so copy the OS type from localhost to the target host
+        {
+            let localhost = self.inventory.read().expect("inventory read").get_host(&String::from("localhost"));
+            let localhost_os = localhost.read().expect("localhost read").os_type;
+            if let Some(os_type) = localhost_os {
+                let mut host_write = host.write().expect("host write");
+                if host_write.os_type.is_none() {
+                    host_write.os_type = Some(os_type);
+                }
+            }
+        }
         let conn : Arc<Mutex<dyn Connection>> = Arc::clone(&self.local_connection);
         return Ok(conn);
     }

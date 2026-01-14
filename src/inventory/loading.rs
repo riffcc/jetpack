@@ -20,6 +20,7 @@ use serde::Deserialize;
 use crate::util::io::{path_walk,jet_file_open,path_basename_as_string,is_executable};
 use crate::util::yaml::show_yaml_error_in_context;
 use crate::inventory::inventory::Inventory;
+use crate::provisioners::ProvisionConfig;
 use std::sync::Arc;
 use std::sync::RwLock;
 use serde_json;
@@ -213,34 +214,53 @@ fn load_vars_directory(inventory: &Arc<RwLock<Inventory>>, path: &Path, is_group
             }
             false => {
                 let host = inv.get_host(&effective_name);
-                
-                // First, collect all group_vars for this host
-                let mut merged_vars = serde_yaml::Mapping::new();
-                
+
+                // Start with existing host variables (from previous inventory paths)
+                let mut merged_vars = {
+                    let h = host.read().unwrap();
+                    h.get_variables()
+                };
+
                 // Get all groups this host belongs to
                 let host_groups = {
                     let h = host.read().unwrap();
                     h.get_group_names()
                 };
-                
+
                 // Merge group_vars in order (all group first, then more specific groups)
                 for group_name in &host_groups {
                     if let Some(group_arc) = inv.groups.get(group_name) {
                         let group = group_arc.read().unwrap();
                         let group_vars = group.get_variables();
-                        
+
                         // Merge group vars into merged_vars
                         for (k, v) in group_vars.iter() {
                             merged_vars.insert(k.clone(), v.clone());
                         }
                     }
                 }
-                
-                // Finally merge the host-specific vars (they override group vars)
-                for (k, v) in yaml_result.iter() {
-                    merged_vars.insert(k.clone(), v.clone());
+
+                // Check for provision block and extract it specially
+                let provision_key = serde_yaml::Value::String("provision".to_string());
+                if let Some(provision_value) = yaml_result.get(&provision_key) {
+                    // Parse the provision block as ProvisionConfig
+                    match serde_yaml::from_value::<ProvisionConfig>(provision_value.clone()) {
+                        Ok(provision_config) => {
+                            host.write().unwrap().set_provision(provision_config);
+                        }
+                        Err(e) => {
+                            return Err(format!("Failed to parse provision block for host '{}': {}", effective_name, e));
+                        }
+                    }
                 }
-                
+
+                // Merge host-specific vars, excluding the provision block
+                for (k, v) in yaml_result.iter() {
+                    if k != &provision_key {
+                        merged_vars.insert(k.clone(), v.clone());
+                    }
+                }
+
                 // Set the merged variables on the host
                 host.write().unwrap().set_variables(merged_vars);
             }

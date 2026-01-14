@@ -16,10 +16,12 @@
 
 pub mod cli;
 pub mod connection;
+pub mod dns;
 pub mod handle;
 pub mod inventory;
 pub mod modules;
 pub mod playbooks;
+pub mod provisioners;
 pub mod registry;
 pub mod tasks;
 pub mod util;
