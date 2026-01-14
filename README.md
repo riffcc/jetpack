@@ -117,3 +117,17 @@ Every file operation should be a proper method on the Connection trait, not a ba
   - Include cache expiry timestamps
   - Privacy-focused: opt-in only feature to avoid tracking user lookups
 - **GitHub token authentication**: Add optional `github_token` parameter for authenticated requests (5000 req/hour vs 60)
+
+## Roadmap
+
+### Secrets Management
+- **rage/age encryption support**: Integrate [rage](https://github.com/str4d/rage) (Rust implementation of age) for encrypting sensitive values in inventory
+  - Encrypt individual values or entire files
+  - Support age identity files for decryption
+  - Integrate with templating system for transparent decryption
+- **Secrets directory**: Load variables from a separate secrets directory (e.g., `../infra-secrets/`) to cleanly separate sensitive data from version-controlled inventory
+
+### Declarative Infrastructure Provisioning
+- **provision: block in host_vars**: Define infrastructure declaratively in inventory - hosts are created automatically before playbook execution
+- **Provisioner backends**: proxmox_lxc (done), proxmox_vm, docker, libvirt, cloud providers
+- **Auto VMID assignment**: Query cluster for next available ID when vmid not specified
