@@ -268,6 +268,22 @@ impl PlaybookContext {
                 blend_variables(&mut blended, serde_yaml::Value::Mapping(src4a.clone()));
             }
         };
+
+        // Add jet_play_hosts - sorted list of hosts in current play
+        // Access first host with {{ jet_play_hosts.[0] }}, second with {{ jet_play_hosts.[1] }}, etc.
+        let mut play_hosts: Vec<String> = self.targetted_hosts.keys().cloned().collect();
+        play_hosts.sort();
+
+        if let serde_yaml::Value::Mapping(ref mut mapping) = blended {
+            let hosts_seq: Vec<serde_yaml::Value> = play_hosts.iter()
+                .map(|h| serde_yaml::Value::String(h.clone()))
+                .collect();
+            mapping.insert(
+                serde_yaml::Value::String("jet_play_hosts".to_string()),
+                serde_yaml::Value::Sequence(hosts_seq)
+            );
+        }
+
         return blended;
     }
 
