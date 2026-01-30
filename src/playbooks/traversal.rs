@@ -299,6 +299,11 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                     .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
 
                 match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref()) {
+                    Ok(crate::provisioners::ProvisionResult::Destroyed) => {
+                        // Host was destroyed, skip it
+                        eprintln!("  → host destroyed, skipping: {}", host_name);
+                        continue;
+                    }
                     Ok(_result) => {
                         // Get IP from provisioner and set host variables
                         let ip = crate::provisioners::get_provisioner(&config.provision_type)

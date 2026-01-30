@@ -41,6 +41,26 @@ struct LxcListItem {
     name: Option<String>,
 }
 
+/// Authentication method for Proxmox API
+enum ProxmoxAuth {
+    /// Token-based auth: PVEAPIToken=user@realm!tokenid=secret
+    Token {
+        token_id: String,
+        token_secret: String,
+    },
+    /// Password-based auth: requires ticket + CSRF token
+    Password {
+        ticket: String,
+        csrf_token: String,
+    },
+}
+
+struct ClusterConnection {
+    api_host: String,
+    auth: ProxmoxAuth,
+    node: String,
+}
+
 impl ProxmoxLxcProvisioner {
     pub fn new() -> Self {
         Self
@@ -70,6 +90,7 @@ impl ProxmoxLxcProvisioner {
 
         Ok(ProvisionConfig {
             provision_type: self.template_string(&templar, &config.provision_type, vars)?,
+            state: config.state.clone(),
             cluster: self.template_string(&templar, &config.cluster, vars)?,
             hostname: self.template_option(&templar, &config.hostname, vars)?,
             vmid: self.template_option(&templar, &config.vmid, vars)?,
@@ -129,32 +150,116 @@ impl ProxmoxLxcProvisioner {
             .map(|s| s.to_string())
             .unwrap_or_else(|| config.cluster.clone());
 
-        let api_token_id = vars.get("proxmox_api_token_id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| format!("Cluster host '{}' missing 'proxmox_api_token_id' variable", config.cluster))?;
-
-        let api_token_secret = vars.get("proxmox_api_token_secret")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| format!("Cluster host '{}' missing 'proxmox_api_token_secret' variable", config.cluster))?;
-
         let node = vars.get("proxmox_node")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| config.cluster.clone());
 
-        Ok(ClusterConnection {
-            api_host,
-            api_token_id,
-            api_token_secret,
-            node,
+        // Try token auth first (preferred), fall back to password auth
+        let api_token_id = vars.get("proxmox_api_token_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let api_token_secret = vars.get("proxmox_api_token_secret")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let auth = if let (Some(token_id), Some(token_secret)) = (api_token_id, api_token_secret) {
+            // Use token auth
+            ProxmoxAuth::Token { token_id, token_secret }
+        } else {
+            // Fall back to password auth
+            let username = vars.get("proxmox_api_user")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| format!(
+                    "Cluster host '{}' missing auth credentials. Need either:\n  \
+                     - proxmox_api_token_id + proxmox_api_token_secret (recommended), or\n  \
+                     - proxmox_api_user + proxmox_api_password",
+                    config.cluster
+                ))?;
+
+            let password = vars.get("proxmox_api_password")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| format!(
+                    "Cluster host '{}' has proxmox_api_user but missing proxmox_api_password",
+                    config.cluster
+                ))?;
+
+            // Get ticket for password auth
+            let (ticket, csrf_token) = self.get_password_ticket(&api_host, &username, &password)?;
+            ProxmoxAuth::Password { ticket, csrf_token }
+        };
+
+        Ok(ClusterConnection { api_host, auth, node })
+    }
+
+    /// Get authentication ticket for password-based auth
+    fn get_password_ticket(&self, api_host: &str, username: &str, password: &str) -> Result<(String, String), String> {
+        let url = format!("https://{}:8006/api2/json/access/ticket", api_host);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+
+        rt.block_on(async {
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+            let mut params = HashMap::new();
+            params.insert("username", username);
+            params.insert("password", password);
+
+            let response = client.post(&url)
+                .form(&params)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to get Proxmox ticket: {}", e))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let text = response.text().await.unwrap_or_default();
+                return Err(format!("Proxmox auth failed ({}): {}", status, text));
+            }
+
+            #[derive(Deserialize)]
+            struct TicketData {
+                ticket: String,
+                #[serde(rename = "CSRFPreventionToken")]
+                csrf_prevention_token: String,
+            }
+
+            #[derive(Deserialize)]
+            struct TicketResponse {
+                data: TicketData,
+            }
+
+            let ticket_response: TicketResponse = response.json()
+                .await
+                .map_err(|e| format!("Failed to parse ticket response: {}", e))?;
+
+            Ok((ticket_response.data.ticket, ticket_response.data.csrf_prevention_token))
         })
     }
 
-    fn get_auth_header(&self, conn: &ClusterConnection) -> String {
-        format!("PVEAPIToken={}={}", conn.api_token_id, conn.api_token_secret)
+    /// Apply authentication headers to a request
+    fn apply_auth(&self, conn: &ClusterConnection, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &conn.auth {
+            ProxmoxAuth::Token { token_id, token_secret } => {
+                builder.header("Authorization", format!("PVEAPIToken={}={}", token_id, token_secret))
+            }
+            ProxmoxAuth::Password { ticket, csrf_token } => {
+                builder
+                    .header("Cookie", format!("PVEAuthCookie={}", ticket))
+                    .header("CSRFPreventionToken", csrf_token)
+            }
+        }
     }
+
 
     fn get_api_url(&self, conn: &ClusterConnection, path: &str) -> String {
         format!("https://{}:8006/api2/json{}", conn.api_host, path)
@@ -175,8 +280,7 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = client.get(&url)
-                .header("Authorization", self.get_auth_header(conn))
+            let response = self.apply_auth(conn, client.get(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to query Proxmox API: {}", e))?;
@@ -220,8 +324,7 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = client.get(&url)
-                .header("Authorization", self.get_auth_header(conn))
+            let response = self.apply_auth(conn, client.get(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to query Proxmox API for next VMID: {}", e))?;
@@ -353,8 +456,7 @@ impl ProxmoxLxcProvisioner {
                 params.insert(key.clone(), value.clone());
             }
 
-            let response = client.post(&url)
-                .header("Authorization", self.get_auth_header(conn))
+            let response = self.apply_auth(conn, client.post(&url))
                 .form(&params)
                 .send()
                 .await
@@ -386,8 +488,7 @@ impl ProxmoxLxcProvisioner {
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
             // Ignore errors - container might already be stopped
-            let _ = client.post(&url)
-                .header("Authorization", self.get_auth_header(conn))
+            let _ = self.apply_auth(conn, client.post(&url))
                 .send()
                 .await;
 
@@ -469,8 +570,7 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = client.post(&url)
-                .header("Authorization", self.get_auth_header(conn))
+            let response = self.apply_auth(conn, client.post(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to start container: {}", e))?;
@@ -503,8 +603,7 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = client.delete(&url)
-                .header("Authorization", self.get_auth_header(conn))
+            let response = self.apply_auth(conn, client.delete(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to delete container: {}", e))?;
@@ -518,13 +617,6 @@ impl ProxmoxLxcProvisioner {
             Ok(())
         })
     }
-}
-
-struct ClusterConnection {
-    api_host: String,
-    api_token_id: String,
-    api_token_secret: String,
-    node: String,
 }
 
 impl Provisioner for ProxmoxLxcProvisioner {
@@ -550,8 +642,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
                         .build()
                         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-                    let response = client.get(&url)
-                        .header("Authorization", self.get_auth_header(&conn))
+                    let response = self.apply_auth(&conn, client.get(&url))
                         .send()
                         .await
                         .map_err(|e| format!("Failed to query Proxmox API: {}", e))?;

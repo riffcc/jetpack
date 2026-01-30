@@ -42,12 +42,21 @@ use std::sync::RwLock;
 use crate::dns::DnsConfig;
 use crate::inventory::inventory::Inventory;
 
+/// Default state for provisioning (present)
+fn default_state() -> String {
+    "present".to_string()
+}
+
 /// Configuration for provisioning a host's underlying infrastructure
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProvisionConfig {
     /// The type of provisioner (e.g., "proxmox_lxc", "proxmox_vm", "docker")
     #[serde(rename = "type")]
     pub provision_type: String,
+
+    /// Desired state: "present" (default) or "absent" (destroy)
+    #[serde(default = "default_state")]
+    pub state: String,
 
     /// Reference to the cluster/hypervisor host in inventory
     pub cluster: String,
@@ -133,6 +142,8 @@ pub enum ProvisionResult {
     Created,
     /// Host was updated (config changed)
     Updated,
+    /// Host was destroyed (state: absent)
+    Destroyed,
 }
 
 /// Wait strategy for SSH connection attempts
@@ -248,12 +259,19 @@ pub fn get_provisioner(provision_type: &str) -> Result<Box<dyn Provisioner>, Str
 
 /// Ensure a host is provisioned before attempting to connect
 /// Also creates DNS records if dns config is present in vars
+/// If state is "absent", destroys the host instead
 pub fn ensure_host_provisioned(
     provision_config: &ProvisionConfig,
     inventory_name: &str,
     inventory: &Arc<RwLock<Inventory>>,
     dns_config: Option<&DnsConfig>,
 ) -> Result<ProvisionResult, String> {
+    // Handle state: absent - destroy instead of provision
+    if provision_config.state == "absent" {
+        destroy_host(provision_config, inventory_name, inventory, dns_config)?;
+        return Ok(ProvisionResult::Destroyed);
+    }
+
     let provisioner = get_provisioner(&provision_config.provision_type)?;
     let result = provisioner.ensure_exists(provision_config, inventory_name, inventory)?;
 
