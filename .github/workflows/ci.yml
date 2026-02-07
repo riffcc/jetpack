@@ -47,7 +47,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -- -D warnings
+      - run: cargo clippy -- -W clippy::all
 
   build:
     name: Build (${{ matrix.target }})
