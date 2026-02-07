@@ -1,7 +1,14 @@
 /src/cli/version.rs
-target
+/target
 
 # AI code helper stuff
 .claude
 .mcp.json
 synthesis
+
+# Generated reports
+tarpaulin-report.html
+*.profraw
+
+# Environment
+.env
