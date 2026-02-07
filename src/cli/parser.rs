@@ -827,6 +827,10 @@ impl CliParser  {
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::Mutex;
+
+    // Env-var-sensitive tests must hold this lock to prevent race conditions
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_cli_mode_from_string() {
@@ -891,13 +895,13 @@ mod tests {
 
     #[test]
     fn test_cli_parser_new_defaults() {
-        // Clear any environment variables that might affect the test
+        let _lock = ENV_LOCK.lock().unwrap();
         env::remove_var("JET_SSH_USER");
         env::remove_var("JET_SSH_PORT");
         env::remove_var("JET_THREADS");
-        
+
         let parser = CliParser::new();
-        
+
         assert!(!parser.needs_help);
         assert!(!parser.needs_version);
         assert_eq!(parser.mode, CLI_MODE_UNSET);
@@ -905,10 +909,7 @@ mod tests {
         assert!(parser.show_groups.is_empty());
         assert!(parser.batch_size.is_none());
         assert_eq!(parser.default_port, 22);
-        // Default should be 20, but might be affected by parallel tests
-        assert!(parser.threads == 20 || parser.threads == 50, 
-                "Expected threads to be 20 (default) or 50 (from parallel test), but got {}", 
-                parser.threads);
+        assert_eq!(parser.threads, 20);
         assert!(!parser.inventory_set);
         assert!(!parser.playbook_set);
         assert_eq!(parser.verbosity, 0);
@@ -923,38 +924,21 @@ mod tests {
 
     #[test]
     fn test_cli_parser_new_with_env_vars() {
-        // Clean up any existing env vars first to avoid interference from other tests
+        let _lock = ENV_LOCK.lock().unwrap();
         env::remove_var("JET_SSH_USER");
         env::remove_var("JET_SSH_PORT");
         env::remove_var("JET_THREADS");
-        
-        // Set environment variables
+
         env::set_var("JET_SSH_USER", "testuser");
         env::set_var("JET_SSH_PORT", "2222");
         env::set_var("JET_THREADS", "50");
-        
+
         let parser = CliParser::new();
-        
-        // For JET_SSH_USER, it should always work
+
         assert_eq!(parser.default_user, "testuser");
-        
-        // For JET_SSH_PORT and JET_THREADS, due to test parallelization issues,
-        // we check if they either got our value or fell back to default
-        if parser.default_port == 2222 {
-            assert_eq!(parser.default_port, 2222);
-        } else {
-            // If another test set it to invalid, it falls back to 22
-            assert_eq!(parser.default_port, 22);
-        }
-        
-        if parser.threads == 50 {
-            assert_eq!(parser.threads, 50);
-        } else {
-            // If another test set it to invalid, it falls back to 20
-            assert_eq!(parser.threads, 20);
-        }
-        
-        // Clean up
+        assert_eq!(parser.default_port, 2222);
+        assert_eq!(parser.threads, 50);
+
         env::remove_var("JET_SSH_USER");
         env::remove_var("JET_SSH_PORT");
         env::remove_var("JET_THREADS");
@@ -962,26 +946,18 @@ mod tests {
 
     #[test]
     fn test_cli_parser_new_with_invalid_env_vars() {
-        // Clean up any existing env vars first
+        let _lock = ENV_LOCK.lock().unwrap();
         env::remove_var("JET_SSH_PORT");
         env::remove_var("JET_THREADS");
-        
-        // Set invalid environment variables
+
         env::set_var("JET_SSH_PORT", "invalid");
         env::set_var("JET_THREADS", "not_a_number");
-        
+
         let parser = CliParser::new();
-        
-        // Should fall back to defaults
+
         assert_eq!(parser.default_port, 22);
-        // When JET_THREADS is set to an invalid value, it should default to 20
-        // However, due to test parallelism, another test might have set a valid value
-        // So we need to check the actual behavior
-        assert!(parser.threads == 20 || parser.threads == 50, 
-                "Expected threads to be 20 (default) or 50 (from another test), but got {}", 
-                parser.threads);
-        
-        // Clean up
+        assert_eq!(parser.threads, 20);
+
         env::remove_var("JET_SSH_PORT");
         env::remove_var("JET_THREADS");
     }
