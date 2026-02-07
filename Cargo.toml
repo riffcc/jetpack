@@ -1,42 +1,43 @@
 [package]
 name = "jetpack"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description="automation platform"
-homepage="https://riff.cc/jetpack"
-documentation="https://docs.riff.cc/jetpack/"
-repository="https://github.com/riffcc/jetpack"
-readme="README.md"
-keywords=["automation","devops","deployment","ssh"]
-include=["src/","version.sh"]
+description = "A fast, modern automation platform"
+homepage = "https://riff.cc/jetpack"
+documentation = "https://docs.riff.cc/jetpack/"
+repository = "https://github.com/riffcc/jetpack"
+readme = "README.md"
+keywords = ["automation", "devops", "deployment", "ssh"]
+categories = ["command-line-utilities", "development-tools"]
+include = ["src/", "version.sh", "LICENSE", "README.md"]
 
 [lib]
 name = "jetpack"
 path = "src/lib.rs"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-once_cell="1.18.0"
-ssh2="0.9.4"
+once_cell = "1.18.0"
+russh = "0.57.0"
+russh-sftp = "2.1.1"
 serde_derive = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml="0.9.25"
-serde_json = {version = "1.0.105", features = ["preserve_order"]} 
-termimad="0.20"
-inline_colorization="0.1.5"
-rayon="1.7.0"
-handlebars="4.3.7"
-sha2="0.10.8"
-guid-create="0.3.1"
-expanduser="1.2.2"
-indexmap = {version = "2.1.0", features = ["serde"]}
-chrono="0.4.31"
-shlex="1.2.0"
-reqwest = { version = "0.12.22", features = ["json"] }
+serde_yaml = "0.9.25"
+serde_json = { version = "1.0.105", features = ["preserve_order"] }
+termimad = "0.20"
+inline_colorization = "0.1.5"
+rayon = "1.7.0"
+handlebars = "4.3.7"
+sha2 = "0.10.8"
+guid-create = "0.3.1"
+expanduser = "1.2.2"
+indexmap = { version = "2.1.0", features = ["serde"] }
+chrono = "0.4.31"
+shlex = "1.2.0"
+reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
 semver = "1.0"
-tokio = { version = "1.47.0", features = ["rt", "macros", "process"] }
+tokio = { version = "1.47.0", features = ["full"] }
+urlencoding = "2.1"
 
 [dev-dependencies]
-tempfile="3.8.0"
+tempfile = "3.8.0"

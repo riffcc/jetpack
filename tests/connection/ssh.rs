@@ -113,7 +113,7 @@ fn test_ssh_connection_new() {
     assert_eq!(conn.port, 22);
     assert_eq!(conn.hostname, "test-server");
     assert_eq!(conn.forward_agent, false);
-    assert!(conn.session.is_none());
+    assert!(!conn.connected);
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn test_ssh_connection_new_with_options() {
     assert_eq!(conn.key, Some("/home/user/.ssh/id_rsa".to_string()));
     assert_eq!(conn.passphrase, Some("key_passphrase".to_string()));
     assert_eq!(conn.key_comment, Some("user@machine".to_string()));
-    assert!(conn.session.is_none());
+    assert!(!conn.connected);
 }
 
 #[test]

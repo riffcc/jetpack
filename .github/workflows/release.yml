@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: jetpack-x86_64-linux
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: jetpack-aarch64-linux
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: jetpack-x86_64-macos
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: jetpack-aarch64-macos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build (native)
+        if: "!matrix.cross"
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cp target/${{ matrix.target }}/release/jetpack ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PRERELEASE=""
+          if [[ "$TAG" == *"-"* ]]; then
+            PRERELEASE="--prerelease"
+          fi
+          gh release create "$TAG" \
+            --title "Jetpack $TAG" \
+            --generate-notes \
+            $PRERELEASE \
+            artifacts/jetpack-x86_64-linux/jetpack-x86_64-linux \
+            artifacts/jetpack-aarch64-linux/jetpack-aarch64-linux \
+            artifacts/jetpack-x86_64-macos/jetpack-x86_64-macos \
+            artifacts/jetpack-aarch64-macos/jetpack-aarch64-macos
