@@ -41,6 +41,7 @@ use crate::modules::control::debug::DebugTask;
 use crate::modules::control::echo::EchoTask;
 use crate::modules::control::fail::FailTask;
 use crate::modules::control::facts::FactsTask;
+use crate::modules::control::self_locate::SelfLocateTask;
 use crate::modules::control::set::SetTask;
 use crate::modules::control::wait_for_host::WaitForHostTask;
 
@@ -58,8 +59,13 @@ use crate::modules::files::unpack::UnpackTask;
 // integrations
 use crate::modules::integrations::github_release::GithubReleaseTask;
 
+// inventory
+use crate::modules::inventory::instantiate::InstantiateTask;
+
 // proxmox
 use crate::modules::proxmox::lxc::ProxmoxLxcTask;
+use crate::modules::proxmox::migrate::ProxmoxMigrateTask;
+use crate::modules::proxmox::node::ProxmoxNodeTask;
 
 // packages
 use crate::modules::packages::apt::AptTask;
@@ -93,10 +99,14 @@ pub enum Task {
     Github_Release(GithubReleaseTask),
     Group(GroupTask),
     Homebrew(HomebrewTask),
+    Instantiate(InstantiateTask),
     Move(MoveTask),
     Pacman(PacmanTask),
     Proxmox_Lxc(ProxmoxLxcTask),
+    Proxmox_Migrate(ProxmoxMigrateTask),
+    Proxmox_Node(ProxmoxNodeTask),
     Sd_Service(SystemdServiceTask),
+    Self_Locate(SelfLocateTask),
     Set(SetTask),
     Shell(ShellTask),
     Stat(StatTask),
@@ -129,10 +139,14 @@ impl Task {
             Task::Github_Release(x) => x.get_module(),
             Task::Group(x)      => x.get_module(),
             Task::Homebrew(x)   => x.get_module(),
+            Task::Instantiate(x) => x.get_module(),
             Task::Move(x)       => x.get_module(),
             Task::Pacman(x)     => x.get_module(),
             Task::Proxmox_Lxc(x) => x.get_module(),
+            Task::Proxmox_Migrate(x) => x.get_module(),
+            Task::Proxmox_Node(x) => x.get_module(),
             Task::Sd_Service(x) => x.get_module(),
+            Task::Self_Locate(x) => x.get_module(),
             Task::Set(x)        => x.get_module(), 
             Task::Command(x)    => x.get_module(),
             Task::Shell(x)      => x.get_module(), 
@@ -165,10 +179,14 @@ impl Task {
             Task::Github_Release(x) => x.get_name(),
             Task::Group(x)      => x.get_name(),
             Task::Homebrew(x)   => x.get_name(),
+            Task::Instantiate(x) => x.get_name(),
             Task::Move(x)       => x.get_name(),
             Task::Pacman(x)     => x.get_name(),
             Task::Proxmox_Lxc(x) => x.get_name(),
+            Task::Proxmox_Migrate(x) => x.get_name(),
+            Task::Proxmox_Node(x) => x.get_name(),
             Task::Sd_Service(x) => x.get_name(),
+            Task::Self_Locate(x) => x.get_name(),
             Task::Set(x)        => x.get_name(),
             Task::Command(x)    => x.get_name(),
             Task::Shell(x)      => x.get_name(), 
@@ -201,10 +219,14 @@ impl Task {
             Task::Github_Release(x) => x.get_with(),
             Task::Group(x)      => x.get_with(),
             Task::Homebrew(x)   => x.get_with(),
+            Task::Instantiate(x) => x.get_with(),
             Task::Move(x)       => x.get_with(),
             Task::Pacman(x)     => x.get_with(),
             Task::Proxmox_Lxc(x) => x.get_with(),
+            Task::Proxmox_Migrate(x) => x.get_with(),
+            Task::Proxmox_Node(x) => x.get_with(),
             Task::Sd_Service(x) => x.get_with(),
+            Task::Self_Locate(x) => x.get_with(),
             Task::Set(x)        => x.get_with(),
             Task::Command(x)    => x.get_with(),
             Task::Shell(x)      => x.get_with(), 
@@ -237,10 +259,14 @@ impl Task {
             Task::Github_Release(x) => x.evaluate(handle, request, tm),
             Task::Group(x)      => x.evaluate(handle, request, tm),
             Task::Homebrew(x)   => x.evaluate(handle, request, tm),
+            Task::Instantiate(x) => x.evaluate(handle, request, tm),
             Task::Move(x)       => x.evaluate(handle, request, tm),
             Task::Pacman(x)     => x.evaluate(handle, request, tm),
             Task::Proxmox_Lxc(x) => x.evaluate(handle, request, tm),
+            Task::Proxmox_Migrate(x) => x.evaluate(handle, request, tm),
+            Task::Proxmox_Node(x) => x.evaluate(handle, request, tm),
             Task::Sd_Service(x) => x.evaluate(handle, request, tm),
+            Task::Self_Locate(x) => x.evaluate(handle, request, tm),
             Task::Set(x)        => x.evaluate(handle, request, tm),
             Task::Command(x)    => x.evaluate(handle, request, tm),
             Task::Shell(x)      => x.evaluate(handle, request, tm), 

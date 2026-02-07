@@ -1,8 +1,9 @@
 
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use crate::inventory::hosts::Host;
 use crate::inventory::groups::Group;
+use crate::inventory::dependencies::VirtualizationType;
 use std::sync::RwLock;
 
 pub struct Inventory {
@@ -136,5 +137,142 @@ impl Inventory {
         }
     }
 
+    // ==============================================================================================================
+    // DEPENDENCY GRAPH QUERIES
+    // ==============================================================================================================
+
+    /// Get all hosts that run on a specific Proxmox node
+    pub fn get_hosts_on_node(&self, node_name: &str) -> Vec<Arc<RwLock<Host>>> {
+        self.hosts.values()
+            .filter(|host| {
+                host.read().ok()
+                    .and_then(|h| h.get_runs_on())
+                    .map(|n| n == node_name)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get all hosts in a specific compute cluster
+    pub fn get_hosts_in_cluster(&self, cluster_name: &str) -> Vec<Arc<RwLock<Host>>> {
+        self.hosts.values()
+            .filter(|host| {
+                host.read().ok()
+                    .and_then(|h| h.get_compute_cluster())
+                    .map(|c| c == cluster_name)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get all hosts of a specific virtualization type
+    pub fn get_hosts_by_virtualization(&self, vtype: VirtualizationType) -> Vec<Arc<RwLock<Host>>> {
+        self.hosts.values()
+            .filter(|host| {
+                host.read().ok()
+                    .map(|h| h.get_virtualization() == vtype)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get all hosts that depend on a specific service
+    pub fn get_hosts_depending_on(&self, service: &str) -> Vec<Arc<RwLock<Host>>> {
+        self.hosts.values()
+            .filter(|host| {
+                host.read().ok()
+                    .map(|h| h.get_depends_on().contains(&service.to_string()))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get all hosts that provide a specific service
+    pub fn get_hosts_providing(&self, service: &str) -> Vec<Arc<RwLock<Host>>> {
+        self.hosts.values()
+            .filter(|host| {
+                host.read().ok()
+                    .map(|h| h.get_provides().contains(&service.to_string()))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get all critical infrastructure hosts
+    pub fn get_critical_hosts(&self) -> Vec<Arc<RwLock<Host>>> {
+        self.hosts.values()
+            .filter(|host| {
+                host.read().ok()
+                    .map(|h| h.is_critical())
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get all unique compute nodes in the inventory
+    pub fn get_compute_nodes(&self) -> Vec<String> {
+        let mut nodes: Vec<String> = self.hosts.values()
+            .filter_map(|host| {
+                host.read().ok().and_then(|h| h.get_runs_on())
+            })
+            .collect();
+        nodes.sort();
+        nodes.dedup();
+        nodes
+    }
+
+    /// Get all unique compute clusters in the inventory
+    pub fn get_compute_clusters(&self) -> Vec<String> {
+        let mut clusters: Vec<String> = self.hosts.values()
+            .filter_map(|host| {
+                host.read().ok().and_then(|h| h.get_compute_cluster())
+            })
+            .collect();
+        clusters.sort();
+        clusters.dedup();
+        clusters
+    }
+
+    /// Check if patching a node would break any critical dependencies
+    /// Returns list of hosts that depend on services provided by hosts on this node
+    pub fn get_patch_blockers(&self, node_name: &str) -> Vec<(Arc<RwLock<Host>>, String)> {
+        let mut blockers = Vec::new();
+
+        // Get all hosts on this node
+        let hosts_on_node = self.get_hosts_on_node(node_name);
+
+        // Collect all services provided by hosts on this node
+        let mut provided_services: Vec<String> = Vec::new();
+        for host in &hosts_on_node {
+            if let Ok(h) = host.read() {
+                provided_services.extend(h.get_provides());
+            }
+        }
+
+        // Find hosts NOT on this node that depend on these services
+        for (hostname, host) in &self.hosts {
+            if let Ok(h) = host.read() {
+                // Skip hosts on the same node (they'll be down anyway)
+                if h.get_runs_on().as_deref() == Some(node_name) {
+                    continue;
+                }
+
+                // Check if this host depends on any service provided by the node
+                for dep in h.get_depends_on() {
+                    if provided_services.contains(&dep) {
+                        blockers.push((Arc::clone(host), dep));
+                    }
+                }
+            }
+        }
+
+        blockers
+    }
 
 }

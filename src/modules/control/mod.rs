@@ -21,5 +21,6 @@ pub mod debug;
 pub mod echo;
 pub mod fail;
 pub mod facts;
+pub mod self_locate;
 pub mod set;
 pub mod wait_for_host;

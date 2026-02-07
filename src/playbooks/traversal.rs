@@ -17,13 +17,13 @@
 use crate::playbooks::language::Play;
 use crate::playbooks::visitor::PlaybookVisitor;
 use crate::playbooks::context::PlaybookContext;
-use crate::playbooks::language::{Role,RoleInvocation};
+use crate::playbooks::language::{Role,RoleInvocation,InstantiateSpec};
 use crate::connection::factory::ConnectionFactory;
 use crate::registry::list::Task;
 use crate::playbooks::task_fsm::fsm_run_task;
 use crate::inventory::inventory::Inventory;
 use crate::inventory::hosts::Host;
-use crate::provisioners::ensure_host_provisioned;
+use crate::provisioners::{ensure_host_provisioned, ProvisionConfig};
 use crate::util::io::{jet_file_open,directory_as_string};
 use crate::util::yaml::{blend_variables,show_yaml_error_in_context};
 use std::path::PathBuf;
@@ -31,6 +31,7 @@ use std::collections::{HashMap,HashSet};
 use std::sync::{Arc,RwLock};
 use std::path::Path;
 use std::env;
+use std::fs;
 
 // this module contains the start of everything related to playbook evaluation
 
@@ -146,6 +147,11 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
         ctx.unset_role();
     }
     run_state.visitor.read().unwrap().on_play_start(&run_state.context);
+
+    // Handle instantiate block - auto-generate hosts before group validation
+    if let Some(ref spec) = play.instantiate {
+        handle_instantiate(run_state, play, spec)?;
+    }
 
     // make sure all host and groups used to limit exists
     validate_limit_groups(run_state, play)?;
@@ -301,10 +307,21 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                 match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref()) {
                     Ok(crate::provisioners::ProvisionResult::Destroyed) => {
                         // Host was destroyed, skip it
-                        eprintln!("  → host destroyed, skipping: {}", host_name);
+                        run_state.visitor.read().unwrap().on_host_provisioned(
+                            &run_state.context,
+                            &host_name,
+                            &crate::provisioners::ProvisionResult::Destroyed
+                        );
                         continue;
                     }
-                    Ok(_result) => {
+                    Ok(result) => {
+                        // Track provision result in visitor/context
+                        run_state.visitor.read().unwrap().on_host_provisioned(
+                            &run_state.context,
+                            &host_name,
+                            &result
+                        );
+
                         // Get IP from provisioner and set host variables
                         let ip = crate::provisioners::get_provisioner(&config.provision_type)
                             .ok()
@@ -694,6 +711,267 @@ fn get_play_hosts(run_state: &Arc<RunState>,play: &Play) -> Vec<Arc<RwLock<Host>
     }
 
     return results.iter().map(|(_k,v)| Arc::clone(&v)).collect();
+}
+
+/// Handle play-level instantiate block
+/// Creates host_vars files and updates inventory before group validation
+fn handle_instantiate(run_state: &Arc<RunState>, play: &Play, spec: &InstantiateSpec) -> Result<(), String> {
+    let inventory_path = PathBuf::from(&spec.inventory_path);
+    let host_vars_dir = inventory_path.join("host_vars");
+    let groups_dir = inventory_path.join("groups");
+
+    // Ensure directories exist
+    fs::create_dir_all(&host_vars_dir)
+        .map_err(|e| format!("Failed to create host_vars dir: {}", e))?;
+    fs::create_dir_all(&groups_dir)
+        .map_err(|e| format!("Failed to create groups dir: {}", e))?;
+
+    // Expand pattern to hostnames
+    let hostnames = expand_instantiate_pattern(&spec.pattern)?;
+    if spec.nodes.is_empty() {
+        return Err("instantiate: nodes list cannot be empty".to_string());
+    }
+
+    let is_vm = spec.provision.provision_type == "proxmox_vm";
+    eprintln!("  → instantiate: generating {} hosts", hostnames.len());
+
+    // Create host_vars for each host
+    for (i, hostname) in hostnames.iter().enumerate() {
+        let node = &spec.nodes[i % spec.nodes.len()];
+        let host_file = host_vars_dir.join(hostname);
+
+        // Build provision block
+        let mut provision = serde_yaml::Mapping::new();
+        provision.insert(
+            serde_yaml::Value::String("type".to_string()),
+            serde_yaml::Value::String(spec.provision.provision_type.clone())
+        );
+        provision.insert(
+            serde_yaml::Value::String("cluster".to_string()),
+            serde_yaml::Value::String(spec.provision.cluster.clone())
+        );
+        provision.insert(
+            serde_yaml::Value::String("node".to_string()),
+            serde_yaml::Value::String(node.clone())
+        );
+
+        // VMID only if specified
+        if let Some(vmid_start) = spec.vmid_start {
+            provision.insert(
+                serde_yaml::Value::String("vmid".to_string()),
+                serde_yaml::Value::String((vmid_start + i as u64).to_string())
+            );
+        }
+
+        // Hostname
+        let short_hostname = hostname.split('.').next().unwrap_or(hostname);
+        provision.insert(
+            serde_yaml::Value::String("hostname".to_string()),
+            serde_yaml::Value::String(short_hostname.to_string())
+        );
+
+        // Network config
+        if let Some(ref ip_template) = spec.ip_template {
+            let ip_num = spec.ip_start.unwrap_or(1) + i as u64;
+            let ip = ip_template.replace("{}", &ip_num.to_string());
+
+            if is_vm {
+                // VMs: net0 is bridge config, IP stored separately
+                provision.insert(
+                    serde_yaml::Value::String("net0".to_string()),
+                    serde_yaml::Value::String("virtio,bridge=vmbr0".to_string())
+                );
+                provision.insert(
+                    serde_yaml::Value::String("ip".to_string()),
+                    serde_yaml::Value::String(ip)
+                );
+                if let Some(ref gw) = spec.gateway {
+                    provision.insert(
+                        serde_yaml::Value::String("gateway".to_string()),
+                        serde_yaml::Value::String(gw.clone())
+                    );
+                }
+            } else {
+                // LXC: IP baked into net0
+                let mut net0 = format!("name=eth0,bridge=vmbr0,ip={}", ip);
+                if let Some(ref gw) = spec.gateway {
+                    net0.push_str(&format!(",gw={}", gw));
+                }
+                provision.insert(
+                    serde_yaml::Value::String("net0".to_string()),
+                    serde_yaml::Value::String(net0)
+                );
+            }
+        } else if is_vm {
+            provision.insert(
+                serde_yaml::Value::String("net0".to_string()),
+                serde_yaml::Value::String("virtio,bridge=vmbr0".to_string())
+            );
+        }
+
+        // VM boot order: disk first, then PXE (prevents bootloop after install)
+        if is_vm && !spec.provision.extra.contains_key("boot") {
+            provision.insert(
+                serde_yaml::Value::String("boot".to_string()),
+                serde_yaml::Value::String("order=scsi0;net0".to_string())
+            );
+        }
+
+        // Optional fields
+        if let Some(ref v) = spec.provision.memory {
+            provision.insert(serde_yaml::Value::String("memory".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.cores {
+            provision.insert(serde_yaml::Value::String("cores".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.storage {
+            provision.insert(serde_yaml::Value::String("storage".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.rootfs_size {
+            provision.insert(serde_yaml::Value::String("rootfs_size".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.ostemplate {
+            provision.insert(serde_yaml::Value::String("ostemplate".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.unprivileged {
+            provision.insert(serde_yaml::Value::String("unprivileged".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.start_on_create {
+            provision.insert(serde_yaml::Value::String("start_on_create".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.features {
+            provision.insert(serde_yaml::Value::String("features".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.authorized_keys {
+            provision.insert(serde_yaml::Value::String("authorized_keys".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.ssh_user {
+            provision.insert(serde_yaml::Value::String("ssh_user".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        if let Some(ref v) = spec.provision.nameserver {
+            provision.insert(serde_yaml::Value::String("nameserver".to_string()), serde_yaml::Value::String(v.clone()));
+        }
+        for (k, v) in &spec.provision.extra {
+            provision.insert(serde_yaml::Value::String(k.clone()), serde_yaml::Value::String(v.clone()));
+        }
+
+        // Build host_vars doc
+        let mut host_vars = serde_yaml::Mapping::new();
+        host_vars.insert(
+            serde_yaml::Value::String("provision".to_string()),
+            serde_yaml::Value::Mapping(provision.clone())
+        );
+
+        // Merge with existing if present (LWW)
+        if host_file.exists() {
+            if let Ok(existing) = fs::read_to_string(&host_file) {
+                if let Ok(existing_doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&existing) {
+                    for (key, value) in existing_doc {
+                        if key.as_str() != Some("provision") {
+                            host_vars.insert(key, value);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Write host_vars file
+        let yaml_str = format!(
+            "# Auto-generated by instantiate\n# Node: {}\n\n{}",
+            node,
+            serde_yaml::to_string(&serde_yaml::Value::Mapping(host_vars)).unwrap_or_default()
+        );
+        fs::write(&host_file, &yaml_str)
+            .map_err(|e| format!("Failed to write host_vars for {}: {}", hostname, e))?;
+
+        // Add to in-memory inventory
+        let mut inv = run_state.inventory.write().unwrap();
+        for group in &play.groups {
+            inv.store_host(group, hostname);
+        }
+
+        // Load the host_vars we just wrote
+        drop(inv);
+        if let Ok(vars) = serde_yaml::from_str::<serde_yaml::Mapping>(&yaml_str) {
+            let mut inv = run_state.inventory.write().unwrap();
+            if inv.has_host(&hostname.to_string()) {
+                let host = inv.get_host(&hostname.to_string());
+                let mut h = host.write().unwrap();
+                h.set_variables(vars);
+                // Parse provision config
+                if let Ok(prov) = serde_yaml::from_value::<ProvisionConfig>(
+                    serde_yaml::Value::Mapping(provision)
+                ) {
+                    h.set_provision(prov);
+                }
+            }
+        }
+    }
+
+    // Update group files
+    for group in &play.groups {
+        let group_file = groups_dir.join(group);
+        let mut hosts: Vec<String> = if group_file.exists() {
+            if let Ok(content) = fs::read_to_string(&group_file) {
+                if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content) {
+                    if let Some(serde_yaml::Value::Sequence(seq)) = doc.get(&serde_yaml::Value::String("hosts".to_string())) {
+                        seq.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                    } else { Vec::new() }
+                } else { Vec::new() }
+            } else { Vec::new() }
+        } else { Vec::new() };
+
+        for hostname in &hostnames {
+            if !hosts.contains(hostname) {
+                hosts.push(hostname.clone());
+            }
+        }
+        hosts.sort();
+
+        let mut group_doc = serde_yaml::Mapping::new();
+        group_doc.insert(
+            serde_yaml::Value::String("hosts".to_string()),
+            serde_yaml::Value::Sequence(hosts.iter().map(|h| serde_yaml::Value::String(h.clone())).collect())
+        );
+        let yaml_str = serde_yaml::to_string(&serde_yaml::Value::Mapping(group_doc)).unwrap_or_default();
+        fs::write(&group_file, yaml_str)
+            .map_err(|e| format!("Failed to write group {}: {}", group, e))?;
+    }
+
+    eprintln!("  → instantiate: created {} host_vars files", hostnames.len());
+    Ok(())
+}
+
+/// Expand pattern like "fleet-{01..10}.domain" to list of hostnames
+fn expand_instantiate_pattern(pattern: &str) -> Result<Vec<String>, String> {
+    if let Some(start_brace) = pattern.find('{') {
+        if let Some(end_brace) = pattern.find('}') {
+            let prefix = &pattern[..start_brace];
+            let suffix = &pattern[end_brace + 1..];
+            let range_part = &pattern[start_brace + 1..end_brace];
+
+            if range_part.contains("..") {
+                let parts: Vec<&str> = range_part.split("..").collect();
+                if parts.len() != 2 {
+                    return Err(format!("Invalid range pattern: {}", range_part));
+                }
+                let start: u64 = parts[0].parse().map_err(|_| format!("Invalid range start: {}", parts[0]))?;
+                let end: u64 = parts[1].parse().map_err(|_| format!("Invalid range end: {}", parts[1]))?;
+                let width = parts[0].len();
+
+                return Ok((start..=end)
+                    .map(|i| format!("{}{:0width$}{}", prefix, i, suffix, width = width))
+                    .collect());
+            }
+
+            if range_part.contains(',') {
+                return Ok(range_part.split(',')
+                    .map(|item| format!("{}{}{}", prefix, item.trim(), suffix))
+                    .collect());
+            }
+        }
+    }
+    Ok(vec![pattern.to_string()])
 }
 
 fn validate_limit_groups(run_state: &Arc<RunState>, _play: &Play) -> Result<(), String> {

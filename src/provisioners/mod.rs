@@ -34,6 +34,7 @@
 //! ```
 
 pub mod proxmox_lxc;
+pub mod proxmox_vm;
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -253,6 +254,7 @@ pub trait Provisioner: Send + Sync {
 pub fn get_provisioner(provision_type: &str) -> Result<Box<dyn Provisioner>, String> {
     match provision_type {
         "proxmox_lxc" => Ok(Box::new(proxmox_lxc::ProxmoxLxcProvisioner::new())),
+        "proxmox_vm" => Ok(Box::new(proxmox_vm::ProxmoxVmProvisioner::new())),
         _ => Err(format!("Unknown provisioner type: {}", provision_type))
     }
 }

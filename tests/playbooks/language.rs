@@ -17,6 +17,7 @@ fn test_play_debug() {
         tasks: None,
         handlers: None,
         batch_size: None,
+        instantiate: None,
     };
     
     let debug_str = format!("{:?}", play);
@@ -53,8 +54,9 @@ fn test_play_with_options() {
         tasks: None,
         handlers: None,
         batch_size: Some(10),
+        instantiate: None,
     };
-    
+
     assert_eq!(play.name, "Complex Play");
     assert_eq!(play.groups.len(), 1);
     assert!(play.roles.is_some());
@@ -70,6 +72,7 @@ fn test_role_debug() {
         defaults: None,
         tasks: Some(vec!["task1.yml".to_string(), "task2.yml".to_string()]),
         handlers: Some(vec!["handler1.yml".to_string()]),
+        dependencies: None,
     };
     
     let debug_str = format!("{:?}", role);
@@ -85,6 +88,7 @@ fn test_role_clone() {
         defaults: None,
         tasks: Some(vec!["task.yml".to_string()]),
         handlers: None,
+        dependencies: None,
     };
     
     let cloned = role.clone();

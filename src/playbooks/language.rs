@@ -16,6 +16,7 @@
 
 use serde::{Deserialize};
 use crate::registry::list::Task;
+use std::collections::HashMap;
 
 // all the playbook language YAML structures!
 
@@ -35,6 +36,51 @@ pub struct Play {
     pub tasks : Option<Vec<Task>>,
     pub handlers : Option<Vec<Task>>,
     pub batch_size : Option<usize>,
+    /// Auto-generate hosts in this group before running
+    pub instantiate: Option<InstantiateSpec>,
+}
+
+/// Specification for auto-generating hosts in a group
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct InstantiateSpec {
+    /// Path to inventory directory (where host_vars/ and groups/ live)
+    pub inventory_path: String,
+    /// Hostname pattern to expand (e.g., "fleet-{01..10}.lon.riff.cc")
+    pub pattern: String,
+    /// Nodes to distribute across (round-robin)
+    pub nodes: Vec<String>,
+    /// Provision configuration template
+    pub provision: ProvisionSpec,
+    /// Starting VMID (optional - Proxmox auto-assigns if not specified)
+    pub vmid_start: Option<u64>,
+    /// IP address template with {} placeholder (e.g., "10.7.1.{}/24")
+    pub ip_template: Option<String>,
+    /// Starting IP number
+    pub ip_start: Option<u64>,
+    /// Gateway for static IPs
+    pub gateway: Option<String>,
+}
+
+/// Provision configuration for instantiate
+#[derive(Debug, Deserialize, Clone)]
+pub struct ProvisionSpec {
+    #[serde(rename = "type")]
+    pub provision_type: String,
+    pub cluster: String,
+    pub memory: Option<String>,
+    pub cores: Option<String>,
+    pub ostemplate: Option<String>,
+    pub storage: Option<String>,
+    pub rootfs_size: Option<String>,
+    pub unprivileged: Option<String>,
+    pub start_on_create: Option<String>,
+    pub features: Option<String>,
+    pub authorized_keys: Option<String>,
+    pub ssh_user: Option<String>,
+    pub nameserver: Option<String>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, String>,
 }
 
 #[derive(Debug,Deserialize,Clone)]

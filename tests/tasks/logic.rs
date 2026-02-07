@@ -28,11 +28,12 @@ fn test_items_input_enum() {
 fn test_pre_logic_input_struct() {
     let pre_logic = PreLogicInput {
         condition: Some("test_condition".to_string()),
-        subscribe: Some("test_event".to_string()), 
+        subscribe: Some("test_event".to_string()),
         sudo: Some("root".to_string()),
         items: Some(ItemsInput::ItemsList(vec!["item1".to_string()])),
         tags: Some(vec!["tag1".to_string()]),
         delegate_to: Some("host1".to_string()),
+        skip_if_exists: None,
     };
     
     assert_eq!(pre_logic.condition, Some("test_condition".to_string()));
@@ -66,6 +67,7 @@ fn test_pre_logic_evaluated_struct() {
         sudo: Some("evaluated_user".to_string()),
         items: Some(ItemsInput::ItemsString("items_var".to_string())),
         tags: Some(vec!["tag1".to_string(), "tag2".to_string()]),
+        skip_if_exists: None,
     };
     
     assert_eq!(evaluated.condition, Some("evaluated_condition".to_string()));

@@ -247,6 +247,32 @@ impl PlaybookVisitor {
         println!("> batch {}/{}, {} hosts", batch_num+1, batch_count, batch_size);
     }
 
+    pub fn on_host_provisioned(&self, context: &Arc<RwLock<PlaybookContext>>, host_name: &str, result: &crate::provisioners::ProvisionResult) {
+        let mut ctx = context.write().unwrap();
+        match result {
+            crate::provisioners::ProvisionResult::Created => {
+                println!("{color_blue}✓ {} => provisioned{color_reset}", host_name);
+                ctx.increment_attempted_for_host(&host_name.to_string());
+                ctx.increment_created_for_host(&host_name.to_string());
+            }
+            crate::provisioners::ProvisionResult::Updated => {
+                println!("{color_blue}✓ {} => provision updated{color_reset}", host_name);
+                ctx.increment_attempted_for_host(&host_name.to_string());
+                ctx.increment_modified_for_host(&host_name.to_string());
+            }
+            crate::provisioners::ProvisionResult::AlreadyExists => {
+                // Already exists counts as matched
+                ctx.increment_attempted_for_host(&host_name.to_string());
+                ctx.increment_matched_for_host(&host_name.to_string());
+            }
+            crate::provisioners::ProvisionResult::Destroyed => {
+                println!("{color_blue}✓ {} => destroyed{color_reset}", host_name);
+                ctx.increment_attempted_for_host(&host_name.to_string());
+                ctx.increment_removed_for_host(&host_name.to_string());
+            }
+        }
+    }
+
     pub fn on_host_task_start(&self, _context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) {
         let host2 = host.read().unwrap();
         println!("… {} => running", host2.name);

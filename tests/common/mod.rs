@@ -8,7 +8,7 @@ use jetpack::cli::parser::CliParser;
 use jetpack::connection::factory::ConnectionFactory;
 use jetpack::connection::local::LocalFactory;
 use std::sync::{Arc, RwLock};
-use std::path::PathBuf;
+use std::collections::HashSet;
 
 pub fn create_test_run_state() -> Arc<RunState> {
     let parser = CliParser::new();
@@ -36,5 +36,10 @@ pub fn create_test_run_state() -> Arc<RunState> {
         connection_factory,
         tags: None,
         allow_localhost_delegation: false,
+        is_pull_mode: false,
+        play_groups: None,
+        processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
     })
 }

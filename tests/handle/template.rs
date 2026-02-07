@@ -1,14 +1,12 @@
 use jetpack::handle::template::*;
-use jetpack::tasks::request::{TaskRequest, TaskRequestType};
-use jetpack::tasks::response::TaskResponse;
+use jetpack::tasks::request::TaskRequest;
 use jetpack::playbooks::templar::TemplateMode;
 use jetpack::playbooks::traversal::RunState;
 use jetpack::playbooks::context::PlaybookContext;
-use jetpack::inventory::hosts::Host;
 use jetpack::cli::parser::CliParser;
 use jetpack::handle::response::Response;
 use std::sync::{Arc, RwLock};
-use std::path::PathBuf;
+use std::collections::HashSet;
 
 fn create_test_template() -> Template {
     let parser = CliParser::new();
@@ -27,7 +25,12 @@ fn create_test_template() -> Template {
         visitor: Arc::new(RwLock::new(jetpack::playbooks::visitor::PlaybookVisitor::new(jetpack::playbooks::visitor::CheckMode::No))),
         connection_factory: Arc::new(RwLock::new(jetpack::connection::no::NoFactory::new())),
         tags: None,
-        allow_localhost_delegation: false
+        allow_localhost_delegation: false,
+        is_pull_mode: false,
+        play_groups: None,
+        processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
     });
     
     let hostname = "testhost".to_string();

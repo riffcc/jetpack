@@ -27,6 +27,7 @@ fn test_stat_task_with_logic() {
         items: None,
         tags: None,
         delegate_to: None,
+        skip_if_exists: None,
     };
 
     let post_logic = PostLogicInput {

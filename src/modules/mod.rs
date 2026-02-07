@@ -21,6 +21,7 @@ pub mod commands;
 pub mod control;
 pub mod files;
 pub mod integrations;
+pub mod inventory;
 pub mod packages;
 pub mod proxmox;
 pub mod services;

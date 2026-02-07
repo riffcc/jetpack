@@ -9,7 +9,7 @@ fn test_shell_task_basic() {
         save: None,
         failed_when: None,
         changed_when: None,
-        unsafe_: None,
+        shell: None,
         with: None,
         and: None,
     };
@@ -28,7 +28,7 @@ fn test_shell_task_with_save() {
         save: Some("hostname_result".to_string()),
         failed_when: None,
         changed_when: None,
-        unsafe_: None,
+        shell: None,
         with: None,
         and: None,
     };
@@ -46,7 +46,7 @@ fn test_shell_task_with_conditions() {
         save: None,
         failed_when: Some("rc != 0 and rc != 3".to_string()),
         changed_when: Some("false".to_string()),
-        unsafe_: None,
+        shell: None,
         with: None,
         and: None,
     };
@@ -56,20 +56,20 @@ fn test_shell_task_with_conditions() {
 }
 
 #[test]
-fn test_shell_task_unsafe() {
+fn test_shell_task_with_custom_shell() {
     let task = ShellTask {
-        name: Some("Run unsafe command".to_string()),
-        cmd: "rm -rf /tmp/test || true".to_string(),
+        name: Some("Run with bash".to_string()),
+        cmd: "echo $BASH_VERSION".to_string(),
         save: None,
         failed_when: None,
         changed_when: None,
-        unsafe_: Some("yes".to_string()),
+        shell: Some("bash".to_string()),
         with: None,
         and: None,
     };
 
-    assert!(task.unsafe_.is_some());
-    assert_eq!(task.unsafe_.unwrap(), "yes");
+    assert!(task.shell.is_some());
+    assert_eq!(task.shell.unwrap(), "bash");
 }
 
 #[test]
@@ -83,7 +83,7 @@ failed_when: "rc != 0"
 
     let task: Result<ShellTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Create directory".to_string()));
     assert_eq!(task.cmd, "mkdir -p /opt/myapp/logs");
@@ -99,7 +99,7 @@ cmd: date
 
     let task: Result<ShellTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.cmd, "date");
     assert!(task.name.is_none());
@@ -111,7 +111,7 @@ fn test_shell_task_with_logic() {
     let yaml = r#"
 cmd: "{{ install_script }}"
 save: install_result
-unsafe: "yes"
+shell: bash
 with:
   condition: "{{ needs_installation }}"
 and:
@@ -120,7 +120,7 @@ and:
 
     let task: Result<ShellTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.cmd.contains("{{ install_script }}"));
     assert!(task.save.is_some());
@@ -140,7 +140,7 @@ changed_when: "'RESTARTED' in stdout"
 
     let task: Result<ShellTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.save, Some("app_status".to_string()));
     assert!(task.failed_when.unwrap().contains("stdout"));

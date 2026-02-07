@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use crate::util::yaml::blend_variables;
 use crate::provisioners::ProvisionConfig;
+use crate::inventory::dependencies::{DependencyReader, DependencyBuilder, VirtualizationType};
 use std::sync::Arc;
 use crate::inventory::groups::Group;
 use std::sync::RwLock;
@@ -252,6 +253,73 @@ impl Host {
             Ok(x) => Ok(x),
             Err(_y) => Err(String::from("error loading blended variables"))
         }
+    }
+
+    // ==============================================================================================================
+    // DEPENDENCY METADATA API
+    // ==============================================================================================================
+
+    /// Get the compute node this workload runs on
+    pub fn get_runs_on(&self) -> Option<String> {
+        DependencyReader::get_runs_on(&self.get_blended_variables())
+    }
+
+    /// Get the workload ID (VMID for Proxmox, pod name for k8s, etc.)
+    pub fn get_workload_id(&self) -> Option<String> {
+        DependencyReader::get_workload_id(&self.get_blended_variables())
+    }
+
+    /// Get the compute cluster this host belongs to
+    pub fn get_compute_cluster(&self) -> Option<String> {
+        DependencyReader::get_compute_cluster(&self.get_blended_variables())
+    }
+
+    /// Get the virtualization type (lxc, qemu, pod, physical)
+    pub fn get_virtualization(&self) -> VirtualizationType {
+        DependencyReader::get_virtualization(&self.get_blended_variables())
+    }
+
+    /// Get the list of hosts/services this depends on
+    pub fn get_depends_on(&self) -> Vec<String> {
+        DependencyReader::get_depends_on(&self.get_blended_variables())
+    }
+
+    /// Get the list of services this host provides
+    pub fn get_provides(&self) -> Vec<String> {
+        DependencyReader::get_provides(&self.get_blended_variables())
+    }
+
+    /// Check if this is a critical infrastructure component
+    pub fn is_critical(&self) -> bool {
+        DependencyReader::is_critical(&self.get_blended_variables())
+    }
+
+    /// Get the primary storage backend
+    pub fn get_storage(&self) -> Option<String> {
+        DependencyReader::get_storage(&self.get_blended_variables())
+    }
+
+    /// Set infrastructure location metadata
+    pub fn set_location(&mut self, runs_on: &str, workload_id: &str, cluster: &str, vtype: VirtualizationType) {
+        DependencyBuilder::set_runs_on(&mut self.variables, runs_on);
+        DependencyBuilder::set_workload_id(&mut self.variables, workload_id);
+        DependencyBuilder::set_compute_cluster(&mut self.variables, cluster);
+        DependencyBuilder::set_virtualization(&mut self.variables, vtype);
+    }
+
+    /// Set service dependencies
+    pub fn set_depends_on(&mut self, deps: &[String]) {
+        DependencyBuilder::set_depends_on(&mut self.variables, deps);
+    }
+
+    /// Set provided services
+    pub fn set_provides(&mut self, services: &[String]) {
+        DependencyBuilder::set_provides(&mut self.variables, services);
+    }
+
+    /// Set critical infrastructure flag
+    pub fn set_critical(&mut self, critical: bool) {
+        DependencyBuilder::set_critical(&mut self.variables, critical);
     }
 
 }

@@ -1,6 +1,6 @@
 use jetpack::handle::response::*;
-use jetpack::tasks::request::{TaskRequest, TaskRequestType, SudoDetails};
-use jetpack::tasks::response::{TaskStatus, TaskResponse};
+use jetpack::tasks::request::{TaskRequest, SudoDetails};
+use jetpack::tasks::response::TaskStatus;
 use jetpack::tasks::fields::Field;
 use jetpack::playbooks::traversal::RunState;
 use jetpack::playbooks::context::PlaybookContext;
@@ -9,9 +9,8 @@ use jetpack::inventory::inventory::Inventory;
 use jetpack::cli::parser::CliParser;
 use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
 use jetpack::connection::no::NoFactory;
-use jetpack::connection::factory::ConnectionFactory;
 use std::sync::{Arc, RwLock};
-use std::path::PathBuf;
+use std::collections::HashSet;
 
 fn create_test_sudo_details() -> SudoDetails {
     SudoDetails {
@@ -37,7 +36,12 @@ fn create_test_response() -> Response {
         visitor: Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No))),
         connection_factory: Arc::new(RwLock::new(NoFactory::new())),
         tags: None,
-        allow_localhost_delegation: false
+        allow_localhost_delegation: false,
+        is_pull_mode: false,
+        play_groups: None,
+        processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
     });
     
     let hostname = "testhost".to_string();

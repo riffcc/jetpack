@@ -31,6 +31,7 @@ pub enum Field {
     Gid,
     Group,
     Groups,
+    Location,
     Mode,
     Owner,
     Restart,
