@@ -72,3 +72,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Dockerfile builds
+        run: |
+          touch jetpack-amd64
+          chmod +x jetpack-amd64
+          docker build --build-arg TARGETARCH=amd64 .
