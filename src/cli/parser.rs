@@ -63,6 +63,8 @@ pub struct CliParser {
     pub argument_map: HashMap<String, Arguments>,
     pub play_groups: Option<Vec<String>>,
     pub async_mode: bool,
+    pub pull_url: Option<String>,
+    pub chroot_path: Option<String>,
 }
 
 // subcommands are usually required
@@ -134,7 +136,9 @@ pub enum Arguments {
     ARGUMENT_MODULES,
     ARGUMENT_MODULES_SHORT,
     ARGUMENT_GROUPS,
-    ARGUMENT_ASYNC
+    ARGUMENT_ASYNC,
+    ARGUMENT_URL,
+    ARGUMENT_CHROOT,
 }
 
 impl Arguments {
@@ -172,6 +176,8 @@ impl Arguments {
             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => "--ask-login-password",
             Arguments::ARGUMENT_GROUPS => "--groups",
             Arguments::ARGUMENT_ASYNC => "--async",
+            Arguments::ARGUMENT_URL => "--url",
+            Arguments::ARGUMENT_CHROOT => "--chroot",
         }
     }
 }
@@ -211,6 +217,8 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_ASK_LOGIN_PASSWORD, "--ask-login-password"),
         (Arguments::ARGUMENT_GROUPS, "--groups"),
         (Arguments::ARGUMENT_ASYNC, "--async"),
+        (Arguments::ARGUMENT_URL, "--url"),
+        (Arguments::ARGUMENT_CHROOT, "--chroot"),
     ];
     let mut map : HashMap<String, Arguments> = HashMap::new();
     for (e,i) in inputs.iter() {
@@ -376,6 +384,8 @@ impl CliParser  {
             argument_map: build_argument_map(),
             play_groups: None,
             async_mode: false,
+            pull_url: None,
+            chroot_path: None,
         };
         return p;
     }
@@ -495,6 +505,8 @@ impl CliParser  {
                                     Arguments::ARGUMENT_EXTRA_VARS        => self.store_extra_vars(&args[arg_count]),
                                     Arguments::ARGUMENT_EXTRA_VARS_SHORT  => self.store_extra_vars(&args[arg_count]),
                                     Arguments::ARGUMENT_GROUPS            => self.store_groups(&args[arg_count]),
+                                    Arguments::ARGUMENT_URL               => self.store_url(&args[arg_count]),
+                                    Arguments::ARGUMENT_CHROOT            => self.store_chroot(&args[arg_count]),
                                     _  => Err(format!("invalid flag: {}", argument_str)),
                                 };
                             }
@@ -829,6 +841,20 @@ impl CliParser  {
 
      fn store_async_mode(&mut self) -> Result<(), String> {
         self.async_mode = true;
+        Ok(())
+     }
+
+     fn store_url(&mut self, value: &String) -> Result<(), String> {
+        self.pull_url = Some(value.clone());
+        Ok(())
+     }
+
+     fn store_chroot(&mut self, value: &String) -> Result<(), String> {
+        let path = Path::new(value);
+        if !path.is_dir() {
+            return Err(format!("--chroot path does not exist: {}", value));
+        }
+        self.chroot_path = Some(value.clone());
         Ok(())
      }
 

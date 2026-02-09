@@ -18,6 +18,7 @@ pub mod connection;
 pub mod factory;
 pub mod ssh;
 pub mod local;
+pub mod chroot;
 pub mod no;
 pub mod command;
 pub mod cache;

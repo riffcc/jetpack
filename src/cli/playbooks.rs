@@ -18,12 +18,14 @@ use crate::cli::parser::CliParser;
 
 use crate::connection::ssh::SshFactory;
 use crate::connection::local::LocalFactory;
+use crate::connection::chroot::ChrootFactory;
 use crate::connection::no::NoFactory;
 use crate::playbooks::traversal::{playbook_traversal,RunState};
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::visitor::{PlaybookVisitor,CheckMode};
 use crate::inventory::inventory::Inventory;
 use std::sync::{Arc,RwLock};
+use std::path::PathBuf;
 
 // code behind *most* playbook related CLI commands, launched from main.rs
 
@@ -54,9 +56,25 @@ pub fn playbook_simulate(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser)
 }
 
 pub fn playbook_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
-    // Pull mode is essentially local mode, but designed for external integration
-    // It runs playbooks locally on the target host with optional inventory for variables
-    return playbook_with_pull(inventory, parser, CheckMode::No);
+    // Pull mode: runs playbooks locally (or inside a chroot).
+    // With --url, downloads the playbook from an HTTPS URL or clones a git repo first.
+    // With --chroot, executes all commands inside the chroot environment.
+
+    // Handle --url: download playbook to temp location
+    let url_playbook_path: Option<PathBuf> = match &parser.pull_url {
+        Some(url) => {
+            match fetch_playbook_url(url) {
+                Ok(path) => Some(path),
+                Err(e) => {
+                    println!("failed to fetch playbook from URL: {}", e);
+                    return 1;
+                }
+            }
+        }
+        None => None,
+    };
+
+    return playbook_with_pull(inventory, parser, CheckMode::No, url_playbook_path.as_ref());
 }
 
 fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode, connection_mode: ConnectionMode) -> i32 {
@@ -96,22 +114,38 @@ fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: 
     };
 }
 
-fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode) -> i32 {
+fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode, url_playbook: Option<&PathBuf>) -> i32 {
+    // If a URL-fetched playbook exists, add it to playbook_paths
+    let playbook_paths = if let Some(pb_path) = url_playbook {
+        let paths = Arc::new(RwLock::new(vec![pb_path.clone()]));
+        // Also include any explicitly specified playbooks
+        for p in parser.playbook_paths.read().unwrap().iter() {
+            paths.write().unwrap().push(p.clone());
+        }
+        paths
+    } else {
+        Arc::clone(&parser.playbook_paths)
+    };
+
+    // Choose connection factory: ChrootFactory if --chroot, otherwise LocalFactory
+    let connection_factory: Arc<RwLock<dyn crate::connection::factory::ConnectionFactory>> =
+        if let Some(ref chroot_path) = parser.chroot_path {
+            Arc::new(RwLock::new(ChrootFactory::new(inventory, chroot_path.clone())))
+        } else {
+            Arc::new(RwLock::new(LocalFactory::new(inventory)))
+        };
+
     let run_state = Arc::new(RunState {
-        // every object gets an inventory, though with local modes it's empty.
         inventory: Arc::clone(inventory),
-        playbook_paths: Arc::clone(&parser.playbook_paths),
+        playbook_paths,
         role_paths: Arc::clone(&parser.role_paths),
         module_paths: Arc::clone(&parser.module_paths),
         limit_hosts: parser.limit_hosts.clone(),
         limit_groups: parser.limit_groups.clone(),
         batch_size: parser.batch_size.clone(),
-        // the context is constructed with an instance of the parser instead of having a back-reference
-        // to run-state.  Context should mostly *not* get parameters from the parser unless they
-        // are going to appear in variables.
         context: Arc::new(RwLock::new(PlaybookContext::new(parser))),
         visitor: Arc::new(RwLock::new(PlaybookVisitor::new(check_mode))),
-        connection_factory: Arc::new(RwLock::new(LocalFactory::new(inventory))),
+        connection_factory,
         tags: parser.tags.clone(),
         allow_localhost_delegation: parser.allow_localhost_delegation,
         is_pull_mode: true,
@@ -127,5 +161,105 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
         Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),
         Err(s) => { println!("{}", s); 1 }
     };
+}
+
+/// Fetch a playbook from a URL (HTTPS) or clone a git repository.
+///
+/// - HTTPS URL ending in .yml/.yaml → downloaded to a temp file
+/// - Git URL (ending in .git or containing github/gitlab) → shallow clone
+/// - Returns the path to the playbook file or directory
+fn fetch_playbook_url(url: &str) -> Result<PathBuf, String> {
+    let temp_dir = std::env::temp_dir().join("jetpack-pull");
+    let _ = std::fs::create_dir_all(&temp_dir);
+
+    if url.ends_with(".yml") || url.ends_with(".yaml") {
+        // HTTPS direct download of a single playbook file
+        let filename = url.rsplit('/').next().unwrap_or("playbook.yml");
+        let dest = temp_dir.join(filename);
+
+        println!("pulling playbook from {}", url);
+
+        // Use curl (universally available) to download
+        let output = std::process::Command::new("curl")
+            .arg("-sfL")
+            .arg("--connect-timeout")
+            .arg("30")
+            .arg("-o")
+            .arg(dest.to_str().unwrap())
+            .arg(url)
+            .output()
+            .map_err(|e| format!("curl failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("curl failed ({}): {}", output.status, stderr));
+        }
+
+        if !dest.exists() {
+            return Err(format!("download succeeded but file not found: {:?}", dest));
+        }
+
+        Ok(dest)
+    } else if url.ends_with(".git")
+        || url.contains("github.com")
+        || url.contains("gitlab.com")
+        || url.contains("codeberg.org")
+        || url.starts_with("git@")
+    {
+        // Git clone
+        let repo_dir = temp_dir.join("repo");
+        let _ = std::fs::remove_dir_all(&repo_dir); // clean previous
+
+        println!("cloning repository from {}", url);
+
+        let output = std::process::Command::new("git")
+            .arg("clone")
+            .arg("--depth")
+            .arg("1")
+            .arg(url)
+            .arg(repo_dir.to_str().unwrap())
+            .output()
+            .map_err(|e| format!("git clone failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git clone failed ({}): {}", output.status, stderr));
+        }
+
+        // Look for playbook files in the cloned repo
+        // Check common locations: playbook.yml, site.yml, main.yml, playbooks/
+        for candidate in &["playbook.yml", "site.yml", "main.yml", "playbook.yaml", "site.yaml"] {
+            let path = repo_dir.join(candidate);
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+
+        // If no standard playbook found, return the repo dir
+        // (user should specify --playbook to pick the right file)
+        Ok(repo_dir)
+    } else {
+        // Assume HTTPS URL to a raw file
+        let dest = temp_dir.join("playbook.yml");
+
+        println!("pulling playbook from {}", url);
+
+        let output = std::process::Command::new("curl")
+            .arg("-sfL")
+            .arg("--connect-timeout")
+            .arg("30")
+            .arg("-o")
+            .arg(dest.to_str().unwrap())
+            .arg(url)
+            .output()
+            .map_err(|e| format!("curl failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("curl failed ({}): {}", output.status, stderr));
+        }
+
+        Ok(dest)
+    }
 }
 
