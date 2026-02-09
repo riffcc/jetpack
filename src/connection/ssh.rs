@@ -58,6 +58,7 @@ pub struct SshFactory {
     localhost: Arc<RwLock<Host>>,
     forward_agent: bool,
     login_password: Option<String>,
+    private_key_file: Option<String>,
 }
 
 impl SshFactory {
@@ -65,6 +66,7 @@ impl SshFactory {
         inventory: &Arc<RwLock<Inventory>>,
         forward_agent: bool,
         login_password: Option<String>,
+        private_key_file: Option<String>,
     ) -> Self {
         Self {
             localhost: inventory
@@ -74,6 +76,7 @@ impl SshFactory {
             local_factory: LocalFactory::new(inventory),
             forward_agent,
             login_password,
+            private_key_file,
         }
     }
 }
@@ -109,8 +112,10 @@ impl ConnectionFactory for SshFactory {
             }
         }
 
-        let (hostname2, user, port, key, passphrase, key_comment) =
+        let (hostname2, user, port, inv_key, passphrase, key_comment) =
             ctx.get_ssh_connection_details(host);
+        // Per-host inventory key takes priority; config-level private_key_file is fallback
+        let key = inv_key.or_else(|| self.private_key_file.clone());
         if hostname2.eq("localhost") {
             let conn: Arc<Mutex<dyn Connection>> =
                 self.local_factory.get_connection(context, &self.localhost)?;

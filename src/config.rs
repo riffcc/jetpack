@@ -37,6 +37,7 @@ pub struct JetpackConfig {
     pub extra_vars: serde_yaml::Value,
     pub forward_agent: bool,
     pub login_password: Option<String>,
+    pub private_key_file: Option<String>,
     pub check_mode: bool,
     pub connection_mode: ConnectionMode,
 }
@@ -74,6 +75,7 @@ impl Default for JetpackConfig {
             extra_vars: serde_yaml::Value::Mapping(Default::default()),
             forward_agent: false,
             login_password: None,
+            private_key_file: None,
             check_mode: false,
             connection_mode: ConnectionMode::Ssh,
         }
@@ -192,6 +194,11 @@ impl JetpackConfig {
 
     pub fn login_password(mut self, password: String) -> Self {
         self.login_password = Some(password);
+        self
+    }
+
+    pub fn private_key_file(mut self, path: String) -> Self {
+        self.private_key_file = Some(path);
         self
     }
 }

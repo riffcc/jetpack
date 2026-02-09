@@ -75,7 +75,7 @@ fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: 
         context: Arc::new(RwLock::new(PlaybookContext::new(parser))),
         visitor: Arc::new(RwLock::new(PlaybookVisitor::new(check_mode))),
         connection_factory: match connection_mode {
-            ConnectionMode::Ssh => Arc::new(RwLock::new(SshFactory::new(inventory, parser.forward_agent, parser.login_password.clone()))),
+            ConnectionMode::Ssh => Arc::new(RwLock::new(SshFactory::new(inventory, parser.forward_agent, parser.login_password.clone(), None))),
             ConnectionMode::Local => Arc::new(RwLock::new(LocalFactory::new(inventory))),
             ConnectionMode::Simulate => Arc::new(RwLock::new(NoFactory::new()))
         },

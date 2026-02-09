@@ -111,6 +111,7 @@ impl PlaybookRunner {
                 &inventory,
                 self.config.forward_agent,
                 self.config.login_password.clone(),
+                self.config.private_key_file.clone(),
             ))),
             ConnectionMode::Local => Arc::new(RwLock::new(OldLocalFactory::new(&inventory))),
             ConnectionMode::Simulate => Arc::new(RwLock::new(OldNoFactory::new())),
@@ -249,6 +250,11 @@ impl PlaybookRunnerBuilder {
 
     pub fn login_password(mut self, password: &str) -> Self {
         self.config = self.config.login_password(password.to_string());
+        self
+    }
+
+    pub fn private_key_file(mut self, path: &str) -> Self {
+        self.config = self.config.private_key_file(path.to_string());
         self
     }
 
