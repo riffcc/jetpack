@@ -62,6 +62,7 @@ pub struct CliParser {
     pub login_password: Option<String>,
     pub argument_map: HashMap<String, Arguments>,
     pub play_groups: Option<Vec<String>>,
+    pub async_mode: bool,
 }
 
 // subcommands are usually required
@@ -132,7 +133,8 @@ pub enum Arguments {
     ARGUMENT_ASK_LOGIN_PASSWORD,
     ARGUMENT_MODULES,
     ARGUMENT_MODULES_SHORT,
-    ARGUMENT_GROUPS
+    ARGUMENT_GROUPS,
+    ARGUMENT_ASYNC
 }
 
 impl Arguments {
@@ -169,6 +171,7 @@ impl Arguments {
             Arguments::ARGUMENT_EXTRA_VARS_SHORT => "-e",
             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => "--ask-login-password",
             Arguments::ARGUMENT_GROUPS => "--groups",
+            Arguments::ARGUMENT_ASYNC => "--async",
         }
     }
 }
@@ -207,6 +210,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_EXTRA_VARS_SHORT, "-e"),
         (Arguments::ARGUMENT_ASK_LOGIN_PASSWORD, "--ask-login-password"),
         (Arguments::ARGUMENT_GROUPS, "--groups"),
+        (Arguments::ARGUMENT_ASYNC, "--async"),
     ];
     let mut map : HashMap<String, Arguments> = HashMap::new();
     for (e,i) in inputs.iter() {
@@ -371,6 +375,7 @@ impl CliParser  {
             login_password: None,
             argument_map: build_argument_map(),
             play_groups: None,
+            async_mode: false,
         };
         return p;
     }
@@ -456,6 +461,7 @@ impl CliParser  {
                             Arguments::ARGUMENT_VERBOSER           => self.increase_verbosity(2),
                             Arguments::ARGUMENT_VERBOSEST          => self.increase_verbosity(3),
                             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => self.store_login_password(),
+                            Arguments::ARGUMENT_ASYNC              => self.store_async_mode(),
                             _ => Ok({ standalone_arg_found = false; next_is_value = true; })
                         };
 
@@ -819,6 +825,11 @@ impl CliParser  {
             Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_GROUPS.as_str(), err_msg)),
         }
         return Ok(());
+     }
+
+     fn store_async_mode(&mut self) -> Result<(), String> {
+        self.async_mode = true;
+        Ok(())
      }
 
 }

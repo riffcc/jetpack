@@ -155,6 +155,7 @@ impl PlaybookRunner {
             is_pull_mode: false,
             play_groups: None,
             output_handler: Some(self.output_handler.clone()),
+            async_mode: false,
             processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
             processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
             role_processing_stack: Arc::new(RwLock::new(Vec::new())),

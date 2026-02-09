@@ -21,6 +21,9 @@ pub mod traversal;
 pub mod templar;
 pub mod task_fsm;
 pub mod t_helpers;
+pub mod barrier;
+pub mod async_exec;
+pub mod async_ui;
 
 // New library-friendly versions
 pub mod context_new;

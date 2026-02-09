@@ -18,9 +18,11 @@ use crate::playbooks::language::Play;
 use crate::playbooks::visitor::PlaybookVisitor;
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::language::{Role,RoleInvocation,InstantiateSpec};
+use crate::playbooks::async_exec::AsyncExecutionContext;
+use crate::playbooks::async_ui::{AsyncUi, HostEvent, TaskDisplayStatus};
+use crate::playbooks::task_fsm::{fsm_run_task, async_run_single_task};
 use crate::connection::factory::ConnectionFactory;
 use crate::registry::list::Task;
-use crate::playbooks::task_fsm::fsm_run_task;
 use crate::inventory::inventory::Inventory;
 use crate::inventory::hosts::Host;
 use crate::provisioners::{ensure_host_provisioned, ProvisionConfig};
@@ -61,6 +63,7 @@ pub struct RunState {
     pub is_pull_mode: bool,
     pub play_groups: Option<Vec<String>>,
     pub output_handler: Option<crate::output::OutputHandlerRef>,
+    pub async_mode: bool,
     // Role dependency tracking
     pub processed_role_tasks: Arc<RwLock<HashSet<String>>>,
     pub processed_role_handlers: Arc<RwLock<HashSet<String>>>,
@@ -287,43 +290,52 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
     }
 
     // Provision hosts that need it before running any tasks
-    for host_arc in hosts.iter() {
-        let (host_name, needs_provision, provision_config, host_vars) = {
-            let host = host_arc.read().unwrap();
-            (
-                host.name.clone(),
-                host.needs_provisioning(),
-                host.get_provision().cloned(),
-                host.get_variables()
-            )
-        };
+    // In async mode, provision all hosts in parallel for maximum speed
+    if run_state.async_mode {
+        use rayon::prelude::*;
 
-        if needs_provision {
-            if let Some(ref config) = provision_config {
-                // Parse dns config from host variables (includes group_vars)
+        let failed: Vec<String> = hosts
+            .par_iter()
+            .filter_map(|host_arc| {
+                let (host_name, needs_provision, provision_config, host_vars) = {
+                    let host = host_arc.read().unwrap();
+                    (
+                        host.name.clone(),
+                        host.needs_provisioning(),
+                        host.get_provision().cloned(),
+                        host.get_variables()
+                    )
+                };
+
+                if !needs_provision {
+                    return None;
+                }
+
+                let config = match provision_config {
+                    Some(ref c) => c,
+                    None => return None,
+                };
+
                 let dns_key = serde_yaml::Value::String("dns".to_string());
                 let dns_config = host_vars.get(&dns_key)
                     .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
 
                 match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref(), run_state.output_handler.as_ref()) {
                     Ok(crate::provisioners::ProvisionResult::Destroyed) => {
-                        // Host was destroyed, skip it
                         run_state.visitor.read().unwrap().on_host_provisioned(
                             &run_state.context,
                             &host_name,
                             &crate::provisioners::ProvisionResult::Destroyed
                         );
-                        continue;
+                        None
                     }
                     Ok(result) => {
-                        // Track provision result in visitor/context
                         run_state.visitor.read().unwrap().on_host_provisioned(
                             &run_state.context,
                             &host_name,
                             &result
                         );
 
-                        // Get IP from provisioner and set host variables
                         let ip = crate::provisioners::get_provisioner(&config.provision_type)
                             .ok()
                             .and_then(|p| p.get_ip(config, &host_name, &run_state.inventory).ok().flatten());
@@ -351,14 +363,96 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                         if changed {
                             host.set_variables(vars);
                         }
+                        None
                     }
                     Err(e) => {
-                        return Err(format!("Failed to provision host '{}': {}", host_name, e));
+                        Some(format!("Failed to provision host '{}': {}", host_name, e))
+                    }
+                }
+            })
+            .collect();
+
+        if !failed.is_empty() {
+            return Err(failed.join("\n"));
+        }
+    } else {
+        // Default: sequential provisioning
+        for host_arc in hosts.iter() {
+            let (host_name, needs_provision, provision_config, host_vars) = {
+                let host = host_arc.read().unwrap();
+                (
+                    host.name.clone(),
+                    host.needs_provisioning(),
+                    host.get_provision().cloned(),
+                    host.get_variables()
+                )
+            };
+
+            if needs_provision {
+                if let Some(ref config) = provision_config {
+                    let dns_key = serde_yaml::Value::String("dns".to_string());
+                    let dns_config = host_vars.get(&dns_key)
+                        .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
+
+                    match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref(), run_state.output_handler.as_ref()) {
+                        Ok(crate::provisioners::ProvisionResult::Destroyed) => {
+                            run_state.visitor.read().unwrap().on_host_provisioned(
+                                &run_state.context,
+                                &host_name,
+                                &crate::provisioners::ProvisionResult::Destroyed
+                            );
+                            continue;
+                        }
+                        Ok(result) => {
+                            run_state.visitor.read().unwrap().on_host_provisioned(
+                                &run_state.context,
+                                &host_name,
+                                &result
+                            );
+
+                            let ip = crate::provisioners::get_provisioner(&config.provision_type)
+                                .ok()
+                                .and_then(|p| p.get_ip(config, &host_name, &run_state.inventory).ok().flatten());
+
+                            let mut host = host_arc.write().unwrap();
+                            let mut vars = host.get_variables();
+                            let mut changed = false;
+
+                            if let Some(ref ip_addr) = ip {
+                                let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
+                                if !vars.contains_key(&key) {
+                                    vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
+                                    changed = true;
+                                }
+                            }
+
+                            if let Some(ref ssh_user) = config.ssh_user {
+                                let key = serde_yaml::Value::String("jet_ssh_user".to_string());
+                                if !vars.contains_key(&key) {
+                                    vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
+                                    changed = true;
+                                }
+                            }
+
+                            if changed {
+                                host.set_variables(vars);
+                            }
+                        }
+                        Err(e) => {
+                            return Err(format!("Failed to provision host '{}': {}", host_name, e));
+                        }
                     }
                 }
             }
         }
     }
+
+    // Async mode: host-parallel execution with explicit barrier synchronization
+    if run_state.async_mode {
+        return async_handle_batch(run_state, play, hosts);
+    }
+
+    // Default mode: task-parallel execution (all hosts per task, then next task)
 
     // handle role tasks
     if play.roles.is_some() {
@@ -387,6 +481,175 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
     }
     return Ok(())
 
+}
+
+/// Host-parallel async execution.
+///
+/// Each host runs its entire task list sequentially and independently.
+/// The only synchronization points are explicit `!wait_for_others` tasks,
+/// which insert barrier waits.
+fn async_handle_batch(
+    run_state: &Arc<RunState>,
+    play: &Play,
+    hosts: &Vec<Arc<RwLock<Host>>>,
+) -> Result<(), String> {
+    use rayon::prelude::*;
+
+    // Collect all tasks from the play (loose tasks only for V1;
+    // roles are handled inline by their normal task files).
+    let mut all_tasks: Vec<&Task> = Vec::new();
+
+    if let Some(ref tasks) = play.tasks {
+        for task in tasks.iter() {
+            if check_tags(run_state, task, None) {
+                all_tasks.push(task);
+            }
+        }
+    }
+
+    if all_tasks.is_empty() {
+        return Ok(());
+    }
+
+    // Build host name list and index map
+    let host_names: Vec<String> = hosts
+        .iter()
+        .map(|h| h.read().unwrap().name.clone())
+        .collect();
+
+    // Build async execution context with barriers
+    let async_ctx = Arc::new(AsyncExecutionContext::from_tasks(&all_tasks, hosts.len()));
+
+    // Set up UI event channel
+    let (tx, rx) = AsyncUi::channel();
+    let ui = AsyncUi::new(host_names.clone());
+
+    // Spawn UI thread
+    let ui_handle = std::thread::spawn(move || {
+        ui.run(rx);
+    });
+
+    // Run all hosts in parallel with Rayon
+    let task_refs: Vec<&Task> = all_tasks;
+    let _total: i64 = hosts
+        .par_iter()
+        .enumerate()
+        .map(|(host_idx, host)| {
+            let host_tx = tx.clone();
+
+            // Get connection for this host
+            let connection_result = run_state
+                .connection_factory
+                .read()
+                .unwrap()
+                .get_connection(&run_state.context, host);
+
+            let connection = match connection_result {
+                Ok(conn) => conn,
+                Err(e) => {
+                    // Connection failed — withdraw from all barriers and report
+                    async_ctx.withdraw_from(0);
+                    run_state.context.write().unwrap().fail_host(host);
+                    let _ = host_tx.send(HostEvent::HostFailed {
+                        host_idx,
+                        error: e.clone(),
+                    });
+                    return 1;
+                }
+            };
+
+            // Run each task sequentially on this host
+            for (task_idx, task) in task_refs.iter().enumerate() {
+                // Check if this is a barrier task
+                if task.is_wait_for_others() {
+                    if let Some(barrier) = async_ctx.get_barrier(task_idx) {
+                        let _ = host_tx.send(HostEvent::BarrierReached {
+                            host_idx,
+                            barrier_name: barrier.name().to_string(),
+                        });
+
+                        match barrier.wait() {
+                            Ok(()) => {
+                                let _ = host_tx.send(HostEvent::BarrierPassed { host_idx });
+                            }
+                            Err(e) => {
+                                async_ctx.withdraw_from(task_idx + 1);
+                                run_state.context.write().unwrap().fail_host(host);
+                                let _ = host_tx.send(HostEvent::BarrierFailed {
+                                    host_idx,
+                                    error: format!("{}", e),
+                                });
+                                let _ = host_tx.send(HostEvent::HostFailed {
+                                    host_idx,
+                                    error: format!("barrier failed: {}", e),
+                                });
+                                return 1;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                let task_name = task.get_display_name();
+                let _ = host_tx.send(HostEvent::TaskStarted {
+                    host_idx,
+                    task_name: task_name.clone(),
+                });
+
+                // Run the task on this host
+                match async_run_single_task(run_state, &connection, host, play, task) {
+                    Ok(response) => {
+                        use crate::tasks::response::TaskStatus;
+                        let status = match response.status {
+                            TaskStatus::IsModified
+                            | TaskStatus::IsCreated
+                            | TaskStatus::IsRemoved
+                            | TaskStatus::IsExecuted => TaskDisplayStatus::Changed,
+                            TaskStatus::IsSkipped => TaskDisplayStatus::Skipped,
+                            _ => TaskDisplayStatus::Ok,
+                        };
+                        let output = response.msg.clone();
+                        let _ = host_tx.send(HostEvent::TaskCompleted {
+                            host_idx,
+                            task_name,
+                            status,
+                            output,
+                        });
+                    }
+                    Err(response) => {
+                        let error = response
+                            .msg
+                            .clone()
+                            .unwrap_or_else(|| "unknown error".to_string());
+
+                        let _ = host_tx.send(HostEvent::TaskFailed {
+                            host_idx,
+                            task_name,
+                            error: error.clone(),
+                        });
+
+                        // Withdraw from remaining barriers and stop this host
+                        async_ctx.withdraw_from(task_idx + 1);
+                        run_state.context.write().unwrap().fail_host(host);
+                        let _ = host_tx.send(HostEvent::HostFailed {
+                            host_idx,
+                            error,
+                        });
+                        return 1;
+                    }
+                }
+            }
+
+            let _ = host_tx.send(HostEvent::HostCompleted { host_idx });
+            1
+        })
+        .sum();
+
+    // Signal UI thread to stop
+    let _ = tx.send(HostEvent::AllDone);
+    let _ = ui_handle.join();
+
+    Ok(())
 }
 
 fn check_tags(run_state: &Arc<RunState>, task: &Task, role_invocation: Option<&RoleInvocation>) -> bool {

@@ -279,8 +279,8 @@ pub fn ensure_host_provisioned(
     dns_config: Option<&DnsConfig>,
     output: Option<&crate::output::OutputHandlerRef>,
 ) -> Result<ProvisionResult, String> {
-    // Handle state: absent - destroy instead of provision
-    if provision_config.state == "absent" {
+    // Handle state: absent / force-absent - destroy instead of provision
+    if provision_config.state == "absent" || provision_config.state == "force-absent" {
         destroy_host(provision_config, inventory_name, inventory, dns_config)?;
         return Ok(ProvisionResult::Destroyed);
     }

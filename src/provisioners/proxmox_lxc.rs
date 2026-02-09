@@ -24,7 +24,24 @@ use crate::inventory::inventory::Inventory;
 use crate::playbooks::templar::{Templar, TemplateMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::sync::{Arc, RwLock};
+
+/// Format a reqwest error with diagnostic context (error kind, cause chain, URL).
+fn format_reqwest_error(prefix: &str, e: &reqwest::Error, url: &str) -> String {
+    let kind = if e.is_builder() { " [builder]" }
+        else if e.is_connect() { " [connect]" }
+        else if e.is_timeout() { " [timeout]" }
+        else if e.is_request() { " [request]" }
+        else { "" };
+    let cause = e.source()
+        .map(|src| {
+            let inner = src.source().map(|s2| format!(" -> {}", s2)).unwrap_or_default();
+            format!(" caused by: {}{}", src, inner)
+        })
+        .unwrap_or_default();
+    format!("{}: {}{}{} (url: {})", prefix, e, kind, cause, url)
+}
 
 /// Proxmox LXC container provisioner
 pub struct ProxmoxLxcProvisioner;
@@ -222,7 +239,7 @@ impl ProxmoxLxcProvisioner {
                 .form(&params)
                 .send()
                 .await
-                .map_err(|e| format!("Failed to get Proxmox ticket: {}", e))?;
+                .map_err(|e| format_reqwest_error("Failed to get Proxmox ticket", &e, &url))?;
 
             if !response.status().is_success() {
                 let status = response.status();
@@ -594,12 +611,14 @@ impl ProxmoxLxcProvisioner {
         })
     }
 
-    /// Delete a container
-    fn delete_container(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
-        // First stop the container
-        let _ = self.stop_container(conn, vmid);
-
-        let url = self.get_api_url(conn, &format!("/nodes/{}/lxc/{}", conn.node, vmid));
+    /// Delete a container. If `force` is true, stops the container first.
+    fn delete_container(&self, conn: &ClusterConnection, vmid: u64, force: bool) -> Result<(), String> {
+        let base = self.get_api_url(conn, &format!("/nodes/{}/lxc/{}", conn.node, vmid));
+        let url = if force {
+            format!("{}?force=1&purge=1", base)
+        } else {
+            base
+        };
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -769,6 +788,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
                 .ok_or_else(|| format!("Container '{}' not found", hostname))?
         };
 
-        self.delete_container(&conn, vmid)
+        let force = config.state == "force-absent";
+        self.delete_container(&conn, vmid, force)
     }
 }

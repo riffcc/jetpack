@@ -37,6 +37,37 @@ use std::{thread, time};
 //
 // FIXME: this will be gradually refactored over time
 
+/// Run a single task on a single host, on the calling thread.
+/// Used by the async (host-parallel) execution engine.
+/// Returns Ok(response) on success, Err(response) on failure.
+pub fn async_run_single_task(
+    run_state: &Arc<RunState>,
+    connection: &Arc<Mutex<dyn Connection>>,
+    host: &Arc<RwLock<Host>>,
+    play: &Play,
+    task: &Task,
+) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    let check = run_state.visitor.read().unwrap().is_check_mode();
+
+    run_state.visitor.read().unwrap().on_host_task_start(&run_state.context, host);
+
+    let result = run_task_on_host(run_state, Arc::clone(connection), host, play, task, HandlerMode::NormalTasks);
+
+    match &result {
+        Ok(x) => {
+            match check {
+                false => run_state.visitor.read().unwrap().on_host_task_ok(&run_state.context, x, host),
+                true => run_state.visitor.read().unwrap().on_host_task_check_ok(&run_state.context, x, host),
+            }
+        }
+        Err(x) => {
+            run_state.visitor.read().unwrap().on_host_task_failed(&run_state.context, x, host);
+        }
+    }
+
+    result
+}
+
 pub fn fsm_run_task(run_state: &Arc<RunState>, play: &Play, task: &Task, are_handlers: HandlerMode) -> Result<(), String> {
 
     // if running in check mode various functions will short circuit early
@@ -145,7 +176,7 @@ fn run_task_on_host(
     run_state: &Arc<RunState>,
     input_connection: Arc<Mutex<dyn Connection>>,
     host: &Arc<RwLock<Host>>,
-    play: &Play, 
+    play: &Play,
     task: &Task,
     are_handlers: HandlerMode) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
 
@@ -183,7 +214,7 @@ fn run_task_on_host(
 
     // process the YAML inputs of the task and turn them into something we can  use
     // initially we run this in 'template off' mode which returns basically junk
-    // but allows us to get the 'items' data off the collection. 
+    // but allows us to get the 'items' data off the collection.
     let evaluated = task.evaluate(&handle, &validate, TemplateMode::Off)?;
 
     if evaluated.with.is_some() {
@@ -371,7 +402,6 @@ fn run_task_on_host_inner(
     let query = TaskRequest::query(&sudo_details);
 
     // invoke the resource and see what actions it thinks need to be performed
-
     let qrc = action.dispatch(&handle, &query);
 
     // in check mode we short-circuit evaluation early, except for passive modules

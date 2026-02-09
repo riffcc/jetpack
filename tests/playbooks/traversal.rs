@@ -33,6 +33,7 @@ fn test_run_state_creation() {
         processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
+        async_mode: false,
     };
 
     assert_eq!(run_state.limit_hosts.len(), 0);
@@ -67,6 +68,7 @@ fn test_run_state_with_limits() {
         processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
+        async_mode: false,
     };
     
     assert_eq!(run_state.limit_hosts.len(), 2);
@@ -118,6 +120,7 @@ fn test_run_state_paths() {
         processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
+        async_mode: false,
     };
     
     let playbook_paths = run_state.playbook_paths.read().unwrap();

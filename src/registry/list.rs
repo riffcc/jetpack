@@ -44,6 +44,7 @@ use crate::modules::control::facts::FactsTask;
 use crate::modules::control::self_locate::SelfLocateTask;
 use crate::modules::control::set::SetTask;
 use crate::modules::control::wait_for_host::WaitForHostTask;
+use crate::modules::control::wait_for_others::WaitForOthersTask;
 
 // files
 use crate::modules::files::copy::CopyTask;
@@ -114,6 +115,7 @@ pub enum Task {
     Unpack(UnpackTask),
     User(UserTask),
     Wait_For_Host(WaitForHostTask),
+    Wait_For_Others(WaitForOthersTask),
     Yum(YumDnfTask),
     Zypper(ZypperTask),
 }
@@ -155,6 +157,7 @@ impl Task {
             Task::Unpack(x)     => x.get_module(),
             Task::User(x)       => x.get_module(),
             Task::Wait_For_Host(x) => x.get_module(),
+            Task::Wait_For_Others(x) => x.get_module(),
             Task::Yum(x)        => x.get_module(),
             Task::Zypper(x)     => x.get_module(),
         };
@@ -195,6 +198,7 @@ impl Task {
             Task::Unpack(x)     => x.get_name(),
             Task::User(x)       => x.get_name(),
             Task::Wait_For_Host(x) => x.get_name(),
+            Task::Wait_For_Others(x) => x.get_name(),
             Task::Yum(x)        => x.get_name(),
             Task::Zypper(x)     => x.get_name(),
         };
@@ -235,6 +239,7 @@ impl Task {
             Task::Unpack(x)     => x.get_with(),
             Task::User(x)       => x.get_with(),
             Task::Wait_For_Host(x) => x.get_with(),
+            Task::Wait_For_Others(x) => x.get_with(),
             Task::Yum(x)        => x.get_with(),
             Task::Zypper(x)     => x.get_with(),
         };
@@ -275,6 +280,7 @@ impl Task {
             Task::Unpack(x)     => x.evaluate(handle, request, tm),
             Task::User(x)       => x.evaluate(handle, request, tm),
             Task::Wait_For_Host(x) => x.evaluate(handle, request, tm),
+            Task::Wait_For_Others(x) => x.evaluate(handle, request, tm),
             Task::Yum(x)        => x.evaluate(handle, request, tm),
             Task::Zypper(x)     => x.evaluate(handle, request, tm),
         };
@@ -284,6 +290,21 @@ impl Task {
 
     pub fn get_display_name(&self) -> String {
         return match self.get_name() { Some(x) => x, _ => self.get_module()  }
+    }
+
+    /// Returns true if this task is a `wait_for_others` barrier task.
+    pub fn is_wait_for_others(&self) -> bool {
+        matches!(self, Task::Wait_For_Others(_))
+    }
+
+    /// If this is a `wait_for_others` task, returns whether it's in strict mode.
+    pub fn is_wait_for_others_strict(&self) -> bool {
+        match self {
+            Task::Wait_For_Others(t) => {
+                t.mode.as_ref().map(|m| m.eq_ignore_ascii_case("strict")).unwrap_or(false)
+            }
+            _ => false,
+        }
     }
 
 }
