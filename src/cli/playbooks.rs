@@ -163,10 +163,12 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
     };
 }
 
-/// Fetch a playbook from a URL (HTTPS) or clone a git repository.
+/// Fetch a playbook from a URL (HTTPS), tarball, or git repository.
 ///
 /// - HTTPS URL ending in .yml/.yaml → downloaded to a temp file
+/// - Tarball URL (.tar.gz, .tgz, .tar.xz, .tar.bz2, .tar) → downloaded and extracted
 /// - Git URL (ending in .git or containing github/gitlab) → shallow clone
+/// - Other URLs → assumed to be a raw playbook file
 /// - Returns the path to the playbook file or directory
 fn fetch_playbook_url(url: &str) -> Result<PathBuf, String> {
     let temp_dir = std::env::temp_dir().join("jetpack-pull");
@@ -179,36 +181,47 @@ fn fetch_playbook_url(url: &str) -> Result<PathBuf, String> {
 
         println!("pulling playbook from {}", url);
 
-        // Use curl (universally available) to download
-        let output = std::process::Command::new("curl")
-            .arg("-sfL")
-            .arg("--connect-timeout")
-            .arg("30")
-            .arg("-o")
-            .arg(dest.to_str().unwrap())
-            .arg(url)
-            .output()
-            .map_err(|e| format!("curl failed: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("curl failed ({}): {}", output.status, stderr));
-        }
+        curl_download(url, dest.to_str().unwrap())?;
 
         if !dest.exists() {
             return Err(format!("download succeeded but file not found: {:?}", dest));
         }
 
         Ok(dest)
+    } else if is_tarball_url(url) {
+        // Tarball: download and extract
+        let filename = url.rsplit('/').next().unwrap_or("playbook.tar.gz");
+        let archive = temp_dir.join(filename);
+        let extract_dir = temp_dir.join("extracted");
+        let _ = std::fs::remove_dir_all(&extract_dir);
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| format!("failed to create extraction dir: {}", e))?;
+
+        println!("pulling playbook archive from {}", url);
+
+        curl_download(url, archive.to_str().unwrap())?;
+
+        // Extract — tar auto-detects compression
+        let output = std::process::Command::new("tar")
+            .arg("xf")
+            .arg(archive.to_str().unwrap())
+            .arg("-C")
+            .arg(extract_dir.to_str().unwrap())
+            .output()
+            .map_err(|e| format!("tar extraction failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("tar extraction failed ({}): {}", output.status, stderr));
+        }
+
+        find_playbook_in_dir(&extract_dir)
     } else if url.ends_with(".git")
-        || url.contains("github.com")
-        || url.contains("gitlab.com")
-        || url.contains("codeberg.org")
         || url.starts_with("git@")
     {
         // Git clone
         let repo_dir = temp_dir.join("repo");
-        let _ = std::fs::remove_dir_all(&repo_dir); // clean previous
+        let _ = std::fs::remove_dir_all(&repo_dir);
 
         println!("cloning repository from {}", url);
 
@@ -226,40 +239,63 @@ fn fetch_playbook_url(url: &str) -> Result<PathBuf, String> {
             return Err(format!("git clone failed ({}): {}", output.status, stderr));
         }
 
-        // Look for playbook files in the cloned repo
-        // Check common locations: playbook.yml, site.yml, main.yml, playbooks/
-        for candidate in &["playbook.yml", "site.yml", "main.yml", "playbook.yaml", "site.yaml"] {
-            let path = repo_dir.join(candidate);
-            if path.exists() {
-                return Ok(path);
-            }
-        }
-
-        // If no standard playbook found, return the repo dir
-        // (user should specify --playbook to pick the right file)
-        Ok(repo_dir)
+        find_playbook_in_dir(&repo_dir)
     } else {
         // Assume HTTPS URL to a raw file
         let dest = temp_dir.join("playbook.yml");
 
         println!("pulling playbook from {}", url);
 
-        let output = std::process::Command::new("curl")
-            .arg("-sfL")
-            .arg("--connect-timeout")
-            .arg("30")
-            .arg("-o")
-            .arg(dest.to_str().unwrap())
-            .arg(url)
-            .output()
-            .map_err(|e| format!("curl failed: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("curl failed ({}): {}", output.status, stderr));
-        }
+        curl_download(url, dest.to_str().unwrap())?;
 
         Ok(dest)
     }
+}
+
+/// Check if a URL points to a tarball archive.
+fn is_tarball_url(url: &str) -> bool {
+    // Strip query string for extension matching
+    let path = url.split('?').next().unwrap_or(url);
+    path.ends_with(".tar.gz")
+        || path.ends_with(".tgz")
+        || path.ends_with(".tar.xz")
+        || path.ends_with(".tar.bz2")
+        || path.ends_with(".tar")
+}
+
+/// Download a file from a URL using curl.
+fn curl_download(url: &str, dest: &str) -> Result<(), String> {
+    let output = std::process::Command::new("curl")
+        .arg("-sfL")
+        .arg("--connect-timeout")
+        .arg("30")
+        .arg("--retry")
+        .arg("3")
+        .arg("-o")
+        .arg(dest)
+        .arg(url)
+        .output()
+        .map_err(|e| format!("curl failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("download failed ({}): {}", output.status, stderr));
+    }
+
+    Ok(())
+}
+
+/// Search a directory for a playbook entry point.
+/// Returns the path to the playbook file, or the directory itself if no standard name found.
+fn find_playbook_in_dir(dir: &PathBuf) -> Result<PathBuf, String> {
+    for candidate in &["playbook.yml", "site.yml", "main.yml", "playbook.yaml", "site.yaml"] {
+        let path = dir.join(candidate);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    // No standard playbook found — return the directory
+    // (implicit role/module discovery will still work)
+    Ok(dir.clone())
 }
 
