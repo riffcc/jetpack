@@ -31,6 +31,7 @@ fn create_test_template() -> Template {
         processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
         processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+        output_handler: None,
     });
     
     let hostname = "testhost".to_string();

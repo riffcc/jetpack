@@ -27,8 +27,14 @@ fn test_run_state_creation() {
         connection_factory: Arc::new(RwLock::new(NoFactory::new())),
         tags: None,
         allow_localhost_delegation: false,
+        is_pull_mode: false,
+        play_groups: None,
+        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+        output_handler: None,
     };
-    
+
     assert_eq!(run_state.limit_hosts.len(), 0);
     assert_eq!(run_state.limit_groups.len(), 0);
     assert!(run_state.batch_size.is_none());
@@ -55,6 +61,12 @@ fn test_run_state_with_limits() {
         connection_factory: Arc::new(RwLock::new(NoFactory::new())),
         tags: Some(vec!["deploy".to_string(), "configure".to_string()]),
         allow_localhost_delegation: true,
+        is_pull_mode: false,
+        play_groups: None,
+        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+        output_handler: None,
     };
     
     assert_eq!(run_state.limit_hosts.len(), 2);
@@ -100,6 +112,12 @@ fn test_run_state_paths() {
         connection_factory: Arc::new(RwLock::new(NoFactory::new())),
         tags: None,
         allow_localhost_delegation: false,
+        is_pull_mode: false,
+        play_groups: None,
+        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+        output_handler: None,
     };
     
     let playbook_paths = run_state.playbook_paths.read().unwrap();

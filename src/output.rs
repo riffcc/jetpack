@@ -36,7 +36,14 @@ pub trait OutputHandler: Send + Sync {
     fn on_handler_end(&self, handler_name: &str);
     
     fn on_recap(&self, recap_data: RecapData);
-    
+
+    // Provisioning lifecycle events
+    fn on_provision_created(&self, _host: &str) {}
+    fn on_provision_exists(&self, _host: &str) {}
+    fn on_provision_ssh_wait(&self, _host: &str, _ip: &str, _timeout_secs: u64) {}
+    fn on_provision_ssh_ready(&self, _host: &str, _elapsed_secs: u64, _attempts: u32) {}
+    fn on_provision_destroyed(&self, _host: &str) {}
+
     fn log(&self, level: LogLevel, message: &str);
     fn debug(&self, message: &str) {
         self.log(LogLevel::Debug, message);

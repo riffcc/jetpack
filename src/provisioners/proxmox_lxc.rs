@@ -734,14 +734,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
 
-        // Wait for SSH to be ready before returning - "Created means ready"
-        if config.wait_for_host != Some(false) {
-            if let Some(ip) = self.get_ip(&config, inventory_name, inventory)? {
-                let ssh_user = config.ssh_user.as_deref().unwrap_or("root");
-                crate::provisioners::wait_for_ssh(&ip, 22, ssh_user, &config, hostname)?;
-            }
-        }
-
+        // SSH wait is handled by ensure_host_provisioned() which has the output handler
         Ok(ProvisionResult::Created)
     }
 

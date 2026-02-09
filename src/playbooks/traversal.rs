@@ -60,6 +60,7 @@ pub struct RunState {
     pub allow_localhost_delegation: bool,
     pub is_pull_mode: bool,
     pub play_groups: Option<Vec<String>>,
+    pub output_handler: Option<crate::output::OutputHandlerRef>,
     // Role dependency tracking
     pub processed_role_tasks: Arc<RwLock<HashSet<String>>>,
     pub processed_role_handlers: Arc<RwLock<HashSet<String>>>,
@@ -304,7 +305,7 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                 let dns_config = host_vars.get(&dns_key)
                     .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
 
-                match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref()) {
+                match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref(), run_state.output_handler.as_ref()) {
                     Ok(crate::provisioners::ProvisionResult::Destroyed) => {
                         // Host was destroyed, skip it
                         run_state.visitor.read().unwrap().on_host_provisioned(

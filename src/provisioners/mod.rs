@@ -176,6 +176,7 @@ pub fn wait_for_ssh(
     _user: &str,  // Reserved for future SSH authentication check
     config: &ProvisionConfig,
     host_name: &str,
+    output: Option<&crate::output::OutputHandlerRef>,
 ) -> Result<(), String> {
     use std::net::TcpStream;
     use std::time::{Duration, Instant};
@@ -198,6 +199,9 @@ pub fn wait_for_ssh(
     let mut current_delay = initial_delay;
     let mut attempt = 0;
 
+    if let Some(out) = output {
+        out.on_provision_ssh_wait(host_name, ip, timeout);
+    }
     eprintln!("  → waiting for SSH on {}:{} (timeout: {}s)", ip, port, timeout);
 
     loop {
@@ -213,6 +217,9 @@ pub fn wait_for_ssh(
                 // Port is open, try SSH connection
                 // We use a simple TCP check for now - if port 22 responds, SSH is likely ready
                 let elapsed = start.elapsed().as_secs();
+                if let Some(out) = output {
+                    out.on_provision_ssh_ready(host_name, elapsed, attempt);
+                }
                 eprintln!("  → SSH available on {} after {}s ({} attempts)", host_name, elapsed, attempt);
                 return Ok(());
             }
@@ -270,6 +277,7 @@ pub fn ensure_host_provisioned(
     inventory_name: &str,
     inventory: &Arc<RwLock<Inventory>>,
     dns_config: Option<&DnsConfig>,
+    output: Option<&crate::output::OutputHandlerRef>,
 ) -> Result<ProvisionResult, String> {
     // Handle state: absent - destroy instead of provision
     if provision_config.state == "absent" {
@@ -279,6 +287,23 @@ pub fn ensure_host_provisioned(
 
     let provisioner = get_provisioner(&provision_config.provision_type)?;
     let result = provisioner.ensure_exists(provision_config, inventory_name, inventory)?;
+
+    // Emit lifecycle event
+    if let Some(out) = output {
+        match &result {
+            ProvisionResult::Created => out.on_provision_created(inventory_name),
+            ProvisionResult::AlreadyExists => out.on_provision_exists(inventory_name),
+            _ => {}
+        }
+    }
+
+    // Wait for SSH connectivity (moved here from individual provisioners so output handler is available)
+    if provision_config.wait_for_host != Some(false) {
+        if let Ok(Some(ip)) = provisioner.get_ip(provision_config, inventory_name, inventory) {
+            let ssh_user = provision_config.ssh_user.as_deref().unwrap_or("root");
+            wait_for_ssh(&ip, 22, ssh_user, provision_config, inventory_name, output)?;
+        }
+    }
 
     // Create DNS record if dns config is present and we have an IP
     if let Some(dns_config) = dns_config {
