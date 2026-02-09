@@ -88,8 +88,8 @@ impl PlaybookRunner {
                 }
             }
             _ => {
-                // For non-local modes, require inventory
-                if self.config.inventory_paths.read().unwrap().is_empty() {
+                // For non-local modes, require inventory (skip check if provided programmatically)
+                if self.provided_inventory.is_none() && self.config.inventory_paths.read().unwrap().is_empty() {
                     return Err(JetpackError::Config("No inventory paths specified".into()));
                 }
                 
