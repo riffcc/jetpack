@@ -33,8 +33,9 @@ pub mod error;
 pub mod output;
 
 // Re-export commonly used types for library users
-pub use api::{PlaybookRunner, PlaybookResult, run_playbook};
+pub use api::{PlaybookRunner, PlaybookRunnerBuilder, PlaybookResult, run_playbook};
 pub use config::{JetpackConfig, ConnectionMode};
 pub use error::{JetpackError, Result};
 pub use output::{OutputHandler, OutputHandlerRef, TerminalOutputHandler, NullOutputHandler, LogLevel, RecapData};
 pub use inventory::inventory::Inventory;
+pub use provisioners::ProvisionConfig;

@@ -189,4 +189,9 @@ impl JetpackConfig {
         self.verbosity = 1;
         self
     }
+
+    pub fn login_password(mut self, password: String) -> Self {
+        self.login_password = Some(password);
+        self
+    }
 }

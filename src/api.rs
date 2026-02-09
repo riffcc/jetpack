@@ -32,6 +32,7 @@ use std::sync::{Arc, RwLock};
 pub struct PlaybookRunner {
     config: JetpackConfig,
     output_handler: OutputHandlerRef,
+    provided_inventory: Option<Arc<RwLock<Inventory>>>,
 }
 
 impl PlaybookRunner {
@@ -40,12 +41,20 @@ impl PlaybookRunner {
         Self {
             config,
             output_handler: Arc::new(NullOutputHandler),
+            provided_inventory: None,
         }
     }
     
     /// Set a custom output handler
     pub fn with_output_handler(mut self, handler: Arc<dyn OutputHandler>) -> Self {
         self.output_handler = handler;
+        self
+    }
+
+    /// Use a pre-built inventory instead of loading from files.
+    /// When set, inventory_paths are ignored and this inventory is used directly.
+    pub fn with_inventory(mut self, inventory: Arc<RwLock<Inventory>>) -> Self {
+        self.provided_inventory = Some(inventory);
         self
     }
     
@@ -59,14 +68,17 @@ impl PlaybookRunner {
                 .map_err(|e| JetpackError::Config(format!("Failed to build thread pool: {}", e)))?;
         }
         
-        // Create and load inventory
-        let inventory = Arc::new(RwLock::new(Inventory::new()));
-        
-        // Load inventory for all modes if inventory paths are provided
-        if !self.config.inventory_paths.read().unwrap().is_empty() {
-            load_inventory(&inventory, Arc::clone(&self.config.inventory_paths))
-                .map_err(|e| JetpackError::Inventory(e))?;
-        }
+        // Use provided inventory or create and load from files
+        let inventory = if let Some(ref inv) = self.provided_inventory {
+            Arc::clone(inv)
+        } else {
+            let inv = Arc::new(RwLock::new(Inventory::new()));
+            if !self.config.inventory_paths.read().unwrap().is_empty() {
+                load_inventory(&inv, Arc::clone(&self.config.inventory_paths))
+                    .map_err(|e| JetpackError::Inventory(e))?;
+            }
+            inv
+        };
         
         match self.config.connection_mode {
             ConnectionMode::Local => {
@@ -174,13 +186,14 @@ pub fn run_playbook(playbook_path: &str) -> PlaybookRunnerBuilder {
 
 pub struct PlaybookRunnerBuilder {
     config: JetpackConfig,
+    provided_inventory: Option<Arc<RwLock<Inventory>>>,
 }
 
 impl PlaybookRunnerBuilder {
     fn new(playbook_path: &str) -> Self {
         let config = JetpackConfig::new()
             .playbook(playbook_path);
-        Self { config }
+        Self { config, provided_inventory: None }
     }
     
     pub fn inventory(mut self, path: &str) -> Self {
@@ -232,15 +245,32 @@ impl PlaybookRunnerBuilder {
         self.config = self.config.check_mode(true);
         self
     }
-    
+
+    pub fn login_password(mut self, password: &str) -> Self {
+        self.config = self.config.login_password(password.to_string());
+        self
+    }
+
+    /// Use a pre-built inventory instead of loading from files.
+    pub fn with_inventory(mut self, inventory: Arc<RwLock<Inventory>>) -> Self {
+        self.provided_inventory = Some(inventory);
+        self
+    }
+
     pub fn run(self) -> Result<PlaybookResult> {
-        let runner = PlaybookRunner::new(self.config);
+        let mut runner = PlaybookRunner::new(self.config);
+        if let Some(inv) = self.provided_inventory {
+            runner = runner.with_inventory(inv);
+        }
         runner.run()
     }
-    
+
     pub fn run_with_output(self, handler: Arc<dyn OutputHandler>) -> Result<PlaybookResult> {
-        let runner = PlaybookRunner::new(self.config)
+        let mut runner = PlaybookRunner::new(self.config)
             .with_output_handler(handler);
+        if let Some(inv) = self.provided_inventory {
+            runner = runner.with_inventory(inv);
+        }
         runner.run()
     }
 }
