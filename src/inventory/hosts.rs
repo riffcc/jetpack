@@ -72,6 +72,10 @@ impl Host {
         self.provision = Some(config);
     }
 
+    pub fn clear_provision(&mut self) {
+        self.provision = None;
+    }
+
     pub fn get_provision(&self) -> Option<&ProvisionConfig> {
         self.provision.as_ref()
     }
