@@ -101,7 +101,7 @@ impl PlaybookRunner {
         
         
         // Check playbook paths
-        if self.config.playbook_paths.read().unwrap().is_empty() {
+        if self.config.playbook_paths.read().unwrap().is_empty() && self.config.playbook_contents.is_empty() {
             return Err(JetpackError::Config("No playbook paths specified".into()));
         }
         
@@ -156,6 +156,7 @@ impl PlaybookRunner {
             play_groups: None,
             output_handler: Some(self.output_handler.clone()),
             async_mode: self.config.async_mode,
+            playbook_contents: self.config.playbook_contents.clone(),
             processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
             processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
             role_processing_stack: Arc::new(RwLock::new(Vec::new())),
@@ -187,6 +188,11 @@ pub fn run_playbook(playbook_path: &str) -> PlaybookRunnerBuilder {
     PlaybookRunnerBuilder::new(playbook_path)
 }
 
+/// Builder-style API for inline playbook content (no file paths needed)
+pub fn run_inline(name: &str, yaml: &str) -> PlaybookRunnerBuilder {
+    PlaybookRunnerBuilder::new_inline(name, yaml)
+}
+
 pub struct PlaybookRunnerBuilder {
     config: JetpackConfig,
     provided_inventory: Option<Arc<RwLock<Inventory>>>,
@@ -196,6 +202,12 @@ impl PlaybookRunnerBuilder {
     fn new(playbook_path: &str) -> Self {
         let config = JetpackConfig::new()
             .playbook(playbook_path);
+        Self { config, provided_inventory: None }
+    }
+
+    fn new_inline(name: &str, yaml: &str) -> Self {
+        let config = JetpackConfig::new()
+            .playbook_content(name, yaml);
         Self { config, provided_inventory: None }
     }
     
@@ -251,6 +263,11 @@ impl PlaybookRunnerBuilder {
 
     pub fn async_mode(mut self) -> Self {
         self.config = self.config.async_mode(true);
+        self
+    }
+
+    pub fn playbook_content(mut self, name: &str, yaml: &str) -> Self {
+        self.config = self.config.playbook_content(name, yaml);
         self
     }
 

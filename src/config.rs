@@ -41,6 +41,7 @@ pub struct JetpackConfig {
     pub check_mode: bool,
     pub async_mode: bool,
     pub connection_mode: ConnectionMode,
+    pub playbook_contents: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +81,7 @@ impl Default for JetpackConfig {
             check_mode: false,
             async_mode: false,
             connection_mode: ConnectionMode::Ssh,
+            playbook_contents: Vec::new(),
         }
     }
 }
@@ -171,6 +173,11 @@ impl JetpackConfig {
 
     pub fn async_mode(mut self, async_mode: bool) -> Self {
         self.async_mode = async_mode;
+        self
+    }
+
+    pub fn playbook_content(mut self, name: impl Into<String>, yaml: impl Into<String>) -> Self {
+        self.playbook_contents.push((name.into(), yaml.into()));
         self
     }
 

@@ -64,6 +64,7 @@ pub struct RunState {
     pub play_groups: Option<Vec<String>>,
     pub output_handler: Option<crate::output::OutputHandlerRef>,
     pub async_mode: bool,
+    pub playbook_contents: Vec<(String, String)>,
     // Role dependency tracking
     pub processed_role_tasks: Arc<RwLock<HashSet<String>>>,
     pub processed_role_handlers: Arc<RwLock<HashSet<String>>>,
@@ -126,7 +127,35 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
 
 
     }
-    // disconnect from all hosts and exit. 
+
+    // Process inline playbook contents (from API's playbook_content())
+    for (name, yaml_content) in &run_state.playbook_contents {
+        {
+            let mut ctx = run_state.context.write().unwrap();
+            ctx.set_playbook_path(&PathBuf::from(name));
+        }
+
+        run_state.visitor.read().unwrap().on_playbook_start(&run_state.context);
+
+        let parsed: Result<Vec<Play>, serde_yaml::Error> = serde_yaml::from_str(yaml_content);
+        if let Err(e) = parsed {
+            return Err(format!("YAML parse error in inline playbook '{}': {}", name, e));
+        }
+
+        let plays: Vec<Play> = parsed.unwrap();
+        for (play_index, play) in plays.iter().enumerate() {
+            run_state.context.write().unwrap().play_index = play_index;
+
+            match handle_play(&run_state, play) {
+                Ok(_) => {},
+                Err(s) => { return Err(s); }
+            }
+            run_state.context.read().unwrap().connection_cache.write().unwrap().clear();
+        }
+        run_state.context.read().unwrap().connection_cache.write().unwrap().clear();
+    }
+
+    // disconnect from all hosts and exit.
     run_state.context.read().unwrap().connection_cache.write().unwrap().clear();
     run_state.visitor.read().unwrap().on_exit(&run_state.context);
     return Ok(())
