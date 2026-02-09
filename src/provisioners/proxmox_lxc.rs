@@ -262,7 +262,12 @@ impl ProxmoxLxcProvisioner {
 
 
     fn get_api_url(&self, conn: &ClusterConnection, path: &str) -> String {
-        format!("https://{}:8006/api2/json{}", conn.api_host, path)
+        // api_host may already include a port (e.g. "host:8006"); only append default if missing
+        if conn.api_host.contains(':') {
+            format!("https://{}/api2/json{}", conn.api_host, path)
+        } else {
+            format!("https://{}:8006/api2/json{}", conn.api_host, path)
+        }
     }
 
     /// Find container by hostname
