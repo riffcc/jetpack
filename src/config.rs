@@ -39,6 +39,7 @@ pub struct JetpackConfig {
     pub login_password: Option<String>,
     pub private_key_file: Option<String>,
     pub check_mode: bool,
+    pub async_mode: bool,
     pub connection_mode: ConnectionMode,
 }
 
@@ -77,6 +78,7 @@ impl Default for JetpackConfig {
             login_password: None,
             private_key_file: None,
             check_mode: false,
+            async_mode: false,
             connection_mode: ConnectionMode::Ssh,
         }
     }
@@ -164,6 +166,11 @@ impl JetpackConfig {
 
     pub fn check_mode(mut self, check: bool) -> Self {
         self.check_mode = check;
+        self
+    }
+
+    pub fn async_mode(mut self, async_mode: bool) -> Self {
+        self.async_mode = async_mode;
         self
     }
 
