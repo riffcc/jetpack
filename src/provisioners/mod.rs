@@ -62,6 +62,9 @@ pub struct ProvisionConfig {
     /// Reference to the cluster/hypervisor host in inventory
     pub cluster: String,
 
+    /// Target Proxmox node name (e.g. "bee", "cardinal"). Overrides proxmox_node from cluster host vars.
+    pub node: Option<String>,
+
     /// Hostname for the VM/container (defaults to inventory name if not specified)
     pub hostname: Option<String>,
 

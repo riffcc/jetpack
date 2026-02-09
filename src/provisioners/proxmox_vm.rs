@@ -60,6 +60,7 @@ impl ProxmoxVmProvisioner {
             provision_type: self.template_string(&templar, &config.provision_type, vars)?,
             state: config.state.clone(),
             cluster: self.template_string(&templar, &config.cluster, vars)?,
+            node: self.template_option(&templar, &config.node, vars)?,
             hostname: self.template_option(&templar, &config.hostname, vars)?,
             vmid: self.template_option(&templar, &config.vmid, vars)?,
             memory: self.template_option(&templar, &config.memory, vars)?,
@@ -108,8 +109,8 @@ impl ProxmoxVmProvisioner {
             .map(|s| s.to_string())
             .ok_or_else(|| format!("Cluster '{}' missing proxmox_api_host", config.cluster))?;
 
-        let node = config.extra.get("node")
-            .cloned()
+        let node = config.node.clone()
+            .or_else(|| config.extra.get("node").cloned())
             .or_else(|| vars.get("proxmox_node").and_then(|v| v.as_str()).map(|s| s.to_string()))
             .ok_or_else(|| "No 'node' specified".to_string())?;
 
@@ -140,7 +141,11 @@ impl ProxmoxVmProvisioner {
     }
 
     fn get_ticket(&self, api_host: &str, username: &str, password: &str) -> Result<(String, String), String> {
-        let url = format!("https://{}:8006/api2/json/access/ticket", api_host);
+        let url = if api_host.contains(':') {
+            format!("https://{}/api2/json/access/ticket", api_host)
+        } else {
+            format!("https://{}:8006/api2/json/access/ticket", api_host)
+        };
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
             .map_err(|e| format!("Runtime: {}", e))?;
 
@@ -179,7 +184,11 @@ impl ProxmoxVmProvisioner {
     }
 
     fn api_url(&self, conn: &ClusterConnection, path: &str) -> String {
-        format!("https://{}:8006/api2/json{}", conn.api_host, path)
+        if conn.api_host.contains(':') {
+            format!("https://{}/api2/json{}", conn.api_host, path)
+        } else {
+            format!("https://{}:8006/api2/json{}", conn.api_host, path)
+        }
     }
 
     fn find_vm(&self, conn: &ClusterConnection, hostname: &str) -> Result<Option<u64>, String> {

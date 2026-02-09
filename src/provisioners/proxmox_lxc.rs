@@ -92,6 +92,7 @@ impl ProxmoxLxcProvisioner {
             provision_type: self.template_string(&templar, &config.provision_type, vars)?,
             state: config.state.clone(),
             cluster: self.template_string(&templar, &config.cluster, vars)?,
+            node: self.template_option(&templar, &config.node, vars)?,
             hostname: self.template_option(&templar, &config.hostname, vars)?,
             vmid: self.template_option(&templar, &config.vmid, vars)?,
             memory: self.template_option(&templar, &config.memory, vars)?,
@@ -150,9 +151,8 @@ impl ProxmoxLxcProvisioner {
             .map(|s| s.to_string())
             .unwrap_or_else(|| config.cluster.clone());
 
-        let node = vars.get("proxmox_node")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+        let node = config.node.clone()
+            .or_else(|| vars.get("proxmox_node").and_then(|v| v.as_str()).map(|s| s.to_string()))
             .unwrap_or_else(|| config.cluster.clone());
 
         // Try token auth first (preferred), fall back to password auth
@@ -197,7 +197,11 @@ impl ProxmoxLxcProvisioner {
 
     /// Get authentication ticket for password-based auth
     fn get_password_ticket(&self, api_host: &str, username: &str, password: &str) -> Result<(String, String), String> {
-        let url = format!("https://{}:8006/api2/json/access/ticket", api_host);
+        let url = if api_host.contains(':') {
+            format!("https://{}/api2/json/access/ticket", api_host)
+        } else {
+            format!("https://{}:8006/api2/json/access/ticket", api_host)
+        };
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
