@@ -99,47 +99,58 @@ impl CountdownBarrier {
         self.mode
     }
 
-    /// Wait at the barrier. Blocks until all expected participants arrive
-    /// or enough have withdrawn that the threshold is met.
+    /// Wait at the barrier. Yields the current thread (Rayon-aware) until
+    /// all expected participants arrive or enough have withdrawn.
+    ///
+    /// Unlike a Condvar-based wait, this releases the thread back to the
+    /// Rayon work-stealing pool so other hosts can make progress. This
+    /// prevents deadlock when the pool has fewer threads than hosts.
     ///
     /// Returns `Ok(())` on success, `Err` if all hosts withdrew or strict
     /// mode was violated.
     pub fn wait(&self) -> Result<(), BarrierError> {
-        let mut state = self.state.lock().unwrap();
-        let my_generation = state.generation;
+        let my_generation;
 
-        // Check for poison (strict mode violation)
-        if state.poisoned {
-            return Err(BarrierError::StrictWithdrawal);
+        // Register arrival under the lock, then release it.
+        {
+            let mut state = self.state.lock().unwrap();
+
+            if state.poisoned {
+                return Err(BarrierError::StrictWithdrawal);
+            }
+            if state.expected == 0 {
+                return Err(BarrierError::AllWithdrawn);
+            }
+
+            my_generation = state.generation;
+            state.arrived += 1;
+
+            // Are we the last one? Bump generation and wake Condvar waiters.
+            if state.arrived >= state.expected {
+                state.generation += 1;
+                state.arrived = 0;
+                self.cv.notify_all();
+                return Ok(());
+            }
         }
 
-        // Check degenerate case: nobody expected
-        if state.expected == 0 {
-            return Err(BarrierError::AllWithdrawn);
-        }
+        // Yield-based wait: release the thread so other work can run.
+        // In a Rayon context this feeds the work-stealing pool; outside
+        // Rayon (e.g. std::thread tests) it falls back to thread::yield.
+        loop {
+            rayon::yield_now();
 
-        state.arrived += 1;
-
-        // Are we the last one? If so, bump generation and wake everyone.
-        if state.arrived >= state.expected {
-            state.generation += 1;
-            state.arrived = 0;
-            self.cv.notify_all();
-            return Ok(());
-        }
-
-        // Wait until generation changes (meaning barrier was released)
-        // or until the barrier becomes poisoned/all-withdrawn.
-        while state.generation == my_generation && !state.poisoned && state.expected > 0 {
-            state = self.cv.wait(state).unwrap();
-        }
-
-        if state.poisoned {
-            Err(BarrierError::StrictWithdrawal)
-        } else if state.expected == 0 {
-            Err(BarrierError::AllWithdrawn)
-        } else {
-            Ok(())
+            let state = self.state.lock().unwrap();
+            if state.generation != my_generation {
+                return Ok(());
+            }
+            if state.poisoned {
+                return Err(BarrierError::StrictWithdrawal);
+            }
+            if state.expected == 0 {
+                return Err(BarrierError::AllWithdrawn);
+            }
+            // Drop lock, yield again
         }
     }
 

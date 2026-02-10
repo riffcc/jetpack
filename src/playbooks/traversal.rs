@@ -318,33 +318,26 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
         }
     }
 
-    // Provision hosts that need it before running any tasks
-    // In async mode, provision all hosts in parallel for maximum speed
+    // Async mode: each host provisions itself inside async_handle_batch,
+    // so hosts start their task list as soon as their own SSH is ready.
     if run_state.async_mode {
-        use rayon::prelude::*;
+        return async_handle_batch(run_state, play, hosts);
+    }
 
-        let failed: Vec<String> = hosts
-            .par_iter()
-            .filter_map(|host_arc| {
-                let (host_name, needs_provision, provision_config, host_vars) = {
-                    let host = host_arc.read().unwrap();
-                    (
-                        host.name.clone(),
-                        host.needs_provisioning(),
-                        host.get_provision().cloned(),
-                        host.get_variables()
-                    )
-                };
+    // Sequential mode: provision all hosts before running tasks
+    for host_arc in hosts.iter() {
+        let (host_name, needs_provision, provision_config, host_vars) = {
+            let host = host_arc.read().unwrap();
+            (
+                host.name.clone(),
+                host.needs_provisioning(),
+                host.get_provision().cloned(),
+                host.get_variables()
+            )
+        };
 
-                if !needs_provision {
-                    return None;
-                }
-
-                let config = match provision_config {
-                    Some(ref c) => c,
-                    None => return None,
-                };
-
+        if needs_provision {
+            if let Some(ref config) = provision_config {
                 let dns_key = serde_yaml::Value::String("dns".to_string());
                 let dns_config = host_vars.get(&dns_key)
                     .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
@@ -356,7 +349,7 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                             &host_name,
                             &crate::provisioners::ProvisionResult::Destroyed
                         );
-                        None
+                        continue;
                     }
                     Ok(result) => {
                         run_state.visitor.read().unwrap().on_host_provisioned(
@@ -392,93 +385,13 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                         if changed {
                             host.set_variables(vars);
                         }
-                        None
                     }
                     Err(e) => {
-                        Some(format!("Failed to provision host '{}': {}", host_name, e))
-                    }
-                }
-            })
-            .collect();
-
-        if !failed.is_empty() {
-            return Err(failed.join("\n"));
-        }
-    } else {
-        // Default: sequential provisioning
-        for host_arc in hosts.iter() {
-            let (host_name, needs_provision, provision_config, host_vars) = {
-                let host = host_arc.read().unwrap();
-                (
-                    host.name.clone(),
-                    host.needs_provisioning(),
-                    host.get_provision().cloned(),
-                    host.get_variables()
-                )
-            };
-
-            if needs_provision {
-                if let Some(ref config) = provision_config {
-                    let dns_key = serde_yaml::Value::String("dns".to_string());
-                    let dns_config = host_vars.get(&dns_key)
-                        .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
-
-                    match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref(), run_state.output_handler.as_ref()) {
-                        Ok(crate::provisioners::ProvisionResult::Destroyed) => {
-                            run_state.visitor.read().unwrap().on_host_provisioned(
-                                &run_state.context,
-                                &host_name,
-                                &crate::provisioners::ProvisionResult::Destroyed
-                            );
-                            continue;
-                        }
-                        Ok(result) => {
-                            run_state.visitor.read().unwrap().on_host_provisioned(
-                                &run_state.context,
-                                &host_name,
-                                &result
-                            );
-
-                            let ip = crate::provisioners::get_provisioner(&config.provision_type)
-                                .ok()
-                                .and_then(|p| p.get_ip(config, &host_name, &run_state.inventory).ok().flatten());
-
-                            let mut host = host_arc.write().unwrap();
-                            let mut vars = host.get_variables();
-                            let mut changed = false;
-
-                            if let Some(ref ip_addr) = ip {
-                                let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                                if !vars.contains_key(&key) {
-                                    vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
-                                    changed = true;
-                                }
-                            }
-
-                            if let Some(ref ssh_user) = config.ssh_user {
-                                let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                                if !vars.contains_key(&key) {
-                                    vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
-                                    changed = true;
-                                }
-                            }
-
-                            if changed {
-                                host.set_variables(vars);
-                            }
-                        }
-                        Err(e) => {
-                            return Err(format!("Failed to provision host '{}': {}", host_name, e));
-                        }
+                        return Err(format!("Failed to provision host '{}': {}", host_name, e));
                     }
                 }
             }
         }
-    }
-
-    // Async mode: host-parallel execution with explicit barrier synchronization
-    if run_state.async_mode {
-        return async_handle_batch(run_state, play, hosts);
     }
 
     // Default mode: task-parallel execution (all hosts per task, then next task)
@@ -558,22 +471,96 @@ fn async_handle_batch(
         ui.run(rx);
     });
 
-    // Run all hosts in parallel with a dedicated Rayon thread pool.
-    // The pool MUST have at least as many threads as hosts, otherwise
-    // barrier-based playbooks will deadlock: blocked threads hold all
-    // slots and queued hosts can never start.
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(hosts.len())
-        .build()
-        .map_err(|e| format!("Failed to build async thread pool: {}", e))?;
-
+    // Run all hosts in parallel with Rayon.
+    // Barriers use rayon::yield_now() instead of Condvar::wait(), so they
+    // release the thread back to the pool — safe with any pool size.
     let task_refs: Vec<&Task> = all_tasks;
-    let _total: i64 = pool.install(|| {
-        hosts
+    let _total: i64 = hosts
         .par_iter()
         .enumerate()
         .map(|(host_idx, host)| {
             let host_tx = tx.clone();
+
+            // Provision this host if needed (async: per-host, no batch gate)
+            {
+                let (host_name, needs_provision, provision_config, host_vars) = {
+                    let h = host.read().unwrap();
+                    (
+                        h.name.clone(),
+                        h.needs_provisioning(),
+                        h.get_provision().cloned(),
+                        h.get_variables()
+                    )
+                };
+
+                if needs_provision {
+                    if let Some(ref config) = provision_config {
+                        let dns_key = serde_yaml::Value::String("dns".to_string());
+                        let dns_config = host_vars.get(&dns_key)
+                            .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
+
+                        match ensure_host_provisioned(config, &host_name, &run_state.inventory, dns_config.as_ref(), run_state.output_handler.as_ref()) {
+                            Ok(crate::provisioners::ProvisionResult::Destroyed) => {
+                                run_state.visitor.read().unwrap().on_host_provisioned(
+                                    &run_state.context,
+                                    &host_name,
+                                    &crate::provisioners::ProvisionResult::Destroyed
+                                );
+                                async_ctx.withdraw_from(0);
+                                let _ = host_tx.send(HostEvent::HostFailed {
+                                    host_idx,
+                                    error: format!("host '{}' was destroyed by provisioner", host_name),
+                                });
+                                return 1;
+                            }
+                            Ok(result) => {
+                                run_state.visitor.read().unwrap().on_host_provisioned(
+                                    &run_state.context,
+                                    &host_name,
+                                    &result
+                                );
+
+                                let ip = crate::provisioners::get_provisioner(&config.provision_type)
+                                    .ok()
+                                    .and_then(|p| p.get_ip(config, &host_name, &run_state.inventory).ok().flatten());
+
+                                let mut h = host.write().unwrap();
+                                let mut vars = h.get_variables();
+                                let mut changed = false;
+
+                                if let Some(ref ip_addr) = ip {
+                                    let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
+                                    if !vars.contains_key(&key) {
+                                        vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
+                                        changed = true;
+                                    }
+                                }
+
+                                if let Some(ref ssh_user) = config.ssh_user {
+                                    let key = serde_yaml::Value::String("jet_ssh_user".to_string());
+                                    if !vars.contains_key(&key) {
+                                        vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
+                                        changed = true;
+                                    }
+                                }
+
+                                if changed {
+                                    h.set_variables(vars);
+                                }
+                            }
+                            Err(e) => {
+                                async_ctx.withdraw_from(0);
+                                run_state.context.write().unwrap().fail_host(host);
+                                let _ = host_tx.send(HostEvent::HostFailed {
+                                    host_idx,
+                                    error: format!("Failed to provision host '{}': {}", host_name, e),
+                                });
+                                return 1;
+                            }
+                        }
+                    }
+                }
+            }
 
             // Get connection for this host
             let connection_result = run_state
@@ -681,8 +668,7 @@ fn async_handle_batch(
             let _ = host_tx.send(HostEvent::HostCompleted { host_idx });
             1
         })
-        .sum()
-    }); // pool.install
+        .sum();
 
     // Signal UI thread to stop
     let _ = tx.send(HostEvent::AllDone);
