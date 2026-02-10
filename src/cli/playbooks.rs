@@ -127,6 +127,26 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
         Arc::clone(&parser.playbook_paths)
     };
 
+    // Discover roles/ and modules/ directories next to URL-fetched playbooks
+    let role_paths = Arc::clone(&parser.role_paths);
+    let module_paths = Arc::clone(&parser.module_paths);
+    if let Some(pb_path) = url_playbook {
+        if let Some(parent) = pb_path.parent() {
+            let roles_dir = parent.join("roles");
+            if roles_dir.is_dir() {
+                if let Ok(full) = std::fs::canonicalize(&roles_dir) {
+                    role_paths.write().unwrap().push(full);
+                }
+            }
+            let modules_dir = parent.join("modules");
+            if modules_dir.is_dir() {
+                if let Ok(full) = std::fs::canonicalize(&modules_dir) {
+                    module_paths.write().unwrap().push(full);
+                }
+            }
+        }
+    }
+
     // Choose connection factory: ChrootFactory if --chroot, otherwise LocalFactory
     let connection_factory: Arc<RwLock<dyn crate::connection::factory::ConnectionFactory>> =
         if let Some(ref chroot_path) = parser.chroot_path {
@@ -138,8 +158,8 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
     let run_state = Arc::new(RunState {
         inventory: Arc::clone(inventory),
         playbook_paths,
-        role_paths: Arc::clone(&parser.role_paths),
-        module_paths: Arc::clone(&parser.module_paths),
+        role_paths,
+        module_paths,
         limit_hosts: parser.limit_hosts.clone(),
         limit_groups: parser.limit_groups.clone(),
         batch_size: parser.batch_size.clone(),
@@ -263,8 +283,27 @@ fn is_tarball_url(url: &str) -> bool {
         || path.ends_with(".tar")
 }
 
-/// Download a file from a URL using curl.
+/// Download a file from a URL.
+///
+/// Tries `wget` first (available in Alpine/BusyBox environments),
+/// then falls back to `curl` if wget is not found.
 fn curl_download(url: &str, dest: &str) -> Result<(), String> {
+    // Try wget first (Alpine/BusyBox has it built-in)
+    match std::process::Command::new("wget").arg("-q").arg("-O").arg(dest).arg(url).output() {
+        Ok(output) if output.status.success() => return Ok(()),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("download failed (wget {}): {}", output.status, stderr));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // wget not found, fall through to curl
+        }
+        Err(e) => {
+            return Err(format!("wget failed: {}", e));
+        }
+    }
+
+    // Fall back to curl
     let output = std::process::Command::new("curl")
         .arg("-sfL")
         .arg("--connect-timeout")
@@ -279,7 +318,7 @@ fn curl_download(url: &str, dest: &str) -> Result<(), String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("download failed ({}): {}", output.status, stderr));
+        return Err(format!("download failed (curl {}): {}", output.status, stderr));
     }
 
     Ok(())

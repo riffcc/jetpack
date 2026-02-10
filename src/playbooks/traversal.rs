@@ -558,9 +558,18 @@ fn async_handle_batch(
         ui.run(rx);
     });
 
-    // Run all hosts in parallel with Rayon
+    // Run all hosts in parallel with a dedicated Rayon thread pool.
+    // The pool MUST have at least as many threads as hosts, otherwise
+    // barrier-based playbooks will deadlock: blocked threads hold all
+    // slots and queued hosts can never start.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(hosts.len())
+        .build()
+        .map_err(|e| format!("Failed to build async thread pool: {}", e))?;
+
     let task_refs: Vec<&Task> = all_tasks;
-    let _total: i64 = hosts
+    let _total: i64 = pool.install(|| {
+        hosts
         .par_iter()
         .enumerate()
         .map(|(host_idx, host)| {
@@ -672,7 +681,8 @@ fn async_handle_batch(
             let _ = host_tx.send(HostEvent::HostCompleted { host_idx });
             1
         })
-        .sum();
+        .sum()
+    }); // pool.install
 
     // Signal UI thread to stop
     let _ = tx.send(HostEvent::AllDone);

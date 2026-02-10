@@ -69,6 +69,11 @@ fn liftoff() -> Result<(),String> {
 
     match cli_parser.mode {
         jetpack::cli::parser::CLI_MODE_SHOW => {},
+        jetpack::cli::parser::CLI_MODE_PULL => {
+            if !cli_parser.playbook_set && cli_parser.pull_url.is_none() {
+                return Err(String::from("--playbook or --url is required for pull mode"));
+            }
+        },
         _ => {
             if ! cli_parser.playbook_set {
                 return Err(String::from("--playbook is required"));

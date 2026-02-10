@@ -75,7 +75,7 @@ pub fn directory_as_string(path: &Path) -> String {
 
 pub fn quit(s: &String) {
     // quit with a message - don't use this except in main.rs!
-    println!("{}", s); 
+    eprintln!("{}", s);
     process::exit(0x01)
 }
 
