@@ -50,6 +50,7 @@ use crate::modules::control::wait_for_others::WaitForOthersTask;
 use crate::modules::files::copy::CopyTask;
 use crate::modules::files::directory::DirectoryTask;
 use crate::modules::files::download::DownloadTask;
+use crate::modules::files::fetch::FetchTask;
 use crate::modules::files::file::FileTask;
 use crate::modules::files::git::GitTask;
 use crate::modules::files::r#move::MoveTask;
@@ -88,6 +89,7 @@ pub enum Task {
     Command(CommandTask),
     Copy(CopyTask),
     Debug(DebugTask),
+    Fetch(FetchTask),
     Directory(DirectoryTask),
     Dnf(YumDnfTask),
     Echo(EchoTask),
@@ -129,6 +131,7 @@ impl Task {
             Task::Assert(x)     => x.get_module(),
             Task::Copy(x)       => x.get_module(),
             Task::Debug(x)      => x.get_module(),
+            Task::Fetch(x)      => x.get_module(),
             Task::Directory(x)  => x.get_module(),
             Task::Dnf(x)        => x.get_module(),
             Task::Echo(x)       => x.get_module(),
@@ -169,7 +172,8 @@ impl Task {
             Task::Apt(x)        => x.get_name(),
             Task::Assert(x)     => x.get_name(),
             Task::Copy(x)       => x.get_name(),
-            Task::Debug(x)      => x.get_name(), 
+            Task::Debug(x)      => x.get_name(),
+            Task::Fetch(x)      => x.get_name(),
             Task::Directory(x)  => x.get_name(),
             Task::Dnf(x)        => x.get_name(),
             Task::Echo(x)       => x.get_name(),
@@ -210,7 +214,8 @@ impl Task {
             Task::Apt(x)        => x.get_with(),
             Task::Assert(x)     => x.get_with(),
             Task::Copy(x)       => x.get_with(),
-            Task::Debug(x)      => x.get_with(), 
+            Task::Debug(x)      => x.get_with(),
+            Task::Fetch(x)      => x.get_with(),
             Task::Directory(x)  => x.get_with(),
             Task::Dnf(x)        => x.get_with(),
             Task::Echo(x)       => x.get_with(),
@@ -251,7 +256,8 @@ impl Task {
             Task::Apt(x)        => x.evaluate(handle, request, tm),
             Task::Assert(x)     => x.evaluate(handle, request, tm),
             Task::Copy(x)       => x.evaluate(handle, request, tm),
-            Task::Debug(x)      => x.evaluate(handle, request, tm), 
+            Task::Debug(x)      => x.evaluate(handle, request, tm),
+            Task::Fetch(x)      => x.evaluate(handle, request, tm),
             Task::Directory(x)  => x.evaluate(handle, request, tm), 
             Task::Dnf(x)        => x.evaluate(handle, request, tm),
             Task::Echo(x)       => x.evaluate(handle, request, tm),

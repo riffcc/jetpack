@@ -232,9 +232,18 @@ impl Remote {
         return Ok(xfer_result);
     }
 
+    // fetches a file from the remote and returns its bytes.
+    // also stores the content in run_state.fetched_files keyed by remote_path.
+
+    pub fn fetch_file(&self, request: &Arc<TaskRequest>, remote_src: &String) -> Result<Vec<u8>, Arc<TaskResponse>> {
+        let content = self.connection.lock().unwrap().fetch_file(&self.response, request, remote_src)?;
+        self.run_state.fetched_files.lock().unwrap().insert(remote_src.clone(), content.clone());
+        Ok(content)
+    }
+
     // copies a file to a remote location
 
-    pub fn copy_file<G>(&self, request: &Arc<TaskRequest>, src: &Path, dest: &String, mut before_complete: G) -> Result<(), Arc<TaskResponse>> 
+    pub fn copy_file<G>(&self, request: &Arc<TaskRequest>, src: &Path, dest: &String, mut before_complete: G) -> Result<(), Arc<TaskResponse>>
     where G: FnMut(&String) -> Result<(), Arc<TaskResponse>> {   
         let (temp_dir, temp_path) = self.get_transfer_location(request)?;
         let real_path = self.get_effective_filename(temp_dir.clone(), temp_path.clone(), dest); /* will be either temp_path or path */
@@ -275,9 +284,15 @@ impl Remote {
     pub fn get_is_directory(&self, request: &Arc<TaskRequest>, path: &String) -> Result<bool,Arc<TaskResponse>> {
         let get_cmd_result = crate::tasks::cmd_library::get_is_directory_command(self.get_os_type(), path);
         let cmd = self.unwrap_string_result(&request, &get_cmd_result)?;
-        
-        let result = self.run(request, &cmd, CheckRc::Checked)?;
-        let (_rc, out) = cmd_info(&result);
+
+        // Use Unchecked: ls -ld exits non-zero when the path does not exist; that
+        // is not an error — it simply means the path is absent (not a directory).
+        let result = self.run(request, &cmd, CheckRc::Unchecked)?;
+        let (rc, out) = cmd_info(&result);
+        if rc != 0 {
+            // Path does not exist → definitely not a directory.
+            return Ok(false);
+        }
         // so far this assumes reliable ls -ld output across all supported operating systems, this may change
         // in wich case we may need to consider os_type here
         if out.starts_with("d") {

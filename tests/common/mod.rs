@@ -7,8 +7,8 @@ use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
 use jetpack::cli::parser::CliParser;
 use jetpack::connection::factory::ConnectionFactory;
 use jetpack::connection::local::LocalFactory;
-use std::sync::{Arc, RwLock};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub fn create_test_run_state() -> Arc<RunState> {
     let parser = CliParser::new();
@@ -43,5 +43,7 @@ pub fn create_test_run_state() -> Arc<RunState> {
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
         async_mode: false,
+        playbook_contents: Vec::new(),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     })
 }

@@ -34,6 +34,8 @@ pub trait Connection : Send + Sync {
 
     fn copy_file(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, src: &Path, dest: &String) -> Result<(), Arc<TaskResponse>>;
 
+    fn fetch_file(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, remote_path: &String) -> Result<Vec<u8>, Arc<TaskResponse>>;
+
     fn whoami(&self) -> Result<String,String>;
 
     fn run_command(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, cmd: &String, forward: Forward) -> Result<Arc<TaskResponse>,Arc<TaskResponse>>;

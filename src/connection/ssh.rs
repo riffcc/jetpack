@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use russh::client::{self, AuthResult};
 use russh::ChannelMsg;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::runtime::Runtime;
 
 // Minimal handler for russh client — accepts all host keys (same as ssh2 default)
@@ -474,6 +474,46 @@ impl Connection for SshConnection {
                 .map_err(|e| response.is_failed(request, &format!("sftp flush failed: {}", e)))?;
 
             Ok(())
+        })
+    }
+
+    fn fetch_file(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        remote_path: &String,
+    ) -> Result<Vec<u8>, Arc<TaskResponse>> {
+        let handle = self.handle.as_ref().expect("session not established");
+        let remote_path = remote_path.clone();
+
+        self.runtime.lock().unwrap().block_on(async {
+            let channel = handle
+                .channel_open_session()
+                .await
+                .map_err(|e| response.is_failed(request, &format!("sftp connection failed: {}", e)))?;
+            channel
+                .request_subsystem(true, "sftp")
+                .await
+                .map_err(|e| {
+                    response.is_failed(request, &format!("sftp subsystem request failed: {}", e))
+                })?;
+            let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
+                .await
+                .map_err(|e| {
+                    response.is_failed(request, &format!("sftp session failed: {}", e))
+                })?;
+
+            let mut file = sftp
+                .open(&remote_path)
+                .await
+                .map_err(|e| response.is_failed(request, &format!("sftp open failed: {}", e)))?;
+
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)
+                .await
+                .map_err(|e| response.is_failed(request, &format!("sftp read failed: {}", e)))?;
+
+            Ok(buf)
         })
     }
 

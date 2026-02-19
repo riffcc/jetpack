@@ -146,6 +146,12 @@ impl Connection for LocalConnection {
         };
     }
 
+    fn fetch_file(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, remote_path: &String) -> Result<Vec<u8>, Arc<TaskResponse>> {
+        std::fs::read(Path::new(remote_path)).map_err(|e| {
+            response.is_failed(request, &format!("fetch failed: {:?}", e))
+        })
+    }
+
     fn copy_file(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, src: &Path, remote_path: &String) -> Result<(), Arc<TaskResponse>> {
         // FIXME: this (temporary) implementation currently loads the file contents into memory which we do not want
         // copy the files with system calls instead.

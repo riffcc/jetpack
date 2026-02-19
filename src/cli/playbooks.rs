@@ -24,7 +24,8 @@ use crate::playbooks::traversal::{playbook_traversal,RunState};
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::visitor::{PlaybookVisitor,CheckMode};
 use crate::inventory::inventory::Inventory;
-use std::sync::{Arc,RwLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 use std::path::PathBuf;
 
 // code behind *most* playbook related CLI commands, launched from main.rs
@@ -107,6 +108,7 @@ fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: 
         processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
         processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
     return match playbook_traversal(&run_state) {
         Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),
@@ -176,6 +178,7 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
         processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
         processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
     return match playbook_traversal(&run_state) {
         Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),

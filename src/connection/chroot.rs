@@ -185,6 +185,18 @@ impl Connection for ChrootConnection {
         }
     }
 
+    fn fetch_file(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        remote_path: &String,
+    ) -> Result<Vec<u8>, Arc<TaskResponse>> {
+        let actual_src = self.resolve_path(remote_path);
+        std::fs::read(Path::new(&actual_src)).map_err(|e| {
+            response.is_failed(request, &format!("chroot fetch failed: {:?}", e))
+        })
+    }
+
     fn copy_file(
         &self,
         response: &Arc<Response>,

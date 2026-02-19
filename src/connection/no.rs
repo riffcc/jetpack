@@ -89,4 +89,9 @@ impl Connection for NoConnection {
        return Ok(());
    }
 
+   fn fetch_file(&self, _response: &Arc<Response>, _request: &Arc<TaskRequest>, _remote_path: &String) -> Result<Vec<u8>, Arc<TaskResponse>> {
+       // simulation mode — return empty bytes
+       return Ok(Vec::new());
+   }
+
 }

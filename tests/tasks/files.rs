@@ -32,21 +32,35 @@ fn test_recurse_clone() {
 
 #[test]
 fn test_file_attributes_input_is_octal_string() {
-    // Valid octal strings
+    // Valid — Rust-style prefix (0o)
+    assert!(FileAttributesInput::is_octal_string(&"0o755".to_string()));
+    assert!(FileAttributesInput::is_octal_string(&"0o644".to_string()));
+    assert!(FileAttributesInput::is_octal_string(&"0o000".to_string()));
+    assert!(FileAttributesInput::is_octal_string(&"0o777".to_string()));
+
+    // Valid — Unix/C-style prefix (0)
+    assert!(FileAttributesInput::is_octal_string(&"0755".to_string()));
+    assert!(FileAttributesInput::is_octal_string(&"0644".to_string()));
+    assert!(FileAttributesInput::is_octal_string(&"0000".to_string()));
+    assert!(FileAttributesInput::is_octal_string(&"0777".to_string()));
+
+    // Valid — bare digits (accepted by is_octal_string for internal use)
     assert!(FileAttributesInput::is_octal_string(&"755".to_string()));
     assert!(FileAttributesInput::is_octal_string(&"644".to_string()));
     assert!(FileAttributesInput::is_octal_string(&"000".to_string()));
     assert!(FileAttributesInput::is_octal_string(&"777".to_string()));
-    assert!(FileAttributesInput::is_octal_string(&"0o755".to_string()));
-    assert!(FileAttributesInput::is_octal_string(&"0o644".to_string()));
-    
-    // Invalid octal strings
+
+    // Invalid — digits out of octal range
     assert!(!FileAttributesInput::is_octal_string(&"999".to_string()));
     assert!(!FileAttributesInput::is_octal_string(&"888".to_string()));
-    assert!(!FileAttributesInput::is_octal_string(&"abc".to_string()));
-    assert!(!FileAttributesInput::is_octal_string(&"12x".to_string()));
+    assert!(!FileAttributesInput::is_octal_string(&"0999".to_string()));
+    assert!(!FileAttributesInput::is_octal_string(&"0888".to_string()));
     assert!(!FileAttributesInput::is_octal_string(&"0o999".to_string()));
     assert!(!FileAttributesInput::is_octal_string(&"0o888".to_string()));
+
+    // Invalid — non-numeric
+    assert!(!FileAttributesInput::is_octal_string(&"abc".to_string()));
+    assert!(!FileAttributesInput::is_octal_string(&"12x".to_string()));
 }
 
 #[test]

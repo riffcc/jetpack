@@ -9,8 +9,8 @@ use jetpack::inventory::inventory::Inventory;
 use jetpack::cli::parser::CliParser;
 use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
 use jetpack::connection::no::NoFactory;
-use std::sync::{Arc, RwLock};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 
 fn create_test_sudo_details() -> SudoDetails {
     SudoDetails {
@@ -44,6 +44,8 @@ fn create_test_response() -> Response {
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
         async_mode: false,
+        playbook_contents: Vec::new(),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
     
     let hostname = "testhost".to_string();

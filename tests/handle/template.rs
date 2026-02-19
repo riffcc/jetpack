@@ -5,8 +5,8 @@ use jetpack::playbooks::traversal::RunState;
 use jetpack::playbooks::context::PlaybookContext;
 use jetpack::cli::parser::CliParser;
 use jetpack::handle::response::Response;
-use std::sync::{Arc, RwLock};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 
 fn create_test_template() -> Template {
     let parser = CliParser::new();
@@ -33,6 +33,8 @@ fn create_test_template() -> Template {
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
         async_mode: false,
+        playbook_contents: Vec::new(),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
     
     let hostname = "testhost".to_string();

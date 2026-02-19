@@ -48,13 +48,28 @@ pub enum Recurse {
 
 impl FileAttributesInput {
 
-    // given an octal string, like 0o755 or 755, return the numeric value
+    // given an octal string (0o755, 0755, or bare 755), return whether it is valid
     pub fn is_octal_string(mode: &String) -> bool {
-        let octal_no_prefix = str::replace(&mode, "0o", "");
-        // this error should be screened out by template() below already but return types are important.
-        return match i32::from_str_radix(&octal_no_prefix, 8) {
+        let octal_part = Self::strip_octal_prefix(mode.as_str());
+        match i32::from_str_radix(octal_part, 8) {
             Ok(_x) => true,
-            Err(_y) => false 
+            Err(_y) => false
+        }
+    }
+
+    /// Strip any supported octal prefix and return the bare digit string.
+    ///
+    /// Accepts:
+    /// - `"0o755"` — Rust-style octal prefix  → returns `"755"`
+    /// - `"0755"`  — Unix/C-style octal prefix → returns `"755"`
+    /// - `"755"`   — bare octal digits          → returns `"755"`
+    fn strip_octal_prefix(mode: &str) -> &str {
+        if let Some(rest) = mode.strip_prefix("0o") {
+            rest
+        } else if mode.starts_with('0') && mode.len() > 1 {
+            &mode[1..]
+        } else {
+            mode
         }
     }
 
@@ -90,27 +105,35 @@ impl FileAttributesInput {
         // that might read the file and encourage users to use YAML-spec required input here even though YAML isn't doing
         // the evaluation.
 
-        if input2.mode.is_some()  { 
+        if input2.mode.is_some()  {
             let mode_input = input2.mode.as_ref().unwrap();
             let templated_mode_string = handle.template.string(request, tm, &String::from("mode"), &mode_input)?;
-            if ! templated_mode_string.starts_with("0o") {
-                return Err(handle.response.is_failed(request, &String::from(
-                    format!("(a) field (mode) must have an octal-prefixed value of form 0o755, was {}", templated_mode_string)
+
+            // Accept both 0o755 (Rust-style) and 0755 (traditional Unix octal prefix).
+            // Plain digits like "755" are NOT accepted — an explicit prefix is required to
+            // prevent accidentally passing decimal values (e.g. "755" decimal ≠ 0755 octal).
+            let octal_no_prefix = if templated_mode_string.starts_with("0o") {
+                // Rust-style: 0o755 → "755"
+                templated_mode_string[2..].to_string()
+            } else if templated_mode_string.starts_with('0') && templated_mode_string.len() > 1 {
+                // Unix/C-style: 0755 → "755"
+                templated_mode_string[1..].to_string()
+            } else {
+                return Err(handle.response.is_failed(request, &format!(
+                    "field (mode) must have an octal prefix: \
+                     use 0o755 (Rust-style) or 0755 (Unix-style), was {}",
+                    templated_mode_string
                 )));
-            }
+            };
 
-            let octal_no_prefix = str::replace(&templated_mode_string, "0o", "");
-
-            // we may have gotten an 0oExampleJunkString which is still not neccessarily valid - so check if it's a number
-            // and return the value with the 0o stripped off, for easier use elsewhere
-            let decimal_mode = i32::from_str_radix(&octal_no_prefix, 8);
-            match decimal_mode {
-                Ok(_x) => { 
+            // Validate that the stripped digits are valid octal.
+            match i32::from_str_radix(&octal_no_prefix, 8) {
+                Ok(_x) => {
                     final_mode_value = Some(octal_no_prefix);
                 },
-                Err(_y) => { 
-                    return Err(handle.response.is_failed(request, &String::from(
-                        format!("(b) field (mode) must have an octal-prefixed value of form 0o755, was {}", templated_mode_string)
+                Err(_y) => {
+                    return Err(handle.response.is_failed(request, &format!(
+                        "field (mode) has invalid octal digits: {}", templated_mode_string
                     )));
                 }
             };
