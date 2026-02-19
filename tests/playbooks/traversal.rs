@@ -5,7 +5,8 @@ use jetpack::cli::parser::CliParser;
 use jetpack::playbooks::context::PlaybookContext;
 use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
 use jetpack::connection::no::NoFactory;
-use std::sync::{Arc, RwLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 use std::path::PathBuf;
 
 #[test]
@@ -13,7 +14,7 @@ fn test_run_state_creation() {
     let parser = CliParser::new();
     let inventory = Arc::new(RwLock::new(Inventory::new()));
     let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
-    
+
     let run_state = RunState {
         inventory: Arc::clone(&inventory),
         playbook_paths: Arc::new(RwLock::new(Vec::new())),
@@ -29,11 +30,13 @@ fn test_run_state_creation() {
         allow_localhost_delegation: false,
         is_pull_mode: false,
         play_groups: None,
-        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
-        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
         async_mode: false,
+        playbook_contents: Vec::new(),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     };
 
     assert_eq!(run_state.limit_hosts.len(), 0);
@@ -48,7 +51,7 @@ fn test_run_state_with_limits() {
     let parser = CliParser::new();
     let inventory = Arc::new(RwLock::new(Inventory::new()));
     let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
-    
+
     let run_state = RunState {
         inventory: Arc::clone(&inventory),
         playbook_paths: Arc::new(RwLock::new(vec![PathBuf::from("/path/to/playbook.yml")])),
@@ -64,13 +67,15 @@ fn test_run_state_with_limits() {
         allow_localhost_delegation: true,
         is_pull_mode: false,
         play_groups: None,
-        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
-        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
         async_mode: false,
+        playbook_contents: Vec::new(),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     };
-    
+
     assert_eq!(run_state.limit_hosts.len(), 2);
     assert_eq!(run_state.limit_hosts[0], "host1");
     assert_eq!(run_state.limit_groups.len(), 1);
@@ -86,21 +91,21 @@ fn test_run_state_paths() {
     let parser = CliParser::new();
     let inventory = Arc::new(RwLock::new(Inventory::new()));
     let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
-    
+
     let playbook_paths = vec![
         PathBuf::from("/path/to/playbook1.yml"),
         PathBuf::from("/path/to/playbook2.yml"),
     ];
-    
+
     let role_paths = vec![
         PathBuf::from("/path/to/roles"),
         PathBuf::from("/custom/roles"),
     ];
-    
+
     let module_paths = vec![
         PathBuf::from("/path/to/modules"),
     ];
-    
+
     let run_state = RunState {
         inventory: Arc::clone(&inventory),
         playbook_paths: Arc::new(RwLock::new(playbook_paths)),
@@ -116,19 +121,21 @@ fn test_run_state_paths() {
         allow_localhost_delegation: false,
         is_pull_mode: false,
         play_groups: None,
-        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
-        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         output_handler: None,
         async_mode: false,
+        playbook_contents: Vec::new(),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
     };
-    
+
     let playbook_paths = run_state.playbook_paths.read().unwrap();
     assert_eq!(playbook_paths.len(), 2);
-    
+
     let role_paths = run_state.role_paths.read().unwrap();
     assert_eq!(role_paths.len(), 2);
-    
+
     let module_paths = run_state.module_paths.read().unwrap();
     assert_eq!(module_paths.len(), 1);
 }

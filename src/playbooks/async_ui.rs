@@ -13,6 +13,7 @@
 
 use std::io::{self, Write};
 use std::sync::mpsc;
+use crate::output::OutputHandlerRef;
 
 /// Color palette for host prefixes. 16 colors cycling.
 const HOST_COLORS: &[&str] = &[
@@ -115,6 +116,9 @@ struct HostOutput {
 pub struct AsyncUi {
     hostnames: Vec<String>,
     is_tty: bool,
+    /// When set, all terminal output is suppressed; task events are forwarded
+    /// to this handler instead.
+    output_handler: Option<OutputHandlerRef>,
 }
 
 impl AsyncUi {
@@ -123,7 +127,17 @@ impl AsyncUi {
         let is_tty = std::env::var("TERM")
             .map(|t| t != "dumb")
             .unwrap_or(false);
-        AsyncUi { hostnames, is_tty }
+        AsyncUi { hostnames, is_tty, output_handler: None }
+    }
+
+    /// Create an AsyncUi that delegates to `handler` instead of printing.
+    /// All terminal output is suppressed; the handler receives task lifecycle
+    /// events so callers can display their own progress UI.
+    pub fn new_with_handler(hostnames: Vec<String>, handler: OutputHandlerRef) -> Self {
+        let is_tty = std::env::var("TERM")
+            .map(|t| t != "dumb")
+            .unwrap_or(false);
+        AsyncUi { hostnames, is_tty, output_handler: Some(handler) }
     }
 
     /// Create an event channel. Returns (sender for workers, receiver for UI).
@@ -134,10 +148,15 @@ impl AsyncUi {
     /// Run the UI loop. Consumes events until `AllDone` is received.
     /// This blocks the calling thread.
     ///
+    /// When `output_handler` is set, all terminal output is suppressed and
+    /// task lifecycle events are forwarded to the handler instead.
+    ///
     /// IMPORTANT: stdout is locked per-event, NOT held across recv() calls.
     /// Holding stdout across recv() deadlocks worker threads that call println!()
     /// in visitor callbacks.
     pub fn run(&self, rx: mpsc::Receiver<HostEvent>) {
+        let quiet = self.output_handler.is_some();
+
         let mut outputs: Vec<HostOutput> = self
             .hostnames
             .iter()
@@ -151,8 +170,8 @@ impl AsyncUi {
             })
             .collect();
 
-        // Print header (brief stdout lock)
-        {
+        // Print header (brief stdout lock) — skipped in quiet mode
+        if !quiet {
             let stdout = io::stdout();
             let mut out = stdout.lock();
             if self.is_tty {
@@ -177,7 +196,11 @@ impl AsyncUi {
                     host_idx,
                     task_name,
                 } => {
-                    if host_idx < outputs.len() {
+                    if quiet {
+                        if let Some(ref h) = self.output_handler {
+                            h.on_task_start(&task_name, self.hostnames.len());
+                        }
+                    } else if host_idx < outputs.len() {
                         self.print_line(&outputs[host_idx], &format!("● {}", task_name));
                     }
                 }
@@ -188,7 +211,7 @@ impl AsyncUi {
                     status,
                     output,
                 } => {
-                    if host_idx < outputs.len() {
+                    if !quiet && host_idx < outputs.len() {
                         let line = match output {
                             Some(ref msg) if !msg.is_empty() => {
                                 if self.is_tty {
@@ -206,6 +229,8 @@ impl AsyncUi {
                             }
                         };
                         self.print_line(&outputs[host_idx], &line);
+                    }
+                    if host_idx < outputs.len() {
                         outputs[host_idx].task_count += 1;
                     }
                 }
@@ -215,13 +240,15 @@ impl AsyncUi {
                     task_name,
                     error,
                 } => {
-                    if host_idx < outputs.len() {
+                    if !quiet && host_idx < outputs.len() {
                         let line = if self.is_tty {
                             format!("\x1b[31m✗\x1b[0m {} — {}", task_name, error)
                         } else {
                             format!("FAILED {} — {}", task_name, error)
                         };
                         self.print_line(&outputs[host_idx], &line);
+                    }
+                    if host_idx < outputs.len() {
                         outputs[host_idx].task_count += 1;
                         outputs[host_idx].failed = true;
                     }
@@ -231,58 +258,64 @@ impl AsyncUi {
                     host_idx,
                     barrier_name,
                 } => {
-                    if host_idx < outputs.len() {
+                    if !quiet && host_idx < outputs.len() {
                         let line = format!("⏳ Waiting at barrier \"{}\"", barrier_name);
                         self.print_line(&outputs[host_idx], &line);
                     }
                 }
 
                 HostEvent::BarrierPassed { host_idx } => {
-                    if host_idx < outputs.len() {
+                    if !quiet && host_idx < outputs.len() {
                         self.print_line(&outputs[host_idx], "↩ Barrier passed");
                     }
                 }
 
                 HostEvent::BarrierFailed { host_idx, error } => {
-                    if host_idx < outputs.len() {
+                    if !quiet && host_idx < outputs.len() {
                         let line = if self.is_tty {
                             format!("\x1b[31m✗ Barrier failed: {}\x1b[0m", error)
                         } else {
                             format!("BARRIER FAILED: {}", error)
                         };
                         self.print_line(&outputs[host_idx], &line);
+                    }
+                    if host_idx < outputs.len() {
                         outputs[host_idx].failed = true;
                     }
                 }
 
                 HostEvent::HostCompleted { host_idx } => {
-                    if host_idx < outputs.len() {
+                    if !quiet && host_idx < outputs.len() {
                         let line = if self.is_tty {
                             "\x1b[32m✓ All tasks complete\x1b[0m".to_string()
                         } else {
                             "COMPLETE".to_string()
                         };
                         self.print_line(&outputs[host_idx], &line);
+                    }
+                    if host_idx < outputs.len() {
                         outputs[host_idx].completed = true;
                     }
                 }
 
                 HostEvent::HostFailed { host_idx, error } => {
-                    if host_idx < outputs.len() {
+                    if !quiet && host_idx < outputs.len() {
                         let line = if self.is_tty {
                             format!("\x1b[31m✗ Host failed: {}\x1b[0m", error)
                         } else {
                             format!("HOST FAILED: {}", error)
                         };
                         self.print_line(&outputs[host_idx], &line);
+                    }
+                    if host_idx < outputs.len() {
                         outputs[host_idx].failed = true;
                     }
                 }
             }
         }
 
-        // Print summary (brief stdout lock)
-        {
+        // Print summary — skipped in quiet mode
+        if !quiet {
             let stdout = io::stdout();
             let mut out = stdout.lock();
             let _ = writeln!(out);

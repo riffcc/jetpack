@@ -30,6 +30,7 @@ use crate::util::io::{jet_file_open,directory_as_string};
 use crate::util::yaml::{blend_variables,show_yaml_error_in_context};
 use std::path::PathBuf;
 use std::collections::{HashMap,HashSet};
+use std::sync::Mutex;
 use std::sync::{Arc,RwLock};
 use std::path::Path;
 use std::env;
@@ -69,6 +70,8 @@ pub struct RunState {
     pub processed_role_tasks: Arc<RwLock<HashSet<String>>>,
     pub processed_role_handlers: Arc<RwLock<HashSet<String>>>,
     pub role_processing_stack: Arc<RwLock<Vec<String>>>,
+    // Files fetched by !fetch tasks (remote_path → bytes)
+    pub fetched_files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
 }
 
 // this is the top end traversal function that is called from cli/playbooks.rs
@@ -464,7 +467,10 @@ fn async_handle_batch(
 
     // Set up UI event channel
     let (tx, rx) = AsyncUi::channel();
-    let ui = AsyncUi::new(host_names.clone());
+    let ui = match &run_state.output_handler {
+        Some(handler) => AsyncUi::new_with_handler(host_names.clone(), handler.clone()),
+        None => AsyncUi::new(host_names.clone()),
+    };
 
     // Spawn UI thread
     let ui_handle = std::thread::spawn(move || {

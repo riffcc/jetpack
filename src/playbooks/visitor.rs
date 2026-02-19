@@ -16,6 +16,7 @@
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::playbooks::context::PlaybookContext;
+use crate::output::OutputHandlerRef;
 use std::sync::Arc;
 use crate::tasks::*;
 use std::sync::RwLock;
@@ -44,7 +45,11 @@ pub struct PlaybookVisitor {
     pub check_mode: CheckMode,
     pub logfile: Option<Arc<RwLock<File>>>,
     pub run_id: String,
-    pub utc_start: DateTime<Utc>
+    pub utc_start: DateTime<Utc>,
+    /// When set, all direct stdout output is suppressed and events are
+    /// delegated to this handler instead.  Set by the API when the caller
+    /// provides a custom OutputHandler.
+    pub output_handler: Option<OutputHandlerRef>,
 }
 
 pub struct LogData {
@@ -83,9 +88,24 @@ impl PlaybookVisitor {
             check_mode: check_mode,
             logfile: logfile,
             utc_start: Utc::now(),
-            run_id: GUID::rand().to_string()
+            run_id: GUID::rand().to_string(),
+            output_handler: None,
         };
         s
+    }
+
+    /// Create a visitor that delegates to `handler` instead of printing to
+    /// stdout.  All progress output is suppressed; the handler receives
+    /// lifecycle events (task start, etc.) via the `OutputHandler` trait.
+    pub fn new_with_handler(check_mode: CheckMode, handler: OutputHandlerRef) -> Self {
+        let mut v = Self::new(check_mode);
+        v.output_handler = Some(handler);
+        v
+    }
+
+    /// Returns true when a custom output handler is in use (quiet/library mode).
+    fn is_quiet(&self) -> bool {
+        self.output_handler.is_some()
     }
 
     pub fn log_entry(&self, event: &String, context: Arc<RwLock<PlaybookContext>>) -> LogData {
@@ -164,17 +184,27 @@ impl PlaybookVisitor {
     }
 
     pub fn banner(&self) {
+        if self.is_quiet() { return; }
         println!("----------------------------------------------------------");
     }
 
     // used by the echo module
     pub fn debug_host(&self, host: &Arc<RwLock<Host>>, message: &String) {
+        if self.is_quiet() { return; }
         println!("{color_cyan}  ..... {} : {}{color_reset}", host.read().unwrap().name, message);
     }
 
     pub fn on_playbook_start(&self, context: &Arc<RwLock<PlaybookContext>>) {
         let ctx = context.read().unwrap();
         let path = ctx.playbook_path.as_ref().unwrap();
+
+        if let Some(ref h) = self.output_handler {
+            h.on_playbook_start(path);
+            let log_entry = self.log_entry(&String::from("PLAYBOOK_START"), context.clone());
+            self.log(&log_entry);
+            return;
+        }
+
         self.banner();
         println!("> playbook start: {}", path);
 
@@ -183,7 +213,15 @@ impl PlaybookVisitor {
     }
 
     pub fn on_play_start(&self, context: &Arc<RwLock<PlaybookContext>>) {
-        let play = &context.read().unwrap().play;
+        let play = context.read().unwrap().play.clone();
+
+        if let Some(ref h) = self.output_handler {
+            h.on_play_start(play.as_deref().unwrap_or(""), vec![]);
+            let log_entry = self.log_entry(&String::from("PLAY_START"), context.clone());
+            self.log(&log_entry);
+            return;
+        }
+
         self.banner();
         println!("> play: {}", play.as_ref().unwrap());
 
@@ -204,17 +242,33 @@ impl PlaybookVisitor {
         // failed occurs if *ALL* hosts in a play have failed
         let ctx = context.read().unwrap();
         let play_name = ctx.get_play_name();
+
+        if let Some(ref h) = self.output_handler {
+            h.on_play_end(&play_name);
+            return;
+        }
+
         if ! failed {
             self.banner();
             println!("> play complete: {}", play_name);
         } else {
             self.banner();
             println!("{color_red}> play failed: {}{color_reset}", play_name);
-
         }
     }
 
     pub fn on_exit(&self, context: &Arc<RwLock<PlaybookContext>>) {
+        if self.is_quiet() {
+            // Still log to file, but suppress the terminal table.
+            let mut log_entry = self.log_entry(&String::from("SUMMARY"), Arc::clone(context));
+            let ctx = context.read().unwrap();
+            let mut map: serde_json::map::Map<String, serde_json::Value> = serde_json::map::Map::new();
+            map.insert(String::from("failed_hosts"), json!(ctx.get_hosts_failed_count()));
+            log_entry.summary = Some(map);
+            self.log(&log_entry);
+            return;
+        }
+
         println!("----------------------------------------------------------");
         println!("");
         self.show_playbook_summary(context);
@@ -222,8 +276,18 @@ impl PlaybookVisitor {
 
     pub fn on_task_start(&self, context: &Arc<RwLock<PlaybookContext>>, is_handler: HandlerMode) {
         let context2 = context.read().unwrap();
-        let task = context2.task.as_ref().unwrap();
-        let role = &context2.role;
+        let task = context2.task.as_ref().unwrap().clone();
+        let role = context2.role.clone();
+
+        if let Some(ref h) = self.output_handler {
+            match is_handler {
+                HandlerMode::NormalTasks => h.on_task_start(&task, 1),
+                HandlerMode::Handlers    => h.on_handler_start(&task),
+            }
+            let log_entry = self.log_entry(&String::from("TASK_START"), Arc::clone(context));
+            self.log(&log_entry);
+            return;
+        }
 
         let what = match is_handler {
             HandlerMode::NormalTasks => String::from("task"),
@@ -243,6 +307,7 @@ impl PlaybookVisitor {
     }
 
     pub fn on_batch(&self, batch_num: usize, batch_count: usize, batch_size: usize) {
+        if self.is_quiet() { return; }
         self.banner();
         println!("> batch {}/{}, {} hosts", batch_num+1, batch_count, batch_size);
     }
@@ -274,61 +339,66 @@ impl PlaybookVisitor {
     }
 
     pub fn on_host_task_start(&self, _context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) {
+        if self.is_quiet() { return; }
         let host2 = host.read().unwrap();
         println!("… {} => running", host2.name);
     }
 
     pub fn on_notify_handler(&self, host: &Arc<RwLock<Host>>, which_handler: &String) {
+        if self.is_quiet() { return; }
         let host2 = host.read().unwrap();
         println!("… {} => notified: {}", host2.name, which_handler);
     }
 
     pub fn on_host_delegate(&self, host: &Arc<RwLock<Host>>, delegated: &String) {
+        if self.is_quiet() { return; }
         let host2 = host.read().unwrap();
         println!("{color_blue}✓ {} => delegating to: {}{color_reset}",  &host2.name, delegated.clone());
     }
 
     pub fn on_host_task_ok(&self, context: &Arc<RwLock<PlaybookContext>>, task_response: &Arc<TaskResponse>, host: &Arc<RwLock<Host>>) {
         let host2 = host.read().unwrap();
+        let quiet = self.is_quiet();
         {
             let mut context2 = context.write().unwrap();
             context2.increment_attempted_for_host(&host2.name);
             match &task_response.status {
                 TaskStatus::IsCreated  =>  {
-                    println!("{color_blue}✓ {} => created{color_reset}",  &host2.name);
+                    if !quiet { println!("{color_blue}✓ {} => created{color_reset}",  &host2.name); }
                     context2.increment_created_for_host(&host2.name);
                 },
                 TaskStatus::IsRemoved  =>  {
-                    println!("{color_blue}✓ {} => removed{color_reset}",  &host2.name);
+                    if !quiet { println!("{color_blue}✓ {} => removed{color_reset}",  &host2.name); }
                     context2.increment_removed_for_host(&host2.name);
                 },
                 TaskStatus::IsModified =>  {
-                    let changes2 : Vec<String> = task_response.changes.iter().map(|x| { format!("{:?}", x) }).collect();
-                    let change_str = changes2.join(",");
-                    println!("{color_blue}✓ {} => modified ({}){color_reset}", &host2.name, change_str);
+                    if !quiet {
+                        let changes2 : Vec<String> = task_response.changes.iter().map(|x| { format!("{:?}", x) }).collect();
+                        let change_str = changes2.join(",");
+                        println!("{color_blue}✓ {} => modified ({}){color_reset}", &host2.name, change_str);
+                    }
                     context2.increment_modified_for_host(&host2.name);
                 },
                 TaskStatus::IsExecuted =>  {
-                    println!("{color_blue}✓ {} => complete{color_reset}", &host2.name);
+                    if !quiet { println!("{color_blue}✓ {} => complete{color_reset}", &host2.name); }
                     context2.increment_executed_for_host(&host2.name);
                 },
                 TaskStatus::IsPassive  =>  {
-                    // println!("{color_green}! host: {} => ok (no effect) {color_reset}", &host2.name);
                     context2.increment_passive_for_host(&host2.name);
                 }
                 TaskStatus::IsMatched  =>  {
-                    println!("{color_green}✓ {} => matched {color_reset}", &host2.name);
+                    if !quiet { println!("{color_green}✓ {} => matched {color_reset}", &host2.name); }
                     context2.increment_matched_for_host(&host2.name);
                 }
                 TaskStatus::IsSkipped  =>  {
-                    println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name);
+                    if !quiet { println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name); }
                     context2.increment_skipped_for_host(&host2.name);
                 }
                 TaskStatus::Failed => {
-                    println!("{color_yellow}✓ {} => failed (ignored){color_reset}", &host2.name);
+                    if !quiet { println!("{color_yellow}✓ {} => failed (ignored){color_reset}", &host2.name); }
                 }
                 _ => {
-                    panic!("on host {}, invalid final task return status, FSM should have rejected: {:?}", host2.name, task_response); 
+                    panic!("on host {}, invalid final task return status, FSM should have rejected: {:?}", host2.name, task_response);
                 }
             }
         }
@@ -344,44 +414,47 @@ impl PlaybookVisitor {
 
     pub fn on_host_task_check_ok(&self, context: &Arc<RwLock<PlaybookContext>>, task_response: &Arc<TaskResponse>, host: &Arc<RwLock<Host>>) {
         let host2 = host.read().unwrap();
+        let quiet = self.is_quiet();
         {
             let mut context2 = context.write().unwrap();
             context2.increment_attempted_for_host(&host2.name);
             match &task_response.status {
                 TaskStatus::NeedsCreation  =>  {
-                    println!("{color_blue}✓ {} => would create{color_reset}",  &host2.name);
+                    if !quiet { println!("{color_blue}✓ {} => would create{color_reset}",  &host2.name); }
                     context2.increment_created_for_host(&host2.name);
                 },
                 TaskStatus::NeedsRemoval  =>  {
-                    println!("{color_blue}✓ {} => would remove{color_reset}",  &host2.name);
+                    if !quiet { println!("{color_blue}✓ {} => would remove{color_reset}",  &host2.name); }
                     context2.increment_removed_for_host(&host2.name);
                 },
                 TaskStatus::NeedsModification =>  {
-                    let changes2 : Vec<String> = task_response.changes.iter().map(|x| { format!("{:?}", x) }).collect();
-                    let change_str = changes2.join(",");
-                    println!("{color_blue}✓ {} => would modify ({}) {color_reset}", &host2.name, change_str);
+                    if !quiet {
+                        let changes2 : Vec<String> = task_response.changes.iter().map(|x| { format!("{:?}", x) }).collect();
+                        let change_str = changes2.join(",");
+                        println!("{color_blue}✓ {} => would modify ({}) {color_reset}", &host2.name, change_str);
+                    }
                     context2.increment_modified_for_host(&host2.name);
                 },
                 TaskStatus::NeedsExecution =>  {
-                    println!("{color_blue}✓ {} => would run{color_reset}", &host2.name);
+                    if !quiet { println!("{color_blue}✓ {} => would run{color_reset}", &host2.name); }
                     context2.increment_executed_for_host(&host2.name);
                 },
                 TaskStatus::IsPassive  =>  {
                     context2.increment_passive_for_host(&host2.name);
                 }
                 TaskStatus::IsMatched  =>  {
-                    println!("{color_green}✓ {} => matched {color_reset}", &host2.name);
+                    if !quiet { println!("{color_green}✓ {} => matched {color_reset}", &host2.name); }
                     context2.increment_matched_for_host(&host2.name);
                 }
                 TaskStatus::IsSkipped  =>  {
-                    println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name);
+                    if !quiet { println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name); }
                     context2.increment_skipped_for_host(&host2.name);
                 }
                 TaskStatus::Failed => {
-                    println!("{color_yellow}✓ {} => failed (ignored){color_reset}", &host2.name);
+                    if !quiet { println!("{color_yellow}✓ {} => failed (ignored){color_reset}", &host2.name); }
                 }
                 _ => {
-                    panic!("on host {}, invalid check-mode final task return status, FSM should have rejected: {:?}", host2.name, task_response); 
+                    panic!("on host {}, invalid check-mode final task return status, FSM should have rejected: {:?}", host2.name, task_response);
                 }
             }
         }
@@ -393,6 +466,7 @@ impl PlaybookVisitor {
     }
 
     pub fn on_host_task_retry(&self, _context: &Arc<RwLock<PlaybookContext>>,host: &Arc<RwLock<Host>>, retries: u64, delay: u64) {
+        if self.is_quiet() { return; }
         let host2 = host.read().unwrap();
         println!("{color_blue}! {} => retrying ({} retries left) in {} seconds{color_reset}",host2.name,retries,delay);
     }
@@ -400,25 +474,28 @@ impl PlaybookVisitor {
     pub fn on_host_task_failed(&self, context: &Arc<RwLock<PlaybookContext>>, task_response: &Arc<TaskResponse>, host: &Arc<RwLock<Host>>) {
         let mut log_entry = self.log_entry(&String::from("TASK_FAILED"), Arc::clone(context));
         let host2 = host.read().unwrap();
+        let quiet = self.is_quiet();
         if task_response.msg.is_some() {
             let msg = &task_response.msg;
             if task_response.command_result.is_some() {
                 {
                     let cmd_result = task_response.command_result.as_ref().as_ref().unwrap();
                     let _lock = context.write().unwrap();
-                    println!("{color_red}! {} => failed", host2.name);
-                    println!("    cmd: {}", cmd_result.cmd);
-                    println!("    out: {}", cmd_result.out);
-                    println!("    rc: {}{color_reset}", cmd_result.rc);
+                    if !quiet {
+                        println!("{color_red}! {} => failed", host2.name);
+                        println!("    cmd: {}", cmd_result.cmd);
+                        println!("    out: {}", cmd_result.out);
+                        println!("    rc: {}{color_reset}", cmd_result.rc);
+                    }
                     log_entry.cmd     = Some(cmd_result.cmd.clone());
                     log_entry.cmd_out = Some(cmd_result.out.clone());
                     log_entry.cmd_rc  = Some(cmd_result.rc.clone());
                 }
             } else {
-                println!("{color_red}! error: {}: {}{color_reset}", host2.name, msg.as_ref().unwrap());
+                if !quiet { println!("{color_red}! error: {}: {}{color_reset}", host2.name, msg.as_ref().unwrap()); }
             }
         } else {
-            println!("{color_red}! host failed: {}, {color_reset}", host2.name);
+            if !quiet { println!("{color_red}! host failed: {}, {color_reset}", host2.name); }
         }
 
         context.write().unwrap().increment_failed_for_host(&host2.name);
@@ -430,7 +507,9 @@ impl PlaybookVisitor {
     pub fn on_host_connect_failed(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) {
         let host2 = host.read().unwrap();
         context.write().unwrap().increment_failed_for_host(&host2.name);
-        println!("{color_red}! connection failed to host: {}{color_reset}", host2.name);
+        if !self.is_quiet() {
+            println!("{color_red}! connection failed to host: {}{color_reset}", host2.name);
+        }
         let mut log_entry = self.log_entry(&String::from("HOST_CONNECT_FAILED"), Arc::clone(context));
         log_entry.host = Some(host2.name.clone());
         self.log(&log_entry);
@@ -445,6 +524,7 @@ impl PlaybookVisitor {
     }
     
     pub fn on_before_transfer(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>, path: &String) {
+        if self.is_quiet() { return; }
         let host2 = host.read().unwrap();
         if context.read().unwrap().verbosity > 0 {
             println!("{color_blue}! {} => transferring to: {}", host2.name, &path.clone());
@@ -452,6 +532,7 @@ impl PlaybookVisitor {
     }
 
     pub fn on_command_run(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>, cmd: &String) {
+        if self.is_quiet() { return; }
         let host2 = host.read().unwrap();
         if context.read().unwrap().verbosity > 0 {
             println!("{color_blue}! {} => exec: {}", host2.name, &cmd.clone());

@@ -26,7 +26,8 @@ use crate::connection::factory::ConnectionFactory;
 use crate::connection::ssh::SshFactory as OldSshFactory;
 use crate::connection::local::LocalFactory as OldLocalFactory; 
 use crate::connection::no::NoFactory as OldNoFactory;
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Main API for running JetPack playbooks
 pub struct PlaybookRunner {
@@ -136,9 +137,12 @@ impl PlaybookRunner {
             CheckMode::No
         };
         
-        let visitor = Arc::new(RwLock::new(PlaybookVisitor::new(check_mode)));
+        let visitor = Arc::new(RwLock::new(
+            PlaybookVisitor::new_with_handler(check_mode, self.output_handler.clone())
+        ));
         
         // Create run state
+        let fetched_files: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
         let run_state = Arc::new(RunState {
             inventory: inventory.clone(),
             playbook_paths: self.config.playbook_paths.clone(),
@@ -160,14 +164,17 @@ impl PlaybookRunner {
             processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
             processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
             role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+            fetched_files: Arc::clone(&fetched_files),
         });
-        
+
         // Run the playbooks
         match playbook_traversal(&run_state) {
             Ok(_) => {
+                let fetched = fetched_files.lock().unwrap().clone();
                 let stats = PlaybookResult {
                     success: true,
                     hosts_processed: inventory.read().unwrap().hosts.len(),
+                    fetched_files: fetched,
                 };
                 Ok(stats)
             }
@@ -181,6 +188,8 @@ impl PlaybookRunner {
 pub struct PlaybookResult {
     pub success: bool,
     pub hosts_processed: usize,
+    /// Files fetched by `!fetch` tasks, keyed by remote path.
+    pub fetched_files: HashMap<String, Vec<u8>>,
 }
 
 /// Builder-style API for simpler use cases
