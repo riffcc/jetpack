@@ -66,6 +66,7 @@ impl ProxmoxVmProvisioner {
             memory: self.template_option(&templar, &config.memory, vars)?,
             cores: self.template_option(&templar, &config.cores, vars)?,
             ostemplate: self.template_option(&templar, &config.ostemplate, vars)?,
+            fetch: self.template_option(&templar, &config.fetch, vars)?,
             storage: self.template_option(&templar, &config.storage, vars)?,
             rootfs_size: self.template_option(&templar, &config.rootfs_size, vars)?,
             net0: self.template_option(&templar, &config.net0, vars)?,

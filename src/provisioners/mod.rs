@@ -80,6 +80,12 @@ pub struct ProvisionConfig {
     /// OS template path (for containers)
     pub ostemplate: Option<String>,
 
+    /// Fetch template before creating container.
+    /// - "true" or "1": download the exact template specified in ostemplate
+    /// - "latest": query Proxmox for available templates, find latest matching version, download it
+    /// Not set: assume template already exists
+    pub fetch: Option<String>,
+
     /// Storage location
     pub storage: Option<String>,
 
@@ -168,23 +174,35 @@ impl WaitStrategy {
     }
 }
 
-/// Wait for SSH to become available on a host
-/// Returns Ok(()) if SSH becomes available, Err with message if timeout
+/// Wait for SSH to become available on a host.
+///
+/// For containers with a known static IP, pass `initial_ip = Some(ip)` and
+/// `ip_getter = None`.
+///
+/// For DHCP containers where the IP is not yet known, pass
+/// `initial_ip = None` and supply an `ip_getter` closure that tries to
+/// discover the IP (e.g. by querying the Proxmox API).  The getter is called
+/// in every loop iteration until it returns `Some(ip)`, at which point the
+/// TCP-SSH knock begins.  The result is a single unified wait loop — there
+/// is no separate "wait for IP" phase.
+///
+/// Returns the confirmed IP address on success.
 pub fn wait_for_ssh(
-    ip: &str,
+    initial_ip: Option<String>,
     port: u16,
     _user: &str,  // Reserved for future SSH authentication check
     config: &ProvisionConfig,
     host_name: &str,
     output: Option<&crate::output::OutputHandlerRef>,
-) -> Result<(), String> {
+    ip_getter: Option<Box<dyn Fn() -> Option<String> + Send>>,
+) -> Result<String, String> {
     use std::net::TcpStream;
     use std::time::{Duration, Instant};
     use std::thread;
 
     // Check if wait is disabled
     if config.wait_for_host == Some(false) {
-        return Ok(());
+        return initial_ip.ok_or_else(|| "wait_for_host disabled and no initial IP".to_string());
     }
 
     let timeout = config.wait_timeout.unwrap_or(300);
@@ -197,50 +215,65 @@ pub fn wait_for_ssh(
     let start = Instant::now();
     let timeout_duration = Duration::from_secs(timeout);
     let mut current_delay = initial_delay;
-    let mut attempt = 0;
+    let mut attempt = 0u32;
+    let mut current_ip = initial_ip;
 
-    if let Some(out) = output {
-        out.on_provision_ssh_wait(host_name, ip, timeout);
+    match &current_ip {
+        Some(ip) => {
+            if let Some(out) = output {
+                out.on_provision_ssh_wait(host_name, ip, timeout);
+            }
+            eprintln!("  → waiting for SSH on {}:{} (timeout: {}s)", ip, port, timeout);
+        }
+        None => {
+            eprintln!("  → waiting for container '{}' to get an IP and SSH (timeout: {}s)", host_name, timeout);
+        }
     }
-    eprintln!("  → waiting for SSH on {}:{} (timeout: {}s)", ip, port, timeout);
 
     loop {
         attempt += 1;
 
-        // Try TCP connection first (quick check if port is open)
-        let addr = format!("{}:{}", ip, port);
-        match TcpStream::connect_timeout(
-            &addr.parse().map_err(|e| format!("Invalid address: {}", e))?,
-            Duration::from_secs(5),
-        ) {
-            Ok(_) => {
-                // Port is open, try SSH connection
-                // We use a simple TCP check for now - if port 22 responds, SSH is likely ready
-                let elapsed = start.elapsed().as_secs();
-                if let Some(out) = output {
-                    out.on_provision_ssh_ready(host_name, elapsed, attempt);
-                }
-                eprintln!("  → SSH available on {} after {}s ({} attempts)", host_name, elapsed, attempt);
-                return Ok(());
-            }
-            Err(_) => {
-                // Connection failed, check timeout
-                if start.elapsed() >= timeout_duration {
-                    return Err(format!(
-                        "Timeout waiting for SSH on {} after {}s ({} attempts)",
-                        host_name, timeout, attempt
-                    ));
-                }
-
-                // Calculate next delay based on strategy
-                let sleep_duration = Duration::from_secs(current_delay);
-                thread::sleep(sleep_duration);
-
-                if strategy == WaitStrategy::Backoff {
-                    // Exponential backoff: double the delay up to max
-                    current_delay = (current_delay * 2).min(max_delay);
+        // For DHCP containers: discover the IP if not yet known.
+        if current_ip.is_none() {
+            if let Some(ref getter) = ip_getter {
+                current_ip = getter();
+                if let Some(ref ip) = current_ip {
+                    eprintln!("  → IP assigned: {} — now waiting for SSH", ip);
+                    if let Some(out) = output {
+                        out.on_provision_ssh_wait(host_name, ip, timeout);
+                    }
                 }
             }
+        }
+
+        if let Some(ref ip) = current_ip {
+            let addr_str = format!("{}:{}", ip, port);
+            let parse_result = addr_str.parse::<std::net::SocketAddr>();
+            if let Ok(addr) = parse_result {
+                match TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
+                    Ok(_) => {
+                        let elapsed = start.elapsed().as_secs();
+                        if let Some(out) = output {
+                            out.on_provision_ssh_ready(host_name, elapsed, attempt);
+                        }
+                        eprintln!("  → SSH available on {} ({}) after {}s ({} attempts)", host_name, ip, elapsed, attempt);
+                        return Ok(ip.clone());
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        if start.elapsed() >= timeout_duration {
+            return Err(format!(
+                "Timeout waiting for SSH on '{}' after {}s ({} attempts)",
+                host_name, timeout, attempt
+            ));
+        }
+
+        thread::sleep(Duration::from_secs(current_delay));
+        if strategy == WaitStrategy::Backoff {
+            current_delay = (current_delay * 2).min(max_delay);
         }
     }
 }
@@ -299,9 +332,53 @@ pub fn ensure_host_provisioned(
 
     // Wait for SSH connectivity (moved here from individual provisioners so output handler is available)
     if provision_config.wait_for_host != Some(false) {
-        if let Ok(Some(ip)) = provisioner.get_ip(provision_config, inventory_name, inventory) {
-            let ssh_user = provision_config.ssh_user.as_deref().unwrap_or("root");
-            wait_for_ssh(&ip, 22, ssh_user, provision_config, inventory_name, output)?;
+        let initial_ip = provisioner.get_ip(provision_config, inventory_name, inventory)
+            .ok()
+            .flatten();
+
+        // Build an IP-getter closure for DHCP containers whose IP isn't assigned yet.
+        // Creates a fresh provisioner instance (provisioners are stateless) so the
+        // closure can own everything it needs without lifetime issues.
+        let ip_getter: Option<Box<dyn Fn() -> Option<String> + Send>> =
+            if initial_ip.is_none() {
+                let prov_type = provision_config.provision_type.clone();
+                let config_clone = provision_config.clone();
+                let inv_clone = Arc::clone(inventory);
+                let inv_name = inventory_name.to_string();
+                match get_provisioner(&prov_type) {
+                    Ok(prov) => Some(Box::new(move || {
+                        prov.get_ip(&config_clone, &inv_name, &inv_clone).ok().flatten()
+                    })),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
+        let ssh_user = provision_config.ssh_user.as_deref().unwrap_or("root");
+        let confirmed_ip = wait_for_ssh(
+            initial_ip,
+            22,
+            ssh_user,
+            provision_config,
+            inventory_name,
+            output,
+            ip_getter,
+        )?;
+
+        // Record the confirmed IP as jet_ssh_hostname so subsequent tasks
+        // connect to the actual container IP instead of an unresolvable hostname.
+        let mut mapping = serde_yaml::Mapping::new();
+        mapping.insert(
+            serde_yaml::Value::String("jet_ssh_hostname".to_string()),
+            serde_yaml::Value::String(confirmed_ip),
+        );
+        let inv = inventory.read().unwrap();
+        if inv.has_host(&inventory_name.to_string()) {
+            inv.get_host(&inventory_name.to_string())
+                .write()
+                .unwrap()
+                .update_variables(mapping);
         }
     }
 
