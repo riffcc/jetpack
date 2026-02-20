@@ -240,7 +240,12 @@ impl AsyncUi {
                     task_name,
                     error,
                 } => {
-                    if !quiet && host_idx < outputs.len() {
+                    if quiet {
+                        if let Some(ref h) = self.output_handler {
+                            let host_name = self.hostnames.get(host_idx).map(|s| s.as_str()).unwrap_or("unknown");
+                            h.error(&format!("Task '{}' failed on {}: {}", task_name, host_name, error));
+                        }
+                    } else if host_idx < outputs.len() {
                         let line = if self.is_tty {
                             format!("\x1b[31m✗\x1b[0m {} — {}", task_name, error)
                         } else {
@@ -299,7 +304,12 @@ impl AsyncUi {
                 }
 
                 HostEvent::HostFailed { host_idx, error } => {
-                    if !quiet && host_idx < outputs.len() {
+                    if quiet {
+                        if let Some(ref h) = self.output_handler {
+                            let host_name = self.hostnames.get(host_idx).map(|s| s.as_str()).unwrap_or("unknown");
+                            h.error(&format!("Host '{}' failed: {}", host_name, error));
+                        }
+                    } else if host_idx < outputs.len() {
                         let line = if self.is_tty {
                             format!("\x1b[31m✗ Host failed: {}\x1b[0m", error)
                         } else {

@@ -481,7 +481,7 @@ fn async_handle_batch(
     // Barriers use rayon::yield_now() instead of Condvar::wait(), so they
     // release the thread back to the pool — safe with any pool size.
     let task_refs: Vec<&Task> = all_tasks;
-    let _total: i64 = hosts
+    let failure_count: i64 = hosts
         .par_iter()
         .enumerate()
         .map(|(host_idx, host)| {
@@ -672,7 +672,7 @@ fn async_handle_batch(
             }
 
             let _ = host_tx.send(HostEvent::HostCompleted { host_idx });
-            1
+            0 // success
         })
         .sum();
 
@@ -680,6 +680,9 @@ fn async_handle_batch(
     let _ = tx.send(HostEvent::AllDone);
     let _ = ui_handle.join();
 
+    if failure_count > 0 {
+        return Err(format!("{} host(s) failed", failure_count));
+    }
     Ok(())
 }
 
