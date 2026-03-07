@@ -31,6 +31,7 @@ use crate::cli::version::{GIT_VERSION,GIT_BRANCH,BUILD_TIME};
 use std::path::Path;
 use std::io;
 use std::collections::HashMap;
+use serde::Deserialize;
 
 // the CLI parser struct values hold various values calculated when calling parse() on
 // the struct
@@ -79,6 +80,22 @@ pub const CLI_MODE_CHECK_SSH: u32 = 5;
 pub const CLI_MODE_SHOW: u32 = 6;
 pub const CLI_MODE_SIMULATE: u32 = 7;
 pub const CLI_MODE_PULL: u32 = 8;
+
+const DEFAULT_LOCAL_PLAYBOOK: &str = "deploy/playbooks/bootstrap.yml";
+const DEFAULT_LOCAL_ROLES: &str = "deploy/roles";
+const DEFAULT_LOCAL_INVENTORY: &str = "deploy/inventory";
+
+#[derive(Debug, Default, Deserialize)]
+struct JetpackFileConfig {
+    local: Option<JetpackLocalConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct JetpackLocalConfig {
+    playbook: Option<String>,
+    roles: Option<String>,
+    inventory: Option<String>,
+}
 
 fn is_cli_mode_valid(value: &String) -> bool {
     match cli_mode_from_string(value) {
@@ -401,6 +418,11 @@ impl CliParser  {
     // actual CLI parsing happens here
 
     pub fn parse(&mut self) -> Result<(), String> {
+        let args: Vec<String> = env::args().collect();
+        self.parse_from_strings(args)
+    }
+
+    fn parse_from_strings(&mut self, args: Vec<String>) -> Result<(), String> {
 
         let mut arg_count: usize = 0;
         let mut next_is_value = false;
@@ -408,7 +430,6 @@ impl CliParser  {
         // we go through each CLI arg in a loop, certain arguments take
         // parameters and others do not.
 
-        let args: Vec<String> = env::args().collect();
         'each_argument: for argument in &args {
 
             let argument_str = argument.as_str();
@@ -536,6 +557,8 @@ impl CliParser  {
             CLI_MODE_UNSET       => { self.needs_help = true; },
             _ => {}
         }
+
+        self.apply_local_bootstrap_defaults()?;
 
         if self.playbook_set {
             self.add_role_paths_from_environment()?;
@@ -743,6 +766,97 @@ impl CliParser  {
         return Ok(());
     }
 
+    fn apply_local_bootstrap_defaults(&mut self) -> Result<(), String> {
+        match self.mode {
+            CLI_MODE_LOCAL | CLI_MODE_CHECK_LOCAL => {}
+            _ => return Ok(()),
+        }
+
+        let cwd = fs::canonicalize(env::current_dir().map_err(|e| e.to_string())?)
+            .map_err(|e| format!("failed to canonicalize current directory: {e}"))?;
+
+        let file_config = self.load_jetpack_file_config(&cwd)?;
+        let local_config = file_config.local.unwrap_or_default();
+
+        if !self.playbook_set {
+            if let Some(playbook) = local_config.playbook.as_ref() {
+                self.append_playbook(&resolve_repo_relative_path(&cwd, playbook)?.display().to_string())?;
+            } else {
+                let default_playbook = cwd.join(DEFAULT_LOCAL_PLAYBOOK);
+                if default_playbook.is_file() {
+                    self.append_playbook(&default_playbook.display().to_string())?;
+                }
+            }
+        }
+
+        if self.playbook_set && self.role_paths.read().unwrap().is_empty() {
+            if let Some(roles) = local_config.roles.as_ref() {
+                self.append_roles(&resolve_repo_relative_path(&cwd, roles)?.display().to_string())?;
+            } else {
+                let default_roles = cwd.join(DEFAULT_LOCAL_ROLES);
+                if default_roles.is_dir() {
+                    self.append_roles(&default_roles.display().to_string())?;
+                }
+            }
+        }
+
+        if !self.inventory_set {
+            if let Some(inventory) = local_config.inventory.as_ref() {
+                self.append_inventory(&resolve_repo_relative_path(&cwd, inventory)?.display().to_string())?;
+            } else {
+                let default_inventory = cwd.join(DEFAULT_LOCAL_INVENTORY);
+                if default_inventory.exists() {
+                    self.append_inventory(&default_inventory.display().to_string())?;
+                }
+            }
+        }
+
+        self.inject_local_builtins(&cwd)?;
+        Ok(())
+    }
+
+    fn load_jetpack_file_config(&self, cwd: &Path) -> Result<JetpackFileConfig, String> {
+        let config_path = cwd.join(".jetpack.yml");
+        if !config_path.is_file() {
+            return Ok(JetpackFileConfig::default());
+        }
+
+        let config_file = jet_file_open(&config_path)?;
+        let parsed: Result<JetpackFileConfig, serde_yaml::Error> = serde_yaml::from_reader(config_file);
+        if let Err(err) = parsed.as_ref() {
+            show_yaml_error_in_context(err, &config_path);
+        }
+        parsed.map_err(|_| format!("invalid .jetpack.yml: {}", config_path.display()))
+    }
+
+    fn inject_local_builtins(&mut self, cwd: &Path) -> Result<(), String> {
+        let repo_root = cwd;
+        let playbook_dir = self.playbook_paths.read().unwrap().first()
+            .map(|path| directory_as_string(path.as_path()))
+            .unwrap_or_else(|| cwd.join("deploy/playbooks").display().to_string());
+        let roles_dir = self.role_paths.read().unwrap().first()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| cwd.join(DEFAULT_LOCAL_ROLES).display().to_string());
+        let inventory_dir = self.inventory_paths.read().unwrap().first()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| cwd.join(DEFAULT_LOCAL_INVENTORY).display().to_string());
+
+        let mut builtins = serde_yaml::Mapping::new();
+        builtins.insert(serde_yaml::Value::String("JET_CWD".to_string()), serde_yaml::Value::String(cwd.display().to_string()));
+        builtins.insert(serde_yaml::Value::String("JET_REPO_ROOT".to_string()), serde_yaml::Value::String(repo_root.display().to_string()));
+        builtins.insert(serde_yaml::Value::String("JET_PLAYBOOK_DIR".to_string()), serde_yaml::Value::String(playbook_dir));
+        builtins.insert(serde_yaml::Value::String("JET_ROLES_DIR".to_string()), serde_yaml::Value::String(roles_dir));
+        builtins.insert(serde_yaml::Value::String("JET_INVENTORY_DIR".to_string()), serde_yaml::Value::String(inventory_dir));
+        builtins.insert(serde_yaml::Value::String("JET_USERNAME".to_string()), serde_yaml::Value::String(self.default_user.clone()));
+
+        if let Ok(home) = env::var("HOME") {
+            builtins.insert(serde_yaml::Value::String("JET_USER_HOME".to_string()), serde_yaml::Value::String(home));
+        }
+
+        blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(builtins));
+        Ok(())
+    }
+
     fn add_role_paths_from_environment(&mut self) -> Result<(), String> {
 
         let env_roles_path = env::var("JET_ROLES_PATH");
@@ -860,11 +974,20 @@ impl CliParser  {
 
 }
 
+fn resolve_repo_relative_path(repo_root: &Path, value: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(value);
+    if candidate.is_absolute() {
+        return Ok(candidate);
+    }
+    Ok(repo_root.join(candidate))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::env;
     use std::sync::Mutex;
+    use tempfile::TempDir;
 
     // Env-var-sensitive tests must hold this lock to prevent race conditions
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -1064,6 +1187,91 @@ mod tests {
         let parser = CliParser::new();
         // Just ensure it doesn't panic
         parser.show_help();
+    }
+
+    #[test]
+    fn test_local_mode_infers_convention_paths_from_cwd() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        fs::create_dir_all(repo_root.join("deploy/playbooks")).unwrap();
+        fs::create_dir_all(repo_root.join("deploy/roles")).unwrap();
+        fs::create_dir_all(repo_root.join("deploy/inventory")).unwrap();
+        fs::write(repo_root.join("deploy/playbooks/bootstrap.yml"), "---\n").unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(repo_root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "local".into()]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok());
+        assert!(parser.playbook_set);
+        assert_eq!(parser.playbook_paths.read().unwrap().len(), 1);
+        assert_eq!(parser.role_paths.read().unwrap().len(), 1);
+        assert_eq!(parser.inventory_paths.read().unwrap().len(), 1);
+        let extra = parser.extra_vars.as_mapping().unwrap();
+        assert_eq!(extra.get(serde_yaml::Value::String("JET_REPO_ROOT".into())).unwrap().as_str().unwrap(), repo_root.canonicalize().unwrap().display().to_string());
+    }
+
+    #[test]
+    fn test_local_mode_uses_jetpack_yml_overrides() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        fs::create_dir_all(repo_root.join("custom/pb")).unwrap();
+        fs::create_dir_all(repo_root.join("custom/roles")).unwrap();
+        fs::create_dir_all(repo_root.join("custom/inventory")).unwrap();
+        fs::write(repo_root.join("custom/pb/install.yml"), "---\n").unwrap();
+        fs::write(repo_root.join(".jetpack.yml"), "local:\n  playbook: custom/pb/install.yml\n  roles: custom/roles\n  inventory: custom/inventory\n").unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(repo_root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "local".into()]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok());
+        let playbook = parser.playbook_paths.read().unwrap().first().unwrap().clone();
+        assert!(playbook.ends_with("custom/pb/install.yml"));
+        let roles = parser.role_paths.read().unwrap().first().unwrap().clone();
+        assert!(roles.ends_with("custom/roles"));
+        let inventory = parser.inventory_paths.read().unwrap().first().unwrap().clone();
+        assert!(inventory.ends_with("custom/inventory"));
+    }
+
+    #[test]
+    fn test_cli_flags_override_local_defaults() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        fs::create_dir_all(repo_root.join("deploy/playbooks")).unwrap();
+        fs::create_dir_all(repo_root.join("deploy/roles")).unwrap();
+        fs::create_dir_all(repo_root.join("deploy/inventory")).unwrap();
+        fs::create_dir_all(repo_root.join("manual")).unwrap();
+        fs::write(repo_root.join("deploy/playbooks/bootstrap.yml"), "---\n").unwrap();
+        fs::write(repo_root.join("manual/explicit.yml"), "---\n").unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(repo_root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec![
+            "jetp".into(),
+            "local".into(),
+            "--playbook".into(),
+            "manual/explicit.yml".into(),
+        ]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok());
+        let playbook = parser.playbook_paths.read().unwrap().first().unwrap().clone();
+        assert!(playbook.ends_with("manual/explicit.yml"));
     }
 
     #[test]

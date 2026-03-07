@@ -15,6 +15,53 @@ Links (currently outdated, will be updated soon)
 
 Please route all questions, help requests, and feature discussion to Discord. Thanks!
 
+## Local Bootstrap Defaults
+
+`jetp local` now supports a convention-based bootstrap flow from the current working directory.
+
+If you run `jetp local` from a repository root:
+
+- Jetpack first checks for `./.jetpack.yml`
+- if that file is absent, it falls back to:
+  - `deploy/playbooks/bootstrap.yml`
+  - `deploy/roles`
+  - `deploy/inventory`
+
+This means a bootstrap repo can expose a trivial install path such as:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+jetp local
+```
+
+### Optional `.jetpack.yml`
+
+If present, `.jetpack.yml` can override the local bootstrap defaults:
+
+```yaml
+local:
+  playbook: deploy/playbooks/bootstrap.yml
+  roles: deploy/roles
+  inventory: deploy/inventory
+```
+
+Paths are resolved relative to the current repository root.
+
+### Built-in Local Bootstrap Variables
+
+When `jetp local` runs, Jetpack injects a small set of built-in variables for bootstrap-oriented repos:
+
+- `JET_CWD`
+- `JET_REPO_ROOT`
+- `JET_PLAYBOOK_DIR`
+- `JET_ROLES_DIR`
+- `JET_INVENTORY_DIR`
+- `JET_USERNAME`
+- `JET_USER_HOME` when `HOME` is available
+
+These variables are intended to make repo-local bootstrap assets addressable without hardcoded absolute paths.
+
 ## Universal Task Modifiers (with parameters)
 
 Jetpack now includes a universal `skip_if_exists` parameter that works with ALL modules:
