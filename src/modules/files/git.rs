@@ -182,6 +182,10 @@ impl GitAction {
 
     // BOOKMARK: fleshing this all out... 
 
+    fn shell_quote(input: &str) -> String {
+        format!("'{}'", input.replace('\'', "'\"'\"'"))
+    }
+
     fn is_ssh_repo(&self) -> bool {
         let result = self.repo.find("@").is_some() || self.repo.find("ssh://").is_some();
         return result;
@@ -189,7 +193,7 @@ impl GitAction {
 
     fn get_ssh_options_string(&self) -> String {
         let options = self.ssh_options.join(" ");
-        if self.path.starts_with("http") {
+        if self.repo.starts_with("http://") || self.repo.starts_with("https://") {
             // http or https:// passwords are intentionally not supported, use a key instead, see docs
             return String::from("GIT_TERMINAL_PROMPT=0");
         }
@@ -203,7 +207,7 @@ impl GitAction {
     }
 
     fn get_local_version(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<String>, Arc<TaskResponse>> {
-        let cmd = format!("git -C {} rev-parse HEAD", self.path);
+        let cmd = format!("git -C {} rev-parse HEAD", Self::shell_quote(&self.path));
         let result = handle.remote.run_unsafe(request, &cmd, CheckRc::Unchecked)?;
         let (rc, out) = cmd_info(&result);
         if rc == 0 {
@@ -227,7 +231,7 @@ impl GitAction {
 
     fn pull(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<(), Arc<TaskResponse>> {
         let ssh_options = self.get_ssh_options_string();
-        let cmd = format!("{} git -C {} pull", ssh_options, self.path);
+        let cmd = format!("{} git -C {} pull", ssh_options, Self::shell_quote(&self.path));
         match self.is_ssh_repo() {
             true  => handle.remote.run_forwardable(request, &cmd, CheckRc::Checked)?,
             false => handle.remote.run_unsafe(&request, &cmd, CheckRc::Checked)?
@@ -236,7 +240,7 @@ impl GitAction {
     }
 
     fn get_local_branch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<String, Arc<TaskResponse>> {
-        let cmd = format!("git -C {} rev-parse --abbrev-ref HEAD", self.path);
+        let cmd = format!("git -C {} rev-parse --abbrev-ref HEAD", Self::shell_quote(&self.path));
         let result = handle.remote.run_unsafe(request, &cmd, CheckRc::Checked)?;
         let (_rc, out) = cmd_info(&result);
         return Ok(out);
@@ -245,7 +249,12 @@ impl GitAction {
     fn clone(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<(),Arc<TaskResponse>> {
         let ssh_options = self.get_ssh_options_string();
         handle.remote.create_directory(request, &self.path)?;
-        let cmd = format!("{} git clone {} {}", ssh_options, self.repo, self.path);
+        let cmd = format!(
+            "{} git clone {} {}",
+            ssh_options,
+            Self::shell_quote(&self.repo),
+            Self::shell_quote(&self.path)
+        );
         match self.is_ssh_repo() {
             true =>  handle.remote.run_forwardable(request, &cmd, CheckRc::Checked)?,
             false => handle.remote.run_unsafe(&request, &cmd, CheckRc::Checked)?
@@ -254,7 +263,11 @@ impl GitAction {
     }
 
     fn switch_branch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<(), Arc<TaskResponse>> {
-        let cmd = format!("git -C {} switch {}", self.path, self.branch);
+        let cmd = format!(
+            "git -C {} switch {}",
+            Self::shell_quote(&self.path),
+            Self::shell_quote(&self.branch)
+        );
         handle.remote.run_unsafe(request, &cmd, CheckRc::Checked)?;
         return Ok(());
     }
@@ -265,3 +278,31 @@ impl GitAction {
 // + testing ssh and http repos without passwords
 // branch changes 
 // etc
+
+#[cfg(test)]
+mod tests {
+    use super::GitAction;
+
+    #[test]
+    fn shell_quote_handles_spaces_and_quotes() {
+        assert_eq!(
+            GitAction::shell_quote("/tmp/Application Support/it's-here"),
+            "'/tmp/Application Support/it'\"'\"'s-here'"
+        );
+    }
+
+    #[test]
+    fn https_repo_disables_git_ssh_command() {
+        let action = GitAction {
+            repo: "https://github.com/riffcc/better-agentic-extended.git".to_string(),
+            path: "/tmp/Application Support/riff-soe/better-agentic-ide".to_string(),
+            branch: "main".to_string(),
+            ssh_options: vec!["-o BatchMode=Yes".to_string()],
+            accept_keys: true,
+            update: true,
+            attributes: None,
+        };
+
+        assert_eq!(action.get_ssh_options_string(), "GIT_TERMINAL_PROMPT=0");
+    }
+}

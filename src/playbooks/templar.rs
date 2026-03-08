@@ -16,7 +16,7 @@
 
 use serde_yaml;
 use once_cell::sync::Lazy;
-use handlebars::{Handlebars,RenderError};
+use handlebars::Handlebars;
 
 use crate::playbooks::t_helpers::register_helpers;
 
@@ -57,17 +57,20 @@ impl Templar {
     // evaluate a string
 
     pub fn render(&self, template: &String, data: serde_yaml::Mapping, template_mode: TemplateMode) -> Result<String, String> {
-        let result : Result<String, RenderError> = match template_mode {
-            TemplateMode::Strict => HANDLEBARS.render_template(template, &data),
-            /* this is only used to get back the raw 'items' collection inside the task FSM */
-            TemplateMode::Off => Ok(String::from("empty"))
-        };
-        return match result {
-            Ok(x) => {
-                Ok(x)
-            },
-            Err(y) => {
-                Err(format!("Template error: {}", y.desc))
+        match template_mode {
+            TemplateMode::Off => Ok(String::from("empty")),
+            TemplateMode::Strict => {
+                let mut rendered = template.clone();
+                for _ in 0..8 {
+                    let next = HANDLEBARS
+                        .render_template(&rendered, &data)
+                        .map_err(|y| format!("Template error: {}", y.desc))?;
+                    if next == rendered || !next.contains("{{") {
+                        return Ok(next);
+                    }
+                    rendered = next;
+                }
+                Err("Template error: exceeded recursive render limit".to_string())
             }
         }
     }
@@ -101,4 +104,36 @@ impl Templar {
         };
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_resolves_nested_templates() {
+        let templar = Templar::new();
+        let mut data = serde_yaml::Mapping::new();
+        data.insert(
+            serde_yaml::Value::String("JET_USER_HOME".to_string()),
+            serde_yaml::Value::String("/home/wings".to_string()),
+        );
+        data.insert(
+            serde_yaml::Value::String("codex_desktop_remote_root".to_string()),
+            serde_yaml::Value::String("{{ JET_USER_HOME }}/projects/riffenvironment/projects/codex-desktop-linux".to_string()),
+        );
+
+        let result = templar
+            .render(
+                &"{{ codex_desktop_remote_root }}/codex-app".to_string(),
+                data,
+                TemplateMode::Strict,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result,
+            "/home/wings/projects/riffenvironment/projects/codex-desktop-linux/codex-app"
+        );
+    }
 }

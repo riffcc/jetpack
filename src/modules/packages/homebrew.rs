@@ -90,7 +90,7 @@ impl PackageManagementModule for HomebrewAction {
     }
 
     fn get_remote_version(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<PackageDetails>,Arc<TaskResponse>> {
-        let cmd = format!("brew info {} | head -n 1 | cut -f 4 -d ' '", self.package.clone());
+        let cmd = format!("{} info {} | head -n 1 | cut -f 4 -d ' '", self.brew_cmd(), self.package.clone());
         let result = handle.remote.run_unsafe(request, &cmd, CheckRc::Unchecked);
         match result {
             Ok(r) => {
@@ -109,7 +109,7 @@ impl PackageManagementModule for HomebrewAction {
     }
 
     fn get_local_version(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<PackageDetails>,Arc<TaskResponse>> {
-        let cmd = format!("brew info {}", self.package);
+        let cmd = format!("{} info {}", self.brew_cmd(), self.package);
         let result = handle.remote.run(request, &cmd, CheckRc::Unchecked);
         match result {
             Ok(r) => {
@@ -127,28 +127,32 @@ impl PackageManagementModule for HomebrewAction {
 
     fn install_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
         let cmd = match self.version.is_none() {
-            true => format!("brew install '{}'", self.package),
-            false => format!("brew install '{}@{}'", self.package, self.version.as_ref().unwrap())
+            true => format!("{} install '{}'", self.brew_cmd(), self.package),
+            false => format!("{} install '{}@{}'", self.brew_cmd(), self.package, self.version.as_ref().unwrap())
         };
         return handle.remote.run(request, &cmd, CheckRc::Checked);
     }
 
     fn update_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
         let cmd = match self.version.is_none() {
-            true => format!("brew upgrade '{}'", self.package),
-            false => format!("brew upgrade '{}@{}'", self.package, self.version.as_ref().unwrap())
+            true => format!("{} upgrade '{}'", self.brew_cmd(), self.package),
+            false => format!("{} upgrade '{}@{}'", self.brew_cmd(), self.package, self.version.as_ref().unwrap())
         };
         return handle.remote.run(request, &cmd, CheckRc::Checked);
     }
 
     fn remove_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
-        let cmd = format!("brew uninstall '{}'", self.package);
+        let cmd = format!("{} uninstall '{}'", self.brew_cmd(), self.package);
         return handle.remote.run(request, &cmd, CheckRc::Checked);
     }
 
 }
 
 impl HomebrewAction {
+
+    fn brew_cmd(&self) -> &'static str {
+        "if command -v brew >/dev/null 2>&1; then brew; elif [ -x /opt/homebrew/bin/brew ]; then /opt/homebrew/bin/brew; else brew; fi"
+    }
 
     pub fn parse_local_package_details(&self, _handle: &Arc<TaskHandle>, out: &String) -> Result<Option<PackageDetails>,Arc<TaskResponse>> {
         let mut version: Option<String> = None;
