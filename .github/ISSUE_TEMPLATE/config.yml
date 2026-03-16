@@ -1,20 +1,5 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
-
-  - name: Get Help
-    url: https://www.jetporch.com/community/discord-chat
-    about: Discord Chat
-  - name: Ask Questions
-    url: https://www.jetporch.com/community/discord-chat
-    about: Discord Chat
-  - name: Make A Feature Request
-    url: https://www.jetporch.com/community/discord-chat
-    about: Discord Chat
-  - name: Discuss Development or Feature Ideas
-    url: https://www.jetporch.com/community/discord-chat
-    about: Discord Chat
-  - name: Contributor Guide
-    url: https://www.jetporch.com/community/contributing
-    about: Required reading
-
-
+  - name: Riff Labs
+    url: https://riff.cc
+    about: Learn more about Riff Labs

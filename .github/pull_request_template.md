@@ -1,6 +1,13 @@
-Pull requests are not accepted on this read-only GitHub mirror.
+## Summary
 
-See details here about using SourceHut:
+<!-- Brief description of what this PR does and why -->
 
-https://www.jetporch.com/community/sourcehut
+## Test plan
 
+<!-- How was this tested? -->
+
+## Checklist
+
+- [ ] `cargo test` passes
+- [ ] `cargo clippy` clean
+- [ ] `cargo fmt --check` clean

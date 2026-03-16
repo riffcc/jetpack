@@ -1,21 +1,20 @@
 ---
-name: Create Documentation Report
-about: Report errors in documentation
+name: Documentation Issue
+about: Report an error or gap in documentation
 title: ''
-labels: Bug Report
+labels: documentation
 assignees: ''
 
 ---
 
-### Explain the problem
+### What's Wrong?
 
-<!--- what is wrong with the docs? -->
+<!-- Describe the documentation issue -->
 
-### URL 
+### URL
 
-<!-- paste the URL of the page(s) being discussed -->
+<!-- Link to the affected page(s) -->
 
-### Additional information
+### Suggested Fix
 
-<!-- optional -->
-
+<!-- Optional: how should it read instead? -->

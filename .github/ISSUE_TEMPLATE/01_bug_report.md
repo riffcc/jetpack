@@ -1,19 +1,19 @@
 ---
-name: Create Bug Report
-about: No one likes bugs
+name: Bug Report
+about: Report a bug in Jetpack
 title: ''
-labels: Bug Report
+labels: bug
 assignees: ''
 
 ---
 
 ### What Happened?
 
-<!-- explain details -->
+<!-- Explain what went wrong -->
 
 ### Version
 
-<-- paste the version/date info from 'jetp --version' -->
+<!-- Paste output of `jetpack --version` -->
 
 ### Steps to Reproduce
 
@@ -21,10 +21,10 @@ assignees: ''
 2.
 3.
 
-<!-- optional: sharing CLI commands used and relevant parts of playbook content and/or output on gist.github.com would be helpful -->
+### Relevant Output
+
+<!-- Optional: paste CLI output, playbook snippets, or link a gist -->
 
 ### Additional Information
 
-<!-- optional -->
-
-
+<!-- Optional -->
