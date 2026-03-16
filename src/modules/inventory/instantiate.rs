@@ -606,7 +606,7 @@ impl InstantiateAction {
             if group_file.exists() {
                 if let Ok(content) = fs::read_to_string(&group_file) {
                     if let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content) {
-                        if let Some(serde_yaml::Value::Sequence(ref mut seq)) = doc.get_mut(&serde_yaml::Value::String("hosts".to_string())) {
+                        if let Some(serde_yaml::Value::Sequence(seq)) = doc.get_mut(&serde_yaml::Value::String("hosts".to_string())) {
                             seq.retain(|v| {
                                 if let Some(s) = v.as_str() {
                                     !self.hostnames.contains(&s.to_string())

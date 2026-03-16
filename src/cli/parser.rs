@@ -1056,9 +1056,12 @@ mod tests {
     #[test]
     fn test_cli_parser_new_defaults() {
         let _lock = ENV_LOCK.lock().unwrap();
-        env::remove_var("JET_SSH_USER");
-        env::remove_var("JET_SSH_PORT");
-        env::remove_var("JET_THREADS");
+        // SAFETY: test holds ENV_LOCK so no concurrent env access
+        unsafe {
+            env::remove_var("JET_SSH_USER");
+            env::remove_var("JET_SSH_PORT");
+            env::remove_var("JET_THREADS");
+        }
 
         let parser = CliParser::new();
 
@@ -1085,13 +1088,16 @@ mod tests {
     #[test]
     fn test_cli_parser_new_with_env_vars() {
         let _lock = ENV_LOCK.lock().unwrap();
-        env::remove_var("JET_SSH_USER");
-        env::remove_var("JET_SSH_PORT");
-        env::remove_var("JET_THREADS");
+        // SAFETY: test holds ENV_LOCK so no concurrent env access
+        unsafe {
+            env::remove_var("JET_SSH_USER");
+            env::remove_var("JET_SSH_PORT");
+            env::remove_var("JET_THREADS");
 
-        env::set_var("JET_SSH_USER", "testuser");
-        env::set_var("JET_SSH_PORT", "2222");
-        env::set_var("JET_THREADS", "50");
+            env::set_var("JET_SSH_USER", "testuser");
+            env::set_var("JET_SSH_PORT", "2222");
+            env::set_var("JET_THREADS", "50");
+        }
 
         let parser = CliParser::new();
 
@@ -1099,27 +1105,36 @@ mod tests {
         assert_eq!(parser.default_port, 2222);
         assert_eq!(parser.threads, 50);
 
-        env::remove_var("JET_SSH_USER");
-        env::remove_var("JET_SSH_PORT");
-        env::remove_var("JET_THREADS");
+        // SAFETY: test holds ENV_LOCK so no concurrent env access
+        unsafe {
+            env::remove_var("JET_SSH_USER");
+            env::remove_var("JET_SSH_PORT");
+            env::remove_var("JET_THREADS");
+        }
     }
 
     #[test]
     fn test_cli_parser_new_with_invalid_env_vars() {
         let _lock = ENV_LOCK.lock().unwrap();
-        env::remove_var("JET_SSH_PORT");
-        env::remove_var("JET_THREADS");
+        // SAFETY: test holds ENV_LOCK so no concurrent env access
+        unsafe {
+            env::remove_var("JET_SSH_PORT");
+            env::remove_var("JET_THREADS");
 
-        env::set_var("JET_SSH_PORT", "invalid");
-        env::set_var("JET_THREADS", "not_a_number");
+            env::set_var("JET_SSH_PORT", "invalid");
+            env::set_var("JET_THREADS", "not_a_number");
+        }
 
         let parser = CliParser::new();
 
         assert_eq!(parser.default_port, 22);
         assert_eq!(parser.threads, 20);
 
-        env::remove_var("JET_SSH_PORT");
-        env::remove_var("JET_THREADS");
+        // SAFETY: test holds ENV_LOCK so no concurrent env access
+        unsafe {
+            env::remove_var("JET_SSH_PORT");
+            env::remove_var("JET_THREADS");
+        }
     }
 
     #[test]
