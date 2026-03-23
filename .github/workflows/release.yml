@@ -55,13 +55,13 @@ jobs:
         if: matrix.deb_arch != ''
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          PKG_DIR="rifflabs-jetpack_${VERSION}_${{ matrix.deb_arch }}"
+          PKG_DIR="jetpack_${VERSION}_${{ matrix.deb_arch }}"
           mkdir -p "${PKG_DIR}/DEBIAN"
           mkdir -p "${PKG_DIR}/usr/bin"
           cp target/${{ matrix.target }}/release/jetpack "${PKG_DIR}/usr/bin/jetpack"
           chmod 755 "${PKG_DIR}/usr/bin/jetpack"
           cat > "${PKG_DIR}/DEBIAN/control" <<CTRL
-          Package: rifflabs-jetpack
+          Package: jetpack
           Version: ${VERSION}
           Section: admin
           Priority: optional
@@ -77,7 +77,7 @@ jobs:
         if: matrix.deb_arch != ''
         uses: actions/upload-artifact@v4
         with:
-          name: rifflabs-jetpack-${{ matrix.deb_arch }}-deb
+          name: jetpack-${{ matrix.deb_arch }}-deb
           path: "*.deb"
 
   release:
