@@ -88,8 +88,18 @@ impl IsAction for UnpackAction {
     fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
             TaskRequestType::Query => {
-                // Check if source archive exists
-                if !Path::new(&self.src).exists() {
+                // Check the source archive exists ON THE TARGET HOST, not the
+                // control node. The archive is typically produced by a prior
+                // remote task (e.g. !download), so a local std::fs check here
+                // wrongly fails over SSH even when the file is really present.
+                // Route the check through the connection so it works for both
+                // local and remote execution.
+                let check_cmd = format!("test -f '{}'", self.src);
+                let exists = match handle.remote.run(&request, &check_cmd, CheckRc::Unchecked) {
+                    Ok(result) => { let (rc, _) = cmd_info(&result); rc == 0 },
+                    Err(_) => false,
+                };
+                if !exists {
                     return Err(handle.response.is_failed(&request, &format!("Source archive does not exist: {}", self.src)));
                 }
                 
@@ -174,5 +184,48 @@ impl IsAction for UnpackAction {
 
             _ => { return Err(handle.response.not_supported(request)); }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{query_request, test_handle, RecordingConnection};
+    use std::sync::{Arc, Mutex};
+
+    // Regression: the Query phase must check whether the source archive exists on
+    // the TARGET HOST (through the connection), not on the control node's local
+    // filesystem. The archive is normally produced by a prior remote task (e.g.
+    // !download), so a local std::fs check fails over SSH even when the file is
+    // really present. Here the path does not exist locally, but the recording
+    // connection reports every command (incl. `test -f`) as succeeding — so a
+    // host-aware Query succeeds and a control-node-local Query fails.
+    #[test]
+    fn query_checks_source_on_target_host_not_control_node() {
+        let conn = RecordingConnection::new(); // every command returns rc 0
+        let log = conn.command_log();
+        let handle = test_handle(Arc::new(Mutex::new(conn)));
+        let request = query_request();
+
+        let action = UnpackAction {
+            src: String::from("/nonexistent/on/control/node/archive.tar.gz"),
+            dest: String::from("/opt/app"),
+            mode: None,
+            owner: None,
+            group: None,
+        };
+
+        let result = action.dispatch(&handle, &request);
+        assert!(
+            result.is_ok(),
+            "Query must consult the target host, not the control node's local filesystem",
+        );
+
+        let commands = log.lock().unwrap();
+        assert!(
+            commands.iter().any(|c| c.contains("test -f") && c.contains("archive.tar.gz")),
+            "expected a remote existence check (`test -f ...`); recorded commands: {:?}",
+            *commands,
+        );
     }
 }
