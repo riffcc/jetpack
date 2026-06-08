@@ -32,6 +32,11 @@ pub mod config;
 pub mod error;
 pub mod output;
 
+// Test-only scaffolding (recording connection + handle builder) for unit-testing
+// module dispatch logic against a fake host.
+#[cfg(test)]
+pub mod test_support;
+
 // Re-export commonly used types for library users
 pub use api::{PlaybookRunner, PlaybookRunnerBuilder, PlaybookResult, run_playbook, run_inline};
 pub use config::{JetpackConfig, ConnectionMode};
