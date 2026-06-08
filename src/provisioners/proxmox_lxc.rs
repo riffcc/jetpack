@@ -51,6 +51,15 @@ struct ProxmoxApiResponse<T> {
     data: Option<T>,
 }
 
+/// Status of a Proxmox async task (UPID). Mutating endpoints (create, start,
+/// stop, ...) return a UPID immediately and do the work in the background;
+/// `status` goes "running" -> "stopped" and `exitstatus` is "OK" on success.
+#[derive(Serialize, Deserialize, Debug)]
+struct ProxmoxTaskStatus {
+    status: String,
+    exitstatus: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct LxcListItem {
     vmid: u64,
@@ -717,6 +726,45 @@ impl ProxmoxLxcProvisioner {
     }
 
     /// Create a new LXC container
+    /// Poll a Proxmox task (UPID) until it finishes.
+    ///
+    /// Proxmox runs container creation (and other mutations) asynchronously,
+    /// returning a UPID immediately while the work continues in the background.
+    /// If callers don't wait for the task to reach "stopped", IP/SSH discovery
+    /// races the still-running create and reports "container not found" until it
+    /// times out. Template extraction on network storage (e.g. moosefs) can take
+    /// a couple of minutes, so we allow a generous ceiling.
+    async fn wait_for_task(&self, conn: &ClusterConnection, client: &reqwest::Client, upid: &str) -> Result<(), String> {
+        let status_url = self.get_api_url(conn, &format!(
+            "/nodes/{}/tasks/{}/status", conn.node, urlencoding::encode(upid)));
+
+        // ~5 minutes at 3s intervals — covers slow template extraction.
+        for _ in 0..100u32 {
+            let response = self.apply_auth(conn, client.get(&status_url))
+                .send()
+                .await
+                .map_err(|e| format!("Failed to query task status: {}", e))?;
+
+            if response.status().is_success() {
+                let parsed: ProxmoxApiResponse<ProxmoxTaskStatus> = response.json()
+                    .await
+                    .map_err(|e| format!("Failed to parse task status: {}", e))?;
+                if let Some(task) = parsed.data {
+                    if task.status == "stopped" {
+                        return match task.exitstatus.as_deref() {
+                            Some("OK") | None => Ok(()),
+                            Some(err) => Err(format!("Proxmox task {} failed: {}", upid, err)),
+                        };
+                    }
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
+
+        Err(format!("Timed out waiting for Proxmox task {} to complete", upid))
+    }
+
     fn create_container(&self, conn: &ClusterConnection, config: &ProvisionConfig, hostname: &str, vmid: u64, host_vars: &serde_yaml::Mapping) -> Result<(), String> {
         let url = self.get_api_url(conn, &format!("/nodes/{}/lxc", conn.node));
 
@@ -838,7 +886,17 @@ impl ProxmoxLxcProvisioner {
                 return Err(format!("Proxmox API returned status {}: {}", status, text));
             }
 
-            Ok(())
+            // Proxmox runs create as a background task and returns its UPID.
+            // Wait for it to finish so the container actually exists (and, with
+            // start=1, is running) before the caller tries to discover its IP
+            // and SSH in — otherwise that discovery races the create and fails.
+            let api_response: ProxmoxApiResponse<String> = response.json()
+                .await
+                .map_err(|e| format!("Failed to parse create response: {}", e))?;
+            match api_response.data {
+                Some(upid) => self.wait_for_task(conn, &client, &upid).await,
+                None => Ok(()),
+            }
         })
     }
 
@@ -1178,7 +1236,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
                         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
                     // First, get list of all cluster nodes
-                    let nodes_url = format!("https://{}/api2/json/nodes", conn.api_host);
+                    let nodes_url = self.get_api_url(&conn, "/nodes");
                     let nodes_response = self.apply_auth(&conn, client.get(&nodes_url))
                         .send()
                         .await
@@ -1216,8 +1274,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
                     for node_info in nodes_resp.data {
                         let node_name = &node_info.node;
-                        let ifaces_url = format!("https://{}/api2/json/nodes/{}/lxc/{}/interfaces",
-                            conn.api_host, node_name, vmid_num);
+                        let ifaces_url = self.get_api_url(&conn, &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num));
 
                         let ifaces_response = self.apply_auth(&conn, client.get(&ifaces_url))
                             .send()
@@ -1248,7 +1305,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
                     }
 
                     // Fallback: try cluster-wide resources to find the container
-                    let resources_url = format!("https://{}/api2/json/cluster/resources", conn.api_host);
+                    let resources_url = self.get_api_url(&conn, "/cluster/resources");
                     let resources_response = self.apply_auth(&conn, client.get(&resources_url))
                         .send()
                         .await
@@ -1278,7 +1335,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
                             if resource.vmid == Some(vmid_num) {
                                 if let Some(node_name) = resource.node {
                                     // Use /interfaces to read the container's live network state.
-                                    let ifaces_url = format!("https://{}/api2/json/nodes/{}/lxc/{}/interfaces", conn.api_host, node_name, vmid_num);
+                                    let ifaces_url = self.get_api_url(&conn, &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num));
                                     let ifaces_response = self.apply_auth(&conn, client.get(&ifaces_url))
                                         .send()
                                         .await
