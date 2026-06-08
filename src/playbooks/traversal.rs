@@ -184,8 +184,18 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
     }
     run_state.visitor.read().unwrap().on_play_start(&run_state.context);
 
-    // Handle instantiate block - auto-generate hosts before group validation
+    let check_mode = run_state.visitor.read().unwrap().is_check_mode();
+
+    // Handle instantiate block - auto-generate hosts before group validation.
+    // In check mode this is a true dry-run: report the provisioning plan and
+    // stop before mutating the on-disk inventory, calling the cloud/hypervisor
+    // API, or attempting SSH. We can't meaningfully diff hosts that don't exist
+    // yet, so reporting the plan is the honest result.
     if let Some(ref spec) = play.instantiate {
+        if check_mode {
+            report_instantiate_plan(play, spec)?;
+            return Ok(());
+        }
         handle_instantiate(run_state, play, spec)?;
     }
 
@@ -238,6 +248,10 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
 }
 
 fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<Host>>>) -> Result<(), String> {
+
+    // Dry-run flag: in check mode we never mutate infrastructure (no container
+    // create/destroy, no DNS writes) — see the guards below.
+    let check_mode = run_state.visitor.read().unwrap().is_check_mode();
 
     // assign the batch
     { let mut ctx = run_state.context.write().unwrap(); ctx.set_targetted_hosts(&hosts); }
@@ -293,10 +307,14 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                     if let Some(inv_ip) = inventory_ip {
                         if inv_ip != zone_ip {
                             // Drift detected - update zone file
-                            match crate::dns::add_host_record(&dns_config, &host_name, &inv_ip) {
-                                Ok(true) => eprintln!("  → DNS: updated {} {} → {}", host_name, zone_ip, inv_ip),
-                                Ok(false) => {}
-                                Err(e) => eprintln!("  → DNS: warning: {}", e),
+                            if check_mode {
+                                eprintln!("  → DNS: would update {} {} → {} (check mode)", host_name, zone_ip, inv_ip);
+                            } else {
+                                match crate::dns::add_host_record(&dns_config, &host_name, &inv_ip) {
+                                    Ok(true) => eprintln!("  → DNS: updated {} {} → {}", host_name, zone_ip, inv_ip),
+                                    Ok(false) => {}
+                                    Err(e) => eprintln!("  → DNS: warning: {}", e),
+                                }
                             }
                         }
                     }
@@ -311,10 +329,14 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
                     });
 
                 if let Some(ip) = inventory_ip {
-                    match crate::dns::add_host_record(&dns_config, &host_name, &ip) {
-                        Ok(true) => eprintln!("  → DNS: added {} → {}", host_name, ip),
-                        Ok(false) => {}
-                        Err(e) => eprintln!("  → DNS: warning: {}", e),
+                    if check_mode {
+                        eprintln!("  → DNS: would add {} → {} (check mode)", host_name, ip);
+                    } else {
+                        match crate::dns::add_host_record(&dns_config, &host_name, &ip) {
+                            Ok(true) => eprintln!("  → DNS: added {} → {}", host_name, ip),
+                            Ok(false) => {}
+                            Err(e) => eprintln!("  → DNS: warning: {}", e),
+                        }
                     }
                 }
             }
@@ -323,7 +345,9 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
 
     // Async mode: each host provisions itself inside async_handle_batch,
     // so hosts start their task list as soon as their own SSH is ready.
-    if run_state.async_mode {
+    // Check mode always runs sequentially: the dry-run path skips real
+    // provisioning, and sequential output is clearer to read as a diff.
+    if run_state.async_mode && !check_mode {
         return async_handle_batch(run_state, play, hosts);
     }
 
@@ -341,6 +365,11 @@ fn handle_batch(run_state: &Arc<RunState>, play: &Play, hosts: &Vec<Arc<RwLock<H
 
         if needs_provision {
             if let Some(ref config) = provision_config {
+                // Dry-run: never create/update/destroy infrastructure in check mode.
+                if check_mode {
+                    eprintln!("  ~ {} => would provision ({}) — skipped (check mode)", host_name, config.provision_type);
+                    continue;
+                }
                 let dns_key = serde_yaml::Value::String("dns".to_string());
                 let dns_config = host_vars.get(&dns_key)
                     .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
@@ -1009,6 +1038,27 @@ fn get_play_hosts(run_state: &Arc<RunState>,play: &Play) -> Vec<Arc<RwLock<Host>
     }
 
     return results.iter().map(|(_k,v)| Arc::clone(&v)).collect();
+}
+
+/// Report what an instantiate block *would* create, without any side effects.
+/// Used in check mode so `jetp check-ssh` / `check-local` is a true dry-run and
+/// never writes inventory files, calls the hypervisor API, or attempts SSH.
+fn report_instantiate_plan(play: &Play, spec: &InstantiateSpec) -> Result<(), String> {
+    if spec.nodes.is_empty() {
+        return Err("instantiate: nodes list cannot be empty".to_string());
+    }
+    let hostnames = expand_instantiate_pattern(&spec.pattern)?;
+    eprintln!("  ~ instantiate (check mode): would generate {} host(s) [{}]:",
+        hostnames.len(), spec.provision.provision_type);
+    for (i, hostname) in hostnames.iter().enumerate() {
+        let node = &spec.nodes[i % spec.nodes.len()];
+        eprintln!("      ~ {} on node {}", hostname, node);
+    }
+    if let Some(ref roles) = play.roles {
+        let role_names: Vec<&str> = roles.iter().map(|r| r.role.as_str()).collect();
+        eprintln!("  ~ would then deploy to group(s) {:?}: role(s) {:?}", play.groups, role_names);
+    }
+    Ok(())
 }
 
 /// Handle play-level instantiate block
