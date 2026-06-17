@@ -80,6 +80,8 @@ pub const CLI_MODE_CHECK_SSH: u32 = 5;
 pub const CLI_MODE_SHOW: u32 = 6;
 pub const CLI_MODE_SIMULATE: u32 = 7;
 pub const CLI_MODE_PULL: u32 = 8;
+pub const CLI_MODE_INVENTORY_CHECK: u32 = 9;
+pub const CLI_MODE_FULL_CHECK: u32 = 10;
 
 const DEFAULT_LOCAL_PLAYBOOK: &str = "deploy/playbooks/bootstrap.yml";
 const DEFAULT_LOCAL_ROLES: &str = "deploy/roles";
@@ -113,6 +115,9 @@ fn cli_mode_from_string(s: &String) -> Result<u32, String> {
         "__simulate" => Ok(CLI_MODE_SIMULATE),
         "show-inventory" => Ok(CLI_MODE_SHOW),
         "pull" => Ok(CLI_MODE_PULL),
+        "syntax-check" => Ok(CLI_MODE_SYNTAX),
+        "inventory-check" => Ok(CLI_MODE_INVENTORY_CHECK),
+        "full-check" => Ok(CLI_MODE_FULL_CHECK),
         _ => Err(format!("invalid mode: {}", s)),
     };
 }
@@ -279,6 +284,14 @@ fn show_help() {
                       | --- | --- | ---\n\
                       | utility: |\n\
                       | | show-inventory | displays inventory, specify --show-groups group1:group2 or --show-hosts host1:host2\n\
+                      | |\n\
+                      | --- | --- | ---\n\
+                      | validation: |\n\
+                      | | syntax-check | statically validate playbooks/roles/tasks/templates (no hosts, no execution)\n\
+                      | |\n\
+                      | | inventory-check | validate an inventory tree (groups/group_vars/host_vars)\n\
+                      | |\n\
+                      | | full-check | run syntax-check and inventory-check in one pass\n\
                       | |\n\
                       | --- | --- | ---\n\
                       | local machine management: |\n\
@@ -603,6 +616,8 @@ impl CliParser {
             CLI_MODE_LOCAL => self.threads = 1,
             CLI_MODE_CHECK_LOCAL => self.threads = 1,
             CLI_MODE_SYNTAX => self.threads = 1,
+            CLI_MODE_INVENTORY_CHECK => self.threads = 1,
+            CLI_MODE_FULL_CHECK => self.threads = 1,
             CLI_MODE_SHOW => self.threads = 1,
             CLI_MODE_PULL => self.threads = 1,
             CLI_MODE_UNSET => {
@@ -1224,6 +1239,18 @@ mod tests {
             cli_mode_from_string(&"pull".to_string()).unwrap(),
             CLI_MODE_PULL
         );
+        assert_eq!(
+            cli_mode_from_string(&"syntax-check".to_string()).unwrap(),
+            CLI_MODE_SYNTAX
+        );
+        assert_eq!(
+            cli_mode_from_string(&"inventory-check".to_string()).unwrap(),
+            CLI_MODE_INVENTORY_CHECK
+        );
+        assert_eq!(
+            cli_mode_from_string(&"full-check".to_string()).unwrap(),
+            CLI_MODE_FULL_CHECK
+        );
 
         assert!(cli_mode_from_string(&"invalid".to_string()).is_err());
     }
@@ -1237,6 +1264,9 @@ mod tests {
         assert!(is_cli_mode_valid(&"show-inventory".to_string()));
         assert!(is_cli_mode_valid(&"__simulate".to_string()));
         assert!(is_cli_mode_valid(&"pull".to_string()));
+        assert!(is_cli_mode_valid(&"syntax-check".to_string()));
+        assert!(is_cli_mode_valid(&"inventory-check".to_string()));
+        assert!(is_cli_mode_valid(&"full-check".to_string()));
 
         assert!(!is_cli_mode_valid(&"invalid".to_string()));
         assert!(!is_cli_mode_valid(&"".to_string()));

@@ -62,6 +62,10 @@ pub struct RunState {
     pub tags: Option<Vec<String>>,
     pub allow_localhost_delegation: bool,
     pub is_pull_mode: bool,
+    /// syntax-check mode: statically validate plays, roles, tasks and templates
+    /// without resolving groups, targeting hosts, provisioning, or executing
+    /// anything. Used by `jetpack syntax-check` / `full-check`.
+    pub syntax_mode: bool,
     pub play_groups: Option<Vec<String>>,
     pub output_handler: Option<crate::output::OutputHandlerRef>,
     pub async_mode: bool,
@@ -237,6 +241,21 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
         .unwrap()
         .on_play_start(&run_state.context);
 
+    // syntax-check mode: validate the play's roles/tasks/handlers and the
+    // templates they reference, then stop. No group resolution, host targeting,
+    // provisioning, or task execution happens. Structural errors (missing role,
+    // malformed YAML, unknown module tag, missing/unparseable template) propagate
+    // as Err and surface as a non-zero exit from the CLI.
+    if run_state.syntax_mode {
+        let result = syntax_walk_play(run_state, play);
+        run_state
+            .visitor
+            .read()
+            .unwrap()
+            .on_play_stop(&run_state.context, result.is_err());
+        return result;
+    }
+
     let check_mode = run_state.visitor.read().unwrap().is_check_mode();
 
     // Handle instantiate block - auto-generate hosts before group validation.
@@ -313,6 +332,77 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
     } else {
         return Ok(());
     }
+}
+
+fn syntax_walk_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
+    // Mirrors the role/task/handler enumeration in handle_batch, but performs no
+    // host targeting or execution. process_role still loads role.yml, resolves
+    // dependencies, and deserializes every task/handler file (catching malformed
+    // YAML and unknown module tags); process_task short-circuits into
+    // syntax_validate_task, which additionally verifies template sources.
+
+    // role normal tasks
+    if let Some(roles) = play.roles.as_ref() {
+        for invocation in roles.iter() {
+            process_role(run_state, play, invocation, HandlerMode::NormalTasks)?;
+        }
+    }
+    run_state.context.write().unwrap().unset_role();
+
+    // loose play tasks
+    if let Some(tasks) = play.tasks.as_ref() {
+        for task in tasks.iter() {
+            process_task(run_state, play, task, HandlerMode::NormalTasks, None)?;
+        }
+    }
+
+    // role handlers
+    if let Some(roles) = play.roles.as_ref() {
+        for invocation in roles.iter() {
+            process_role(run_state, play, invocation, HandlerMode::Handlers)?;
+        }
+    }
+    run_state.context.write().unwrap().unset_role();
+
+    // loose play handlers
+    if let Some(handlers) = play.handlers.as_ref() {
+        for handler in handlers.iter() {
+            process_task(run_state, play, handler, HandlerMode::Handlers, None)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn syntax_validate_task(task: &Task) -> Result<(), String> {
+    // Templates are the only task type with an external file dependency we can
+    // verify without executing: confirm the source file exists (relative to the
+    // role directory, which process_role has chdir'd into — checking both the
+    // role root and the conventional templates/ subdir) and that it compiles as a
+    // handlebars template. Compilation validates syntax only, not variable
+    // references, since there is no host context to render against.
+    if let Task::Template(template_task) = task {
+        let cwd =
+            env::current_dir().map_err(|e| format!("could not determine role directory: {}", e))?;
+        let candidates = [
+            cwd.join(&template_task.src),
+            cwd.join("templates").join(&template_task.src),
+        ];
+        let src_path = candidates.iter().find(|p| p.is_file()).ok_or_else(|| {
+            format!(
+                "template source '{}' not found in role root or templates/",
+                template_task.src
+            )
+        })?;
+        let content = fs::read_to_string(src_path)
+            .map_err(|e| format!("could not read template '{}': {}", template_task.src, e))?;
+        let mut handlebars = handlebars::Handlebars::new();
+        handlebars.register_escape_fn(handlebars::no_escape);
+        handlebars
+            .register_template_string("_jetpack_syntax_check_", &content)
+            .map_err(|e| format!("template '{}' failed to compile: {}", template_task.src, e))?;
+    }
+    Ok(())
 }
 
 fn handle_batch(
@@ -923,6 +1013,12 @@ fn process_task(
 ) -> Result<(), String> {
     // this function is the final wrapper before fsm_run_task, the low-level finite state machine around task execution that is wrapped
     // by rayon, for multi-threaded execution with our thread worker pool.
+
+    // In syntax-check mode there are no hosts and we never execute: validate the
+    // task statically (template source exists + compiles) and return.
+    if run_state.syntax_mode {
+        return syntax_validate_task(task);
+    }
 
     let hosts: HashMap<String, Arc<RwLock<Host>>> =
         run_state.context.read().unwrap().get_remaining_hosts();
