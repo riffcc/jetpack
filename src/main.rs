@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Clippy temporarily silenced (see src/lib.rs for rationale / tracking #8).
+#![allow(clippy::all)]
+
 use jetpack::util::io::{quit};
 use jetpack::inventory::inventory::Inventory;
 use jetpack::inventory::loading::{load_inventory};
