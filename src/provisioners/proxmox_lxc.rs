@@ -2068,7 +2068,7 @@ mod tests {
     fn test_container_idempotency_existing_container_returns_already_exists() {
         // When find_container_by_hostname returns Some(vmid), ensure_exists should return AlreadyExists
         // This tests the logic path, not the actual API call
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         // Create a mock config
         let config = ProvisionConfig {
@@ -2128,7 +2128,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_prefix_matching() {
         // Test that template prefix matching works correctly
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         // Simulate template list from local storage
         let templates = vec![
@@ -2149,7 +2149,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_exact_matching() {
         // Test that exact template name matching works
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         let templates = vec![
             "local:vztmpl/debian-12-standard_amd64_12.2.0_pve8.tar.zst".to_string(),
@@ -2175,7 +2175,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_arch_specific() {
         // Test that amd64 and arm64 templates are distinguished
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         let templates = vec![
             "local:vztmpl/debian-12-standard_amd64.tar.zst".to_string(),
@@ -2198,7 +2198,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_latest_version() {
         // Test that sorting finds the latest version
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         let mut templates = vec![
             "local:vztmpl/debian-12-standard_amd64_12.0.0_pve8.tar.zst".to_string(),
@@ -2513,7 +2513,7 @@ mod tests {
         // The IP lookup should search all nodes
 
         let cluster_nodes = vec!["pve1", "pve2", "pve3"];
-        let target_hostname = "dragonfly";
+        let _target_hostname = "dragonfly";
 
         // Simulate finding container on pve2
         let container_location = Some(("pve2", 106u64));

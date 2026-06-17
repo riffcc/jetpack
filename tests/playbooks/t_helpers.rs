@@ -1,8 +1,7 @@
 use jetpack::playbooks::t_helpers::*;
-use handlebars::{Handlebars, no_escape, Helper, RenderContext, Context, HelperDef, ScopedJson, JsonValue, RenderError};
+use handlebars::{Handlebars, no_escape};
 use serde_json::json;
 use std::error::Error;
-use std::collections::HashMap;
 
 pub fn new_handlebars<'reg>() -> Handlebars<'reg> {
     let mut handlebars = Handlebars::new();

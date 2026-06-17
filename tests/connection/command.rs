@@ -1,6 +1,5 @@
 use jetpack::connection::command::*;
 use jetpack::tasks::response::{TaskResponse, TaskStatus};
-use jetpack::tasks::fields::Field;
 use std::sync::Arc;
 
 #[test]

@@ -3,7 +3,7 @@ use serde_yaml;
 
 #[test]
 fn test_templar_new() {
-    let templar = Templar::new();
+    let _templar = Templar::new();
     // Just ensure we can create a new instance
     assert!(true);
 }

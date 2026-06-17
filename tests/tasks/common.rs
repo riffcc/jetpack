@@ -1,7 +1,7 @@
 use jetpack::tasks::common::*;
 use jetpack::tasks::request::TaskRequest;
 use jetpack::tasks::response::TaskResponse;
-use jetpack::tasks::logic::{PreLogicInput, PreLogicEvaluated, PostLogicEvaluated};
+use jetpack::tasks::logic::PreLogicInput;
 use jetpack::handle::handle::TaskHandle;
 use jetpack::playbooks::templar::TemplateMode;
 use std::sync::Arc;

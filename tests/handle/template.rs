@@ -50,7 +50,7 @@ fn create_test_request() -> Arc<TaskRequest> {
 
 #[test]
 fn test_template_new() {
-    let template = create_test_template();
+    let _template = create_test_template();
     // Template creation should succeed
     assert!(true);
 }

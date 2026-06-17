@@ -1,5 +1,4 @@
 use jetpack::registry::list::*;
-use jetpack::tasks::*;
 
 #[test]
 fn test_task_enum_variant_access_modules() {

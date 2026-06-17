@@ -1,6 +1,5 @@
 use jetpack::{JetpackConfig, PlaybookRunner, NullOutputHandler};
 use std::sync::Arc;
-use std::path::PathBuf;
 
 #[test]
 fn test_config_builder() {
@@ -24,7 +23,7 @@ fn test_runner_creation() {
         .playbook("/tmp/test.yml")
         .local();
     
-    let runner = PlaybookRunner::new(config)
+    let _runner = PlaybookRunner::new(config)
         .with_output_handler(Arc::new(NullOutputHandler));
     
     // Just verify it can be created

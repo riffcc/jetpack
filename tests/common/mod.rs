@@ -10,6 +10,10 @@ use jetpack::connection::local::LocalFactory;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
+// Shared helper used by subdirectory test files that are not compiled as
+// top-level Cargo targets (tests/modules/*, tests/connection/*, ...).
+// Allowed dead_code until those tests are wired into a test target.
+#[allow(dead_code)]
 pub fn create_test_run_state() -> Arc<RunState> {
     let parser = CliParser::new();
     let mut inventory = Inventory::new();
