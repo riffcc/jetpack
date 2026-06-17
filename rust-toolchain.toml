@@ -1,0 +1,9 @@
+# Pinned to the stable Rust toolchain for consistent builds across contributors
+# and CI. Edition 2024 requires Rust >= 1.85, which stable always satisfies.
+#
+# Uses `stable` rather than an exact version (e.g. 1.96.0): CI installs
+# components/targets via dtolnay/rust-toolchain against `stable`, and a
+# named-version pin would select a toolchain without them, breaking the
+# fmt/clippy/cross-target build jobs.
+[toolchain]
+channel = "stable"
