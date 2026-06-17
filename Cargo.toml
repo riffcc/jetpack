@@ -18,7 +18,7 @@ path = "src/lib.rs"
 
 [dependencies]
 once_cell = "1.18.0"
-russh = "0.57.0"
+russh = "0.61.2"
 russh-sftp = "2.1.1"
 serde_derive = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -33,7 +33,6 @@ guid-create = "0.3.1"
 expanduser = "1.2.2"
 indexmap = { version = "2.1.0", features = ["serde"] }
 chrono = "0.4.31"
-shlex = "1.2.0"
 reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
 semver = "1.0"
 tokio = { version = "1.47.0", features = ["full"] }
