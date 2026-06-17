@@ -5,36 +5,41 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::connection::connection::{Connection};
+use crate::connection::connection::Connection;
 use crate::inventory::hosts::Host;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
-use std::collections::HashMap;
 
 pub struct ConnectionCache {
-    connections: HashMap<String, Arc<Mutex<dyn Connection>>>
+    connections: HashMap<String, Arc<Mutex<dyn Connection>>>,
 }
 
 impl ConnectionCache {
     pub fn new() -> Self {
         Self {
-            connections: HashMap::new()
+            connections: HashMap::new(),
         }
     }
 
-    pub fn add_connection(&mut self, host:&Arc<RwLock<Host>>, connection: &Arc<Mutex<dyn Connection>>) {
+    pub fn add_connection(
+        &mut self,
+        host: &Arc<RwLock<Host>>,
+        connection: &Arc<Mutex<dyn Connection>>,
+    ) {
         let host2 = host.read().expect("host read");
-        self.connections.insert(host2.name.clone(), Arc::clone(connection));
+        self.connections
+            .insert(host2.name.clone(), Arc::clone(connection));
     }
 
     pub fn has_connection(&self, host: &Arc<RwLock<Host>>) -> bool {

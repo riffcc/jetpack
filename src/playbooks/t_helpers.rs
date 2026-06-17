@@ -13,7 +13,10 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use handlebars::{Handlebars, RenderError, RenderErrorReason, HelperDef, RenderContext, ScopedJson, JsonValue, Helper, Context, handlebars_helper};
+use handlebars::{
+    Context, Handlebars, Helper, HelperDef, JsonValue, RenderContext, RenderError,
+    RenderErrorReason, ScopedJson, handlebars_helper,
+};
 
 //#[allow(non_camel_case_types)]
 pub struct IsDefined;
@@ -28,11 +31,12 @@ impl HelperDef for IsDefined {
     ) -> Result<ScopedJson<'rc>, RenderError> {
         let params = h.params();
         if params.len() != 1 {
-            return Err(RenderErrorReason::Other(
-                "is_defined: requires one parameter".to_owned(),
-            ).into());
+            return Err(
+                RenderErrorReason::Other("is_defined: requires one parameter".to_owned()).into(),
+            );
         }
-        let result = h.param(0)
+        let result = h
+            .param(0)
             .and_then(|x| {
                 if x.is_value_missing() {
                     Some(false)
@@ -40,7 +44,11 @@ impl HelperDef for IsDefined {
                     Some(true)
                 }
             })
-            .ok_or_else(|| RenderError::from(RenderErrorReason::Other("is_defined: Couldn't read parameter".to_owned())))?;
+            .ok_or_else(|| {
+                RenderError::from(RenderErrorReason::Other(
+                    "is_defined: Couldn't read parameter".to_owned(),
+                ))
+            })?;
 
         Ok(ScopedJson::Derived(JsonValue::from(result)))
     }
@@ -120,213 +128,223 @@ mod tests {
     fn test_to_lower_case() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{to_lower_case \"HELLO WORLD\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "hello world");
     }
-    
+
     #[test]
     fn test_to_upper_case() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{to_upper_case \"hello world\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "HELLO WORLD");
     }
-    
+
     #[test]
     fn test_trim() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{trim \"  hello world  \"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "hello world");
     }
-    
+
     #[test]
     fn test_trim_start() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{trim_start \"  hello world  \"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "hello world  ");
     }
-    
+
     #[test]
     fn test_trim_end() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{trim_end \"  hello world  \"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "  hello world");
     }
-    
+
     #[test]
     fn test_contains_true() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{contains \"hello world\" \"world\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "true");
     }
-    
+
     #[test]
     fn test_contains_false() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{contains \"hello world\" \"foo\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "false");
     }
-    
+
     #[test]
     fn test_starts_with_true() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{starts_with \"hello world\" \"hello\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "true");
     }
-    
+
     #[test]
     fn test_starts_with_false() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{starts_with \"hello world\" \"world\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "false");
     }
-    
+
     #[test]
     fn test_ends_with_true() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{ends_with \"hello world\" \"world\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "true");
     }
-    
+
     #[test]
     fn test_ends_with_false() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{ends_with \"hello world\" \"hello\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "false");
     }
-    
+
     #[test]
     fn test_isdefined_with_defined_value() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{isdefined myvar}}";
         let data = json!({ "myvar": "test" });
         let result = handlebars.render_template(template, &data).unwrap();
         assert_eq!(result, "true");
     }
-    
+
     #[test]
     fn test_isdefined_with_undefined_value() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{isdefined myvar}}";
         let data = json!({});
         let result = handlebars.render_template(template, &data).unwrap();
         assert_eq!(result, "false");
     }
-    
+
     #[test]
     fn test_isdefined_with_null_value() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{isdefined myvar}}";
         let data = json!({ "myvar": null });
         let result = handlebars.render_template(template, &data).unwrap();
         assert_eq!(result, "true");
     }
-    
+
     #[test]
     fn test_isdefined_no_params_error() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{isdefined}}";
         let result = handlebars.render_template(template, &json!({}));
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("requires one parameter"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("requires one parameter")
+        );
     }
-    
+
     #[test]
     fn test_isdefined_too_many_params_error() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{isdefined myvar another}}";
         let result = handlebars.render_template(template, &json!({}));
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("requires one parameter"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("requires one parameter")
+        );
     }
-    
+
     #[test]
     fn test_multiple_helpers_in_template() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{to_upper_case (trim \"  hello  \")}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "HELLO");
     }
-    
+
     #[test]
     fn test_helpers_with_variables() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{to_lower_case name}}";
         let data = json!({ "name": "JOHN DOE" });
         let result = handlebars.render_template(template, &data).unwrap();
         assert_eq!(result, "john doe");
     }
-    
+
     #[test]
     fn test_helpers_with_special_characters() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{trim \"\\t\\n  hello\\r\\n  \"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "hello");
     }
-    
+
     #[test]
     fn test_contains_empty_string() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{contains \"hello\" \"\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "true"); // Empty string is contained in any string
     }
-    
+
     #[test]
     fn test_helpers_with_unicode() {
         let mut handlebars = Handlebars::new();
         register_helpers(&mut handlebars);
-        
+
         let template = "{{to_upper_case \"café\"}}";
         let result = handlebars.render_template(template, &json!({})).unwrap();
         assert_eq!(result, "CAFÉ");

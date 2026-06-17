@@ -51,7 +51,10 @@ fn test_file_task_with_attributes() {
     };
 
     assert!(task.attributes.is_some());
-    assert_eq!(task.attributes.as_ref().unwrap().owner, Some("user".to_string()));
+    assert_eq!(
+        task.attributes.as_ref().unwrap().owner,
+        Some("user".to_string())
+    );
 }
 
 #[test]
@@ -67,7 +70,7 @@ attributes:
 
     let task: Result<FileTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Create test file".to_string()));
     assert_eq!(task.path, "/tmp/test.txt");
@@ -83,7 +86,7 @@ remove: "yes"
 
     let task: Result<FileTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.path, "/tmp/delete_me.txt");
     assert_eq!(task.remove, Some("yes".to_string()));
@@ -101,7 +104,7 @@ and:
 
     let task: Result<FileTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.with.is_some());
     assert!(task.and.is_some());

@@ -111,15 +111,17 @@ impl DependencyReader {
     /// Check if this is a critical infrastructure component
     pub fn is_critical(vars: &serde_yaml::Mapping) -> bool {
         let key = serde_yaml::Value::String(vars::CRITICAL.to_string());
-        vars.get(&key).and_then(|v| match v {
-            serde_yaml::Value::Bool(b) => Some(*b),
-            serde_yaml::Value::String(s) => match s.to_lowercase().as_str() {
-                "true" | "yes" | "1" => Some(true),
-                "false" | "no" | "0" => Some(false),
+        vars.get(&key)
+            .and_then(|v| match v {
+                serde_yaml::Value::Bool(b) => Some(*b),
+                serde_yaml::Value::String(s) => match s.to_lowercase().as_str() {
+                    "true" | "yes" | "1" => Some(true),
+                    "false" | "no" | "0" => Some(false),
+                    _ => None,
+                },
                 _ => None,
-            },
-            _ => None,
-        }).unwrap_or(false)
+            })
+            .unwrap_or(false)
     }
 
     /// Get the primary storage backend
@@ -144,16 +146,20 @@ impl DependencyReader {
     // Helper: get a list of strings
     fn get_string_list(vars: &serde_yaml::Mapping, key_name: &str) -> Vec<String> {
         let key = serde_yaml::Value::String(key_name.to_string());
-        vars.get(&key).and_then(|v| match v {
-            serde_yaml::Value::Sequence(seq) => {
-                Some(seq.iter().filter_map(|item| match item {
-                    serde_yaml::Value::String(s) => Some(s.clone()),
-                    _ => None,
-                }).collect())
-            },
-            serde_yaml::Value::String(s) => Some(vec![s.clone()]),
-            _ => None,
-        }).unwrap_or_default()
+        vars.get(&key)
+            .and_then(|v| match v {
+                serde_yaml::Value::Sequence(seq) => Some(
+                    seq.iter()
+                        .filter_map(|item| match item {
+                            serde_yaml::Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .collect(),
+                ),
+                serde_yaml::Value::String(s) => Some(vec![s.clone()]),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -216,7 +222,8 @@ impl DependencyBuilder {
     // Helper: set a list of strings
     fn set_string_list(vars: &mut serde_yaml::Mapping, key_name: &str, values: &[String]) {
         let key = serde_yaml::Value::String(key_name.to_string());
-        let seq: Vec<serde_yaml::Value> = values.iter()
+        let seq: Vec<serde_yaml::Value> = values
+            .iter()
             .map(|s| serde_yaml::Value::String(s.clone()))
             .collect();
         vars.insert(key, serde_yaml::Value::Sequence(seq));
@@ -243,25 +250,37 @@ mod tests {
     #[test]
     fn test_runs_on() {
         let vars = create_test_vars();
-        assert_eq!(DependencyReader::get_runs_on(&vars), Some("pve01".to_string()));
+        assert_eq!(
+            DependencyReader::get_runs_on(&vars),
+            Some("pve01".to_string())
+        );
     }
 
     #[test]
     fn test_workload_id() {
         let vars = create_test_vars();
-        assert_eq!(DependencyReader::get_workload_id(&vars), Some("100".to_string()));
+        assert_eq!(
+            DependencyReader::get_workload_id(&vars),
+            Some("100".to_string())
+        );
     }
 
     #[test]
     fn test_compute_cluster() {
         let vars = create_test_vars();
-        assert_eq!(DependencyReader::get_compute_cluster(&vars), Some("homelab".to_string()));
+        assert_eq!(
+            DependencyReader::get_compute_cluster(&vars),
+            Some("homelab".to_string())
+        );
     }
 
     #[test]
     fn test_virtualization() {
         let vars = create_test_vars();
-        assert_eq!(DependencyReader::get_virtualization(&vars), VirtualizationType::Lxc);
+        assert_eq!(
+            DependencyReader::get_virtualization(&vars),
+            VirtualizationType::Lxc
+        );
     }
 
     #[test]
@@ -289,23 +308,47 @@ mod tests {
     #[test]
     fn test_storage() {
         let vars = create_test_vars();
-        assert_eq!(DependencyReader::get_storage(&vars), Some("moosefs".to_string()));
+        assert_eq!(
+            DependencyReader::get_storage(&vars),
+            Some("moosefs".to_string())
+        );
     }
 
     #[test]
     fn test_virtualization_from_str() {
         assert_eq!(VirtualizationType::from_str("lxc"), VirtualizationType::Lxc);
         assert_eq!(VirtualizationType::from_str("LXC"), VirtualizationType::Lxc);
-        assert_eq!(VirtualizationType::from_str("container"), VirtualizationType::Lxc);
-        assert_eq!(VirtualizationType::from_str("qemu"), VirtualizationType::Qemu);
+        assert_eq!(
+            VirtualizationType::from_str("container"),
+            VirtualizationType::Lxc
+        );
+        assert_eq!(
+            VirtualizationType::from_str("qemu"),
+            VirtualizationType::Qemu
+        );
         assert_eq!(VirtualizationType::from_str("vm"), VirtualizationType::Qemu);
-        assert_eq!(VirtualizationType::from_str("kvm"), VirtualizationType::Qemu);
+        assert_eq!(
+            VirtualizationType::from_str("kvm"),
+            VirtualizationType::Qemu
+        );
         assert_eq!(VirtualizationType::from_str("pod"), VirtualizationType::Pod);
         assert_eq!(VirtualizationType::from_str("k8s"), VirtualizationType::Pod);
-        assert_eq!(VirtualizationType::from_str("kubernetes"), VirtualizationType::Pod);
-        assert_eq!(VirtualizationType::from_str("physical"), VirtualizationType::Physical);
-        assert_eq!(VirtualizationType::from_str("baremetal"), VirtualizationType::Physical);
-        assert_eq!(VirtualizationType::from_str("unknown_type"), VirtualizationType::Unknown);
+        assert_eq!(
+            VirtualizationType::from_str("kubernetes"),
+            VirtualizationType::Pod
+        );
+        assert_eq!(
+            VirtualizationType::from_str("physical"),
+            VirtualizationType::Physical
+        );
+        assert_eq!(
+            VirtualizationType::from_str("baremetal"),
+            VirtualizationType::Physical
+        );
+        assert_eq!(
+            VirtualizationType::from_str("unknown_type"),
+            VirtualizationType::Unknown
+        );
     }
 
     #[test]
@@ -314,7 +357,10 @@ mod tests {
         assert_eq!(DependencyReader::get_runs_on(&vars), None);
         assert_eq!(DependencyReader::get_workload_id(&vars), None);
         assert_eq!(DependencyReader::get_compute_cluster(&vars), None);
-        assert_eq!(DependencyReader::get_virtualization(&vars), VirtualizationType::Unknown);
+        assert_eq!(
+            DependencyReader::get_virtualization(&vars),
+            VirtualizationType::Unknown
+        );
         assert!(DependencyReader::get_depends_on(&vars).is_empty());
         assert!(DependencyReader::get_provides(&vars).is_empty());
         assert!(!DependencyReader::is_critical(&vars));
@@ -325,8 +371,14 @@ mod tests {
         // When a number is provided for workload_id, it should be converted to string
         let mut vars = serde_yaml::Mapping::new();
         let key = serde_yaml::Value::String(vars::WORKLOAD_ID.to_string());
-        vars.insert(key, serde_yaml::Value::Number(serde_yaml::Number::from(200)));
-        assert_eq!(DependencyReader::get_workload_id(&vars), Some("200".to_string()));
+        vars.insert(
+            key,
+            serde_yaml::Value::Number(serde_yaml::Number::from(200)),
+        );
+        assert_eq!(
+            DependencyReader::get_workload_id(&vars),
+            Some("200".to_string())
+        );
     }
 
     #[test]
@@ -335,7 +387,10 @@ mod tests {
         let mut vars = serde_yaml::Mapping::new();
         let key = serde_yaml::Value::String(vars::DEPENDS_ON.to_string());
         vars.insert(key, serde_yaml::Value::String("moosefs".to_string()));
-        assert_eq!(DependencyReader::get_depends_on(&vars), vec!["moosefs".to_string()]);
+        assert_eq!(
+            DependencyReader::get_depends_on(&vars),
+            vec!["moosefs".to_string()]
+        );
     }
 
     #[test]

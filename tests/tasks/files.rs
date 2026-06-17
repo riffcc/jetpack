@@ -11,7 +11,7 @@ fn test_recurse_enum() {
 fn test_recurse_debug() {
     let r = Recurse::Yes;
     assert_eq!(format!("{:?}", r), "Yes");
-    
+
     let r = Recurse::No;
     assert_eq!(format!("{:?}", r), "No");
 }
@@ -70,7 +70,7 @@ fn test_file_attributes_input_debug() {
         group: Some("group".to_string()),
         mode: Some("0o755".to_string()),
     };
-    
+
     let debug_str = format!("{:?}", attr);
     assert!(debug_str.contains("owner"));
     assert!(debug_str.contains("group"));
@@ -84,7 +84,7 @@ fn test_file_attributes_evaluated_debug() {
         group: Some("group".to_string()),
         mode: Some("0o755".to_string()),
     };
-    
+
     let debug_str = format!("{:?}", attr);
     assert!(debug_str.contains("owner"));
     assert!(debug_str.contains("group"));
@@ -98,7 +98,7 @@ fn test_file_attributes_with_none_values() {
         group: None,
         mode: None,
     };
-    
+
     assert!(attr.owner.is_none());
     assert!(attr.group.is_none());
     assert!(attr.mode.is_none());
@@ -108,13 +108,15 @@ fn test_file_attributes_with_none_values() {
 fn test_is_octal_string_edge_cases() {
     // Empty string
     assert!(!FileAttributesInput::is_octal_string(&"".to_string()));
-    
+
     // Just the prefix
     assert!(!FileAttributesInput::is_octal_string(&"0o".to_string()));
-    
+
     // Very long valid octal
-    assert!(FileAttributesInput::is_octal_string(&"12345670".to_string()));
-    
+    assert!(FileAttributesInput::is_octal_string(
+        &"12345670".to_string()
+    ));
+
     // Negative numbers - from_str_radix accepts them
     assert!(FileAttributesInput::is_octal_string(&"-755".to_string()));
 }

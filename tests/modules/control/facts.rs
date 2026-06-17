@@ -42,7 +42,7 @@ ohai: "no"
 
     let task: Result<FactsTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Gather Facts".to_string()));
     assert_eq!(task.facter, Some("yes".to_string()));
@@ -57,7 +57,7 @@ facter:
 
     let task: Result<FactsTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.name.is_none());
     assert!(task.facter.is_none());
@@ -76,7 +76,7 @@ and:
 
     let task: Result<FactsTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.with.is_some());
     assert!(task.and.is_some());

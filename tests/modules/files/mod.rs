@@ -1,6 +1,6 @@
-mod file;
-mod directory;
 mod copy;
-mod template;
-mod stat;
+mod directory;
+mod file;
 mod git;
+mod stat;
+mod template;

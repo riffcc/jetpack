@@ -15,7 +15,7 @@ fn test_items_input_enum() {
         ItemsInput::ItemsString(s) => assert_eq!(s, "my_var"),
         _ => panic!("Expected ItemsString"),
     }
-    
+
     // Test ItemsList variant
     let items_list = ItemsInput::ItemsList(vec!["a".to_string(), "b".to_string()]);
     match items_list {
@@ -35,7 +35,7 @@ fn test_pre_logic_input_struct() {
         delegate_to: Some("host1".to_string()),
         skip_if_exists: None,
     };
-    
+
     assert_eq!(pre_logic.condition, Some("test_condition".to_string()));
     assert_eq!(pre_logic.subscribe, Some("test_event".to_string()));
     assert_eq!(pre_logic.sudo, Some("root".to_string()));
@@ -52,7 +52,7 @@ fn test_post_logic_input_struct() {
         retry: Some("3".to_string()),
         delay: Some("5".to_string()),
     };
-    
+
     assert_eq!(post_logic.notify, Some("handler".to_string()));
     assert_eq!(post_logic.ignore_errors, Some("true".to_string()));
     assert_eq!(post_logic.retry, Some("3".to_string()));
@@ -69,12 +69,15 @@ fn test_pre_logic_evaluated_struct() {
         tags: Some(vec!["tag1".to_string(), "tag2".to_string()]),
         skip_if_exists: None,
     };
-    
+
     assert_eq!(evaluated.condition, Some("evaluated_condition".to_string()));
     assert_eq!(evaluated.subscribe, Some("evaluated_event".to_string()));
     assert_eq!(evaluated.sudo, Some("evaluated_user".to_string()));
     assert!(matches!(evaluated.items, Some(ItemsInput::ItemsString(_))));
-    assert_eq!(evaluated.tags, Some(vec!["tag1".to_string(), "tag2".to_string()]));
+    assert_eq!(
+        evaluated.tags,
+        Some(vec!["tag1".to_string(), "tag2".to_string()])
+    );
 }
 
 #[test]
@@ -85,7 +88,7 @@ fn test_post_logic_evaluated_struct() {
         retry: 3,
         delay: 5,
     };
-    
+
     assert_eq!(evaluated.notify, Some("handler_name".to_string()));
     assert_eq!(evaluated.ignore_errors, true);
     assert_eq!(evaluated.retry, 3);
@@ -100,7 +103,7 @@ fn test_post_logic_evaluated_defaults() {
         retry: 0,
         delay: 1,
     };
-    
+
     assert_eq!(evaluated.notify, None);
     assert_eq!(evaluated.ignore_errors, false);
     assert_eq!(evaluated.retry, 0);

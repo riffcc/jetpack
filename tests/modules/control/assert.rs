@@ -27,9 +27,18 @@ fn test_assert_task_with_lists() {
         msg: None,
         r#true: None,
         r#false: None,
-        all_true: Some(vec!["{{ test_true }}".to_string(), "{{ 1 == 1 }}".to_string()]),
-        all_false: Some(vec!["{{ test_false }}".to_string(), "{{ 1 == 2 }}".to_string()]),
-        some_true: Some(vec!["{{ test_false }}".to_string(), "{{ test_true }}".to_string()]),
+        all_true: Some(vec![
+            "{{ test_true }}".to_string(),
+            "{{ 1 == 1 }}".to_string(),
+        ]),
+        all_false: Some(vec![
+            "{{ test_false }}".to_string(),
+            "{{ 1 == 2 }}".to_string(),
+        ]),
+        some_true: Some(vec![
+            "{{ test_false }}".to_string(),
+            "{{ test_true }}".to_string(),
+        ]),
         with: None,
         and: None,
     };
@@ -51,7 +60,7 @@ false: "{{ test_var == 0 }}"
 
     let task: Result<AssertTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Test Assert".to_string()));
     assert_eq!(task.msg, Some("Test assertion".to_string()));
@@ -75,7 +84,7 @@ some_true:
 
     let task: Result<AssertTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.all_true.as_ref().unwrap().len(), 2);
     assert_eq!(task.all_false.as_ref().unwrap().len(), 2);

@@ -5,27 +5,27 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::config::{JetpackConfig, ConnectionMode};
+use crate::config::{ConnectionMode, JetpackConfig};
+use crate::connection::factory::ConnectionFactory;
+use crate::connection::local::LocalFactory as OldLocalFactory;
+use crate::connection::no::NoFactory as OldNoFactory;
+use crate::connection::ssh::SshFactory as OldSshFactory;
 use crate::error::{JetpackError, Result};
-use crate::output::{OutputHandler, OutputHandlerRef, NullOutputHandler};
 use crate::inventory::inventory::Inventory;
 use crate::inventory::loading::load_inventory;
+use crate::output::{NullOutputHandler, OutputHandler, OutputHandlerRef};
 use crate::playbooks::context::PlaybookContext;
-use crate::playbooks::visitor::{PlaybookVisitor, CheckMode};
-use crate::playbooks::traversal::{playbook_traversal, RunState};
-use crate::connection::factory::ConnectionFactory;
-use crate::connection::ssh::SshFactory as OldSshFactory;
-use crate::connection::local::LocalFactory as OldLocalFactory; 
-use crate::connection::no::NoFactory as OldNoFactory;
+use crate::playbooks::traversal::{RunState, playbook_traversal};
+use crate::playbooks::visitor::{CheckMode, PlaybookVisitor};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -45,7 +45,7 @@ impl PlaybookRunner {
             provided_inventory: None,
         }
     }
-    
+
     /// Set a custom output handler
     pub fn with_output_handler(mut self, handler: Arc<dyn OutputHandler>) -> Self {
         self.output_handler = handler;
@@ -58,7 +58,7 @@ impl PlaybookRunner {
         self.provided_inventory = Some(inventory);
         self
     }
-    
+
     /// Run the configured playbooks
     pub fn run(&self) -> Result<PlaybookResult> {
         // Set up thread pool if configured
@@ -68,7 +68,7 @@ impl PlaybookRunner {
                 .build_global()
                 .map_err(|e| JetpackError::Config(format!("Failed to build thread pool: {}", e)))?;
         }
-        
+
         // Use provided inventory or create and load from files
         let inventory = if let Some(ref inv) = self.provided_inventory {
             Arc::clone(inv)
@@ -80,44 +80,53 @@ impl PlaybookRunner {
             }
             inv
         };
-        
+
         match self.config.connection_mode {
             ConnectionMode::Local => {
                 // For local mode, add localhost if no inventory was loaded
                 if inventory.read().unwrap().hosts.is_empty() {
-                    inventory.write().unwrap().store_host(&String::from("all"), &String::from("localhost"));
+                    inventory
+                        .write()
+                        .unwrap()
+                        .store_host(&String::from("all"), &String::from("localhost"));
                 }
             }
             _ => {
                 // For non-local modes, require inventory (skip check if provided programmatically)
-                if self.provided_inventory.is_none() && self.config.inventory_paths.read().unwrap().is_empty() {
+                if self.provided_inventory.is_none()
+                    && self.config.inventory_paths.read().unwrap().is_empty()
+                {
                     return Err(JetpackError::Config("No inventory paths specified".into()));
                 }
-                
+
                 if inventory.read().unwrap().hosts.is_empty() {
-                    return Err(JetpackError::Inventory("No hosts found in inventory".into()));
+                    return Err(JetpackError::Inventory(
+                        "No hosts found in inventory".into(),
+                    ));
                 }
             }
         }
-        
-        
+
         // Check playbook paths
-        if self.config.playbook_paths.read().unwrap().is_empty() && self.config.playbook_contents.is_empty() {
+        if self.config.playbook_paths.read().unwrap().is_empty()
+            && self.config.playbook_contents.is_empty()
+        {
             return Err(JetpackError::Config("No playbook paths specified".into()));
         }
-        
+
         // Create connection factory
-        let connection_factory: Arc<RwLock<dyn ConnectionFactory>> = match self.config.connection_mode {
-            ConnectionMode::Ssh => Arc::new(RwLock::new(OldSshFactory::new(
-                &inventory,
-                self.config.forward_agent,
-                self.config.login_password.clone(),
-                self.config.private_key_file.clone(),
-            ))),
-            ConnectionMode::Local => Arc::new(RwLock::new(OldLocalFactory::new(&inventory))),
-            ConnectionMode::Simulate => Arc::new(RwLock::new(OldNoFactory::new())),
-        };
-        
+        let connection_factory: Arc<RwLock<dyn ConnectionFactory>> =
+            match self.config.connection_mode {
+                ConnectionMode::Ssh => Arc::new(RwLock::new(OldSshFactory::new(
+                    &inventory,
+                    self.config.forward_agent,
+                    self.config.login_password.clone(),
+                    self.config.private_key_file.clone(),
+                ))),
+                ConnectionMode::Local => Arc::new(RwLock::new(OldLocalFactory::new(&inventory))),
+                ConnectionMode::Simulate => Arc::new(RwLock::new(OldNoFactory::new())),
+            };
+
         // Create a minimal CLI parser to pass to context
         // This is a temporary workaround until we refactor context
         let mut temp_parser = crate::cli::parser::CliParser::new();
@@ -126,23 +135,25 @@ impl PlaybookRunner {
         temp_parser.sudo = self.config.sudo.clone();
         temp_parser.extra_vars = self.config.extra_vars.clone();
         temp_parser.verbosity = self.config.verbosity;
-        
+
         // Create playbook context
         let context = Arc::new(RwLock::new(PlaybookContext::new(&temp_parser)));
-        
+
         // Create visitor with output handler
         let check_mode = if self.config.check_mode {
             CheckMode::Yes
         } else {
             CheckMode::No
         };
-        
-        let visitor = Arc::new(RwLock::new(
-            PlaybookVisitor::new_with_handler(check_mode, self.output_handler.clone())
-        ));
-        
+
+        let visitor = Arc::new(RwLock::new(PlaybookVisitor::new_with_handler(
+            check_mode,
+            self.output_handler.clone(),
+        )));
+
         // Create run state
-        let fetched_files: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let fetched_files: Arc<Mutex<HashMap<String, Vec<u8>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let run_state = Arc::new(RunState {
             inventory: inventory.clone(),
             playbook_paths: self.config.playbook_paths.clone(),
@@ -178,7 +189,7 @@ impl PlaybookRunner {
                 };
                 Ok(stats)
             }
-            Err(e) => Err(JetpackError::PlaybookParse(e))
+            Err(e) => Err(JetpackError::PlaybookParse(e)),
         }
     }
 }
@@ -209,62 +220,66 @@ pub struct PlaybookRunnerBuilder {
 
 impl PlaybookRunnerBuilder {
     fn new(playbook_path: &str) -> Self {
-        let config = JetpackConfig::new()
-            .playbook(playbook_path);
-        Self { config, provided_inventory: None }
+        let config = JetpackConfig::new().playbook(playbook_path);
+        Self {
+            config,
+            provided_inventory: None,
+        }
     }
 
     fn new_inline(name: &str, yaml: &str) -> Self {
-        let config = JetpackConfig::new()
-            .playbook_content(name, yaml);
-        Self { config, provided_inventory: None }
+        let config = JetpackConfig::new().playbook_content(name, yaml);
+        Self {
+            config,
+            provided_inventory: None,
+        }
     }
-    
+
     pub fn inventory(mut self, path: &str) -> Self {
         self.config = self.config.inventory(path);
         self
     }
-    
+
     pub fn local(mut self) -> Self {
         self.config = self.config.local();
         self
     }
-    
+
     pub fn ssh(mut self) -> Self {
         self.config = self.config.ssh();
         self
     }
-    
+
     pub fn user(mut self, user: &str) -> Self {
         self.config = self.config.user(user.to_string());
         self
     }
-    
+
     pub fn sudo(mut self, sudo: &str) -> Self {
         self.config = self.config.sudo(sudo.to_string());
         self
     }
-    
+
     pub fn limit_hosts(mut self, hosts: Vec<String>) -> Self {
         self.config = self.config.limit_hosts(hosts);
         self
     }
-    
+
     pub fn extra_vars(mut self, vars: serde_yaml::Value) -> Self {
         self.config = self.config.extra_vars(vars);
         self
     }
-    
+
     pub fn threads(mut self, threads: usize) -> Self {
         self.config = self.config.threads(threads);
         self
     }
-    
+
     pub fn verbose(mut self) -> Self {
         self.config = self.config.verbose();
         self
     }
-    
+
     pub fn check_mode(mut self) -> Self {
         self.config = self.config.check_mode(true);
         self
@@ -305,8 +320,7 @@ impl PlaybookRunnerBuilder {
     }
 
     pub fn run_with_output(self, handler: Arc<dyn OutputHandler>) -> Result<PlaybookResult> {
-        let mut runner = PlaybookRunner::new(self.config)
-            .with_output_handler(handler);
+        let mut runner = PlaybookRunner::new(self.config).with_output_handler(handler);
         if let Some(inv) = self.provided_inventory {
             runner = runner.with_inventory(inv);
         }

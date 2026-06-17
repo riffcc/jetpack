@@ -28,11 +28,11 @@
 //!   dest: /tmp/dragonfly-password.txt   # optional
 //! ```
 
-use crate::tasks::*;
 use crate::handle::handle::TaskHandle;
 use crate::tasks::fields::Field;
-use std::path::Path;
+use crate::tasks::*;
 use serde::Deserialize;
+use std::path::Path;
 use std::sync::Arc;
 use std::vec::Vec;
 
@@ -57,18 +57,35 @@ struct FetchAction {
 }
 
 impl IsTask for FetchTask {
-    fn get_module(&self) -> String { String::from(MODULE) }
-    fn get_name(&self) -> Option<String> { self.name.clone() }
-    fn get_with(&self) -> Option<PreLogicInput> { self.with.clone() }
+    fn get_module(&self) -> String {
+        String::from(MODULE)
+    }
+    fn get_name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    fn get_with(&self) -> Option<PreLogicInput> {
+        self.with.clone()
+    }
 
-    fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+    fn evaluate(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let dest = match &self.dest {
-            Some(d) => Some(handle.template.path(request, tm, &String::from("dest"), d)?),
+            Some(d) => Some(
+                handle
+                    .template
+                    .path(request, tm, &String::from("dest"), d)?,
+            ),
             None => None,
         };
         return Ok(EvaluatedTask {
             action: Arc::new(FetchAction {
-                src: handle.template.path(request, tm, &String::from("src"), &self.src)?,
+                src: handle
+                    .template
+                    .path(request, tm, &String::from("src"), &self.src)?,
                 dest,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
@@ -78,14 +95,20 @@ impl IsTask for FetchTask {
 }
 
 impl IsAction for FetchAction {
-    fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-
             TaskRequestType::Query => {
                 // Verify the remote file exists.
                 let remote_512 = handle.remote.get_sha512(request, &self.src)?;
                 if remote_512.is_empty() {
-                    return Err(handle.response.is_failed(request, &format!("remote file does not exist: {}", self.src)));
+                    return Err(handle.response.is_failed(
+                        request,
+                        &format!("remote file does not exist: {}", self.src),
+                    ));
                 }
 
                 // If no local dest, always fetch (no idempotency check possible).
@@ -119,17 +142,24 @@ impl IsAction for FetchAction {
                     if let Some(parent) = dest_path.parent() {
                         if !parent.as_os_str().is_empty() && !parent.exists() {
                             std::fs::create_dir_all(parent).map_err(|e| {
-                                handle.response.is_failed(request, &format!("mkdir failed for {}: {}", parent.display(), e))
+                                handle.response.is_failed(
+                                    request,
+                                    &format!("mkdir failed for {}: {}", parent.display(), e),
+                                )
                             })?;
                         }
                     }
                     std::fs::write(dest_path, &content).map_err(|e| {
-                        handle.response.is_failed(request, &format!("write to '{}' failed: {}", dest, e))
+                        handle
+                            .response
+                            .is_failed(request, &format!("write to '{}' failed: {}", dest, e))
                     })?;
                 }
                 match request.request_type {
                     TaskRequestType::Create => Ok(handle.response.is_created(request)),
-                    _                       => Ok(handle.response.is_modified(request, request.changes.clone())),
+                    _ => Ok(handle
+                        .response
+                        .is_modified(request, request.changes.clone())),
                 }
             }
 

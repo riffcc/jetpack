@@ -5,51 +5,77 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::tasks::*;
-use crate::handle::handle::{TaskHandle};
+use crate::handle::handle::TaskHandle;
 use crate::tasks::fields::Field;
+use crate::tasks::*;
 use std::sync::Arc;
 
-#[derive(Clone,PartialEq,Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct PackageDetails {
     pub name: String,
     pub version: String,
 }
 
 pub trait PackageManagementModule {
-
     fn is_update(&self) -> bool;
     fn is_remove(&self) -> bool;
     fn get_version(&self) -> Option<String>;
 
-    fn initial_setup(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<(),Arc<TaskResponse>>;
-            
-    fn get_local_version(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<PackageDetails>,Arc<TaskResponse>>;
-                
-    fn get_remote_version(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<PackageDetails>,Arc<TaskResponse>>;
+    fn initial_setup(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<(), Arc<TaskResponse>>;
 
-    fn install_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>>;
-    
-    fn update_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>>;
-    
-    fn remove_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>>;
-    
-    fn common_package_query(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        
-        let mut changes : Vec<Field> = Vec::new();
+    fn get_local_version(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Option<PackageDetails>, Arc<TaskResponse>>;
+
+    fn get_remote_version(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Option<PackageDetails>, Arc<TaskResponse>>;
+
+    fn install_package(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>>;
+
+    fn update_package(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>>;
+
+    fn remove_package(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>>;
+
+    fn common_package_query(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        let mut changes: Vec<Field> = Vec::new();
 
         self.initial_setup(handle, request)?;
-        
-        let package_details = self.get_local_version(handle, request)?; 
+
+        let package_details = self.get_local_version(handle, request)?;
 
         if package_details.is_some() {
             // package is installed
@@ -66,9 +92,11 @@ pub trait PackageManagementModule {
                 }
             } else if version.is_some() {
                 let specified_version = version.as_ref().unwrap();
-                if ! pkg.version.eq(specified_version) { changes.push(Field::Version); }
+                if !pkg.version.eq(specified_version) {
+                    changes.push(Field::Version);
+                }
             }
-        
+
             if changes.len() > 0 {
                 return Ok(handle.response.needs_modification(request, &changes));
             } else {
@@ -78,21 +106,23 @@ pub trait PackageManagementModule {
             // package is not installed
             return match self.is_remove() {
                 true => Ok(handle.response.is_matched(request)),
-                false => Ok(handle.response.needs_creation(request))
-            }
-        }    
+                false => Ok(handle.response.needs_creation(request)),
+            };
+        }
     }
 
-    fn common_dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-
+    fn common_dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-
             TaskRequestType::Query => {
                 return self.common_package_query(handle, request);
-            },
+            }
 
             TaskRequestType::Create => {
-                self.install_package(handle, request)?;               
+                self.install_package(handle, request)?;
                 return Ok(handle.response.is_created(request));
             }
 
@@ -100,7 +130,9 @@ pub trait PackageManagementModule {
                 if request.changes.contains(&Field::Version) {
                     self.update_package(handle, request)?;
                 }
-                return Ok(handle.response.is_modified(request, request.changes.clone()));
+                return Ok(handle
+                    .response
+                    .is_modified(request, request.changes.clone()));
             }
 
             TaskRequestType::Remove => {
@@ -108,9 +140,9 @@ pub trait PackageManagementModule {
                 return Ok(handle.response.is_removed(request));
             }
 
-            _ => { return Err(handle.response.not_supported(request)); }
-
+            _ => {
+                return Err(handle.response.not_supported(request));
+            }
         }
-
     }
 }

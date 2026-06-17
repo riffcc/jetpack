@@ -34,12 +34,14 @@
 //!   save_to: node_info
 //! ```
 
-use crate::tasks::*;
 use crate::handle::handle::TaskHandle;
-use crate::modules::proxmox::common::{ProxmoxApiConfig, ProxmoxApiResponse, NodeStatus, ClusterNodeStatus, GuestListItem};
+use crate::modules::proxmox::common::{
+    ClusterNodeStatus, GuestListItem, NodeStatus, ProxmoxApiConfig, ProxmoxApiResponse,
+};
+use crate::tasks::*;
 use serde::Deserialize;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 const MODULE: &str = "proxmox_node";
 
@@ -73,39 +75,89 @@ struct ProxmoxNodeAction {
 }
 
 impl IsTask for ProxmoxNodeTask {
-    fn get_module(&self) -> String { String::from(MODULE) }
-    fn get_name(&self) -> Option<String> { self.name.clone() }
-    fn get_with(&self) -> Option<PreLogicInput> { self.with.clone() }
+    fn get_module(&self) -> String {
+        String::from(MODULE)
+    }
+    fn get_name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    fn get_with(&self) -> Option<PreLogicInput> {
+        self.with.clone()
+    }
 
-    fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        Ok(
-            EvaluatedTask {
-                action: Arc::new(ProxmoxNodeAction {
-                    api_config: ProxmoxApiConfig {
-                        api_host: handle.template.string(request, tm, &String::from("api_host"), &self.api_host)?,
-                        api_token_id: handle.template.string(request, tm, &String::from("api_token_id"), &self.api_token_id)?,
-                        api_token_secret: handle.template.string(request, tm, &String::from("api_token_secret"), &self.api_token_secret)?,
-                    },
-                    node: handle.template.string(request, tm, &String::from("node"), &self.node)?,
-                    save_to: handle.template.string_option(request, tm, &String::from("save_to"), &self.save_to)?,
-                    include_cluster: handle.template.boolean_option_default_false(request, tm, &String::from("include_cluster"), &self.include_cluster)?,
-                    include_vms: handle.template.boolean_option_default_false(request, tm, &String::from("include_vms"), &self.include_vms)?,
-                    include_lxc: handle.template.boolean_option_default_false(request, tm, &String::from("include_lxc"), &self.include_lxc)?,
-                }),
-                with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-                and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-            }
-        )
+    fn evaluate(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        Ok(EvaluatedTask {
+            action: Arc::new(ProxmoxNodeAction {
+                api_config: ProxmoxApiConfig {
+                    api_host: handle.template.string(
+                        request,
+                        tm,
+                        &String::from("api_host"),
+                        &self.api_host,
+                    )?,
+                    api_token_id: handle.template.string(
+                        request,
+                        tm,
+                        &String::from("api_token_id"),
+                        &self.api_token_id,
+                    )?,
+                    api_token_secret: handle.template.string(
+                        request,
+                        tm,
+                        &String::from("api_token_secret"),
+                        &self.api_token_secret,
+                    )?,
+                },
+                node: handle
+                    .template
+                    .string(request, tm, &String::from("node"), &self.node)?,
+                save_to: handle.template.string_option(
+                    request,
+                    tm,
+                    &String::from("save_to"),
+                    &self.save_to,
+                )?,
+                include_cluster: handle.template.boolean_option_default_false(
+                    request,
+                    tm,
+                    &String::from("include_cluster"),
+                    &self.include_cluster,
+                )?,
+                include_vms: handle.template.boolean_option_default_false(
+                    request,
+                    tm,
+                    &String::from("include_vms"),
+                    &self.include_vms,
+                )?,
+                include_lxc: handle.template.boolean_option_default_false(
+                    request,
+                    tm,
+                    &String::from("include_lxc"),
+                    &self.include_lxc,
+                )?,
+            }),
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
 impl IsAction for ProxmoxNodeAction {
-    fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
             TaskRequestType::Query => {
                 // This is a passive/query module - always needs to run
                 Ok(handle.response.needs_passive(request))
-            },
+            }
 
             TaskRequestType::Passive => {
                 let info = self.get_node_info(handle, request)?;
@@ -115,7 +167,7 @@ impl IsAction for ProxmoxNodeAction {
                     let mut mapping = serde_yaml::Mapping::new();
                     mapping.insert(
                         serde_yaml::Value::String(var_name.clone()),
-                        serde_yaml::Value::String(info.clone())
+                        serde_yaml::Value::String(info.clone()),
                     );
                     handle.host.write().unwrap().update_variables(mapping);
                 }
@@ -124,15 +176,19 @@ impl IsAction for ProxmoxNodeAction {
                 handle.debug(request, &format!("Node {} info retrieved", self.node));
 
                 Ok(handle.response.is_passive(request))
-            },
+            }
 
-            _ => Err(handle.response.not_supported(request))
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
 
 impl ProxmoxNodeAction {
-    fn get_node_info(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<String, Arc<TaskResponse>> {
+    fn get_node_info(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<String, Arc<TaskResponse>> {
         let rt = self.api_config.create_runtime(handle, request)?;
 
         rt.block_on(async {
@@ -141,17 +197,30 @@ impl ProxmoxNodeAction {
 
             // Get node status
             let status = self.fetch_node_status(&client, handle, request).await?;
-            result.insert("status".to_string(), serde_json::to_value(&status).unwrap_or_default());
-            result.insert("node".to_string(), serde_json::Value::String(self.node.clone()));
-            result.insert("online".to_string(), serde_json::Value::Bool(status.is_some()));
+            result.insert(
+                "status".to_string(),
+                serde_json::to_value(&status).unwrap_or_default(),
+            );
+            result.insert(
+                "node".to_string(),
+                serde_json::Value::String(self.node.clone()),
+            );
+            result.insert(
+                "online".to_string(),
+                serde_json::Value::Bool(status.is_some()),
+            );
 
             // Get cluster info if requested
             if self.include_cluster {
                 let cluster = self.fetch_cluster_status(&client, handle, request).await?;
-                result.insert("cluster".to_string(), serde_json::to_value(&cluster).unwrap_or_default());
+                result.insert(
+                    "cluster".to_string(),
+                    serde_json::to_value(&cluster).unwrap_or_default(),
+                );
 
                 // Extract quorum status for easy access
-                let is_quorate = cluster.iter()
+                let is_quorate = cluster
+                    .iter()
                     .find(|n| n.node_type == "cluster")
                     .and_then(|c| c.quorate)
                     .map(|q| q == 1)
@@ -162,106 +231,190 @@ impl ProxmoxNodeAction {
             // Get VMs if requested
             if self.include_vms {
                 let vms = self.fetch_vms(&client, handle, request).await?;
-                result.insert("vms".to_string(), serde_json::to_value(&vms).unwrap_or_default());
-                result.insert("vm_count".to_string(), serde_json::Value::Number(vms.len().into()));
+                result.insert(
+                    "vms".to_string(),
+                    serde_json::to_value(&vms).unwrap_or_default(),
+                );
+                result.insert(
+                    "vm_count".to_string(),
+                    serde_json::Value::Number(vms.len().into()),
+                );
             }
 
             // Get LXCs if requested
             if self.include_lxc {
                 let lxcs = self.fetch_lxcs(&client, handle, request).await?;
-                result.insert("lxc".to_string(), serde_json::to_value(&lxcs).unwrap_or_default());
-                result.insert("lxc_count".to_string(), serde_json::Value::Number(lxcs.len().into()));
+                result.insert(
+                    "lxc".to_string(),
+                    serde_json::to_value(&lxcs).unwrap_or_default(),
+                );
+                result.insert(
+                    "lxc_count".to_string(),
+                    serde_json::Value::Number(lxcs.len().into()),
+                );
             }
 
-            serde_json::to_string(&result)
-                .map_err(|e| handle.response.is_failed(request, &format!("Failed to serialize node info: {}", e)))
+            serde_json::to_string(&result).map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to serialize node info: {}", e))
+            })
         })
     }
 
-    async fn fetch_node_status(&self, client: &reqwest::Client, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<NodeStatus>, Arc<TaskResponse>> {
-        let url = self.api_config.get_api_url(&format!("/nodes/{}/status", self.node));
+    async fn fetch_node_status(
+        &self,
+        client: &reqwest::Client,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Option<NodeStatus>, Arc<TaskResponse>> {
+        let url = self
+            .api_config
+            .get_api_url(&format!("/nodes/{}/status", self.node));
 
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .header("Authorization", self.api_config.get_auth_header())
             .send()
             .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to query node status: {}", e)))?;
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to query node status: {}", e))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(handle.response.is_failed(request, &format!("Proxmox API returned status {}: {}", status, text)));
+            return Err(handle.response.is_failed(
+                request,
+                &format!("Proxmox API returned status {}: {}", status, text),
+            ));
         }
 
-        let api_response: ProxmoxApiResponse<NodeStatus> = response.json()
-            .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to parse node status: {}", e)))?;
+        let api_response: ProxmoxApiResponse<NodeStatus> = response.json().await.map_err(|e| {
+            handle
+                .response
+                .is_failed(request, &format!("Failed to parse node status: {}", e))
+        })?;
 
         Ok(api_response.data)
     }
 
-    async fn fetch_cluster_status(&self, client: &reqwest::Client, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Vec<ClusterNodeStatus>, Arc<TaskResponse>> {
+    async fn fetch_cluster_status(
+        &self,
+        client: &reqwest::Client,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Vec<ClusterNodeStatus>, Arc<TaskResponse>> {
         let url = self.api_config.get_api_url("/cluster/status");
 
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .header("Authorization", self.api_config.get_auth_header())
             .send()
             .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to query cluster status: {}", e)))?;
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to query cluster status: {}", e))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(handle.response.is_failed(request, &format!("Proxmox API returned status {}: {}", status, text)));
+            return Err(handle.response.is_failed(
+                request,
+                &format!("Proxmox API returned status {}: {}", status, text),
+            ));
         }
 
-        let api_response: ProxmoxApiResponse<Vec<ClusterNodeStatus>> = response.json()
-            .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to parse cluster status: {}", e)))?;
+        let api_response: ProxmoxApiResponse<Vec<ClusterNodeStatus>> =
+            response.json().await.map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to parse cluster status: {}", e))
+            })?;
 
         Ok(api_response.data.unwrap_or_default())
     }
 
-    async fn fetch_vms(&self, client: &reqwest::Client, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Vec<GuestListItem>, Arc<TaskResponse>> {
-        let url = self.api_config.get_api_url(&format!("/nodes/{}/qemu", self.node));
+    async fn fetch_vms(
+        &self,
+        client: &reqwest::Client,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Vec<GuestListItem>, Arc<TaskResponse>> {
+        let url = self
+            .api_config
+            .get_api_url(&format!("/nodes/{}/qemu", self.node));
 
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .header("Authorization", self.api_config.get_auth_header())
             .send()
             .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to query VMs: {}", e)))?;
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to query VMs: {}", e))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(handle.response.is_failed(request, &format!("Proxmox API returned status {}: {}", status, text)));
+            return Err(handle.response.is_failed(
+                request,
+                &format!("Proxmox API returned status {}: {}", status, text),
+            ));
         }
 
-        let api_response: ProxmoxApiResponse<Vec<GuestListItem>> = response.json()
-            .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to parse VM list: {}", e)))?;
+        let api_response: ProxmoxApiResponse<Vec<GuestListItem>> =
+            response.json().await.map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to parse VM list: {}", e))
+            })?;
 
         Ok(api_response.data.unwrap_or_default())
     }
 
-    async fn fetch_lxcs(&self, client: &reqwest::Client, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Vec<GuestListItem>, Arc<TaskResponse>> {
-        let url = self.api_config.get_api_url(&format!("/nodes/{}/lxc", self.node));
+    async fn fetch_lxcs(
+        &self,
+        client: &reqwest::Client,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Vec<GuestListItem>, Arc<TaskResponse>> {
+        let url = self
+            .api_config
+            .get_api_url(&format!("/nodes/{}/lxc", self.node));
 
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .header("Authorization", self.api_config.get_auth_header())
             .send()
             .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to query LXCs: {}", e)))?;
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to query LXCs: {}", e))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(handle.response.is_failed(request, &format!("Proxmox API returned status {}: {}", status, text)));
+            return Err(handle.response.is_failed(
+                request,
+                &format!("Proxmox API returned status {}: {}", status, text),
+            ));
         }
 
-        let api_response: ProxmoxApiResponse<Vec<GuestListItem>> = response.json()
-            .await
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to parse LXC list: {}", e)))?;
+        let api_response: ProxmoxApiResponse<Vec<GuestListItem>> =
+            response.json().await.map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to parse LXC list: {}", e))
+            })?;
 
         Ok(api_response.data.unwrap_or_default())
     }

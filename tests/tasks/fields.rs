@@ -29,7 +29,7 @@ fn test_all_file_attributes() {
     assert!(attrs.contains(&Field::Owner));
     assert!(attrs.contains(&Field::Group));
     assert!(attrs.contains(&Field::Mode));
-    
+
     // Verify order
     assert_eq!(attrs[0], Field::Owner);
     assert_eq!(attrs[1], Field::Group);
@@ -42,7 +42,7 @@ fn test_field_hash() {
     set.insert(Field::Branch);
     set.insert(Field::Content);
     set.insert(Field::Branch); // Duplicate should not increase size
-    
+
     assert_eq!(set.len(), 2);
     assert!(set.contains(&Field::Branch));
     assert!(set.contains(&Field::Content));
@@ -70,7 +70,7 @@ fn test_all_field_variants() {
         Field::Users,
         Field::Version,
     ];
-    
+
     // Ensure all are unique
     let unique_fields: HashSet<_> = fields.iter().collect();
     assert_eq!(unique_fields.len(), fields.len());

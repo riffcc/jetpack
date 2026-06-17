@@ -40,10 +40,13 @@ vars:
 
     let task: Result<DebugTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Test Debug".to_string()));
-    assert_eq!(task.vars, Some(vec!["var1".to_string(), "var2".to_string()]));
+    assert_eq!(
+        task.vars,
+        Some(vec!["var1".to_string(), "var2".to_string()])
+    );
 }
 
 #[test]
@@ -54,7 +57,7 @@ vars:
 
     let task: Result<DebugTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.name.is_none());
     assert!(task.vars.is_none());
@@ -73,7 +76,7 @@ and:
 
     let task: Result<DebugTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.with.is_some());
     assert!(task.and.is_some());

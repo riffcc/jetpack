@@ -1,5 +1,5 @@
-use jetpack::playbooks::t_helpers::*;
 use handlebars::{Handlebars, no_escape};
+use jetpack::playbooks::t_helpers::*;
 use serde_json::json;
 use std::error::Error;
 
@@ -37,14 +37,25 @@ fn test_condition(condition: &str, expected: bool) {
             &json!({}),
         )
         .unwrap();
-    assert_eq!(&result, if expected { "lorem" } else { "ipsum" }, "testing condition: {}", condition);
+    assert_eq!(
+        &result,
+        if expected { "lorem" } else { "ipsum" },
+        "testing condition: {}",
+        condition
+    );
 }
 
 #[test]
 fn test_register_string_helpers() -> Result<(), Box<dyn Error>> {
     assert_renders![
-        (r##"{{ to_lower_case "Hello foo-bars" }}"##, r##"hello foo-bars"##),
-        (r##"{{ to_upper_case "Hello foo-bars" }}"##, r##"HELLO FOO-BARS"##)
+        (
+            r##"{{ to_lower_case "Hello foo-bars" }}"##,
+            r##"hello foo-bars"##
+        ),
+        (
+            r##"{{ to_upper_case "Hello foo-bars" }}"##,
+            r##"HELLO FOO-BARS"##
+        )
     ]
 }
 
@@ -145,12 +156,14 @@ fn test_isdefined_a() -> Result<(), Box<dyn Error>> {
 #[test]
 fn test_isdefined_helper_with_two_params() {
     let handlebars = new_handlebars();
-    
+
     // Test isdefined with two parameters (should fail)
-    let result = handlebars.render_template(
-        r#"{{isdefined a b}}"#,
-        &json!({"a": 1, "b": 2})
-    );
+    let result = handlebars.render_template(r#"{{isdefined a b}}"#, &json!({"a": 1, "b": 2}));
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("requires one parameter"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("requires one parameter")
+    );
 }

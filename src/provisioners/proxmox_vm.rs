@@ -4,9 +4,9 @@
 // Creates empty QEMU VMs configured for PXE boot.
 // VMs boot from network and get provisioned by Dragonfly.
 
-use crate::provisioners::{ProvisionConfig, ProvisionResult, Provisioner};
 use crate::inventory::inventory::Inventory;
 use crate::playbooks::templar::{Templar, TemplateMode};
+use crate::provisioners::{ProvisionConfig, ProvisionResult, Provisioner};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -26,8 +26,14 @@ struct VmListItem {
 }
 
 enum ProxmoxAuth {
-    Token { token_id: String, token_secret: String },
-    Password { ticket: String, csrf_token: String },
+    Token {
+        token_id: String,
+        token_secret: String,
+    },
+    Password {
+        ticket: String,
+        csrf_token: String,
+    },
 }
 
 struct ClusterConnection {
@@ -37,9 +43,16 @@ struct ClusterConnection {
 }
 
 impl ProxmoxVmProvisioner {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
-    fn template_string(&self, templar: &Templar, value: &str, vars: &serde_yaml::Mapping) -> Result<String, String> {
+    fn template_string(
+        &self,
+        templar: &Templar,
+        value: &str,
+        vars: &serde_yaml::Mapping,
+    ) -> Result<String, String> {
         if value.contains("{{") {
             templar.render(&value.to_string(), vars.clone(), TemplateMode::Strict)
         } else {
@@ -47,14 +60,23 @@ impl ProxmoxVmProvisioner {
         }
     }
 
-    fn template_option(&self, templar: &Templar, value: &Option<String>, vars: &serde_yaml::Mapping) -> Result<Option<String>, String> {
+    fn template_option(
+        &self,
+        templar: &Templar,
+        value: &Option<String>,
+        vars: &serde_yaml::Mapping,
+    ) -> Result<Option<String>, String> {
         match value {
             Some(v) => Ok(Some(self.template_string(templar, v, vars)?)),
             None => Ok(None),
         }
     }
 
-    fn template_config(&self, config: &ProvisionConfig, vars: &serde_yaml::Mapping) -> Result<ProvisionConfig, String> {
+    fn template_config(
+        &self,
+        config: &ProvisionConfig,
+        vars: &serde_yaml::Mapping,
+    ) -> Result<ProvisionConfig, String> {
         let templar = Templar::new();
         Ok(ProvisionConfig {
             provision_type: self.template_string(&templar, &config.provision_type, vars)?,
@@ -96,68 +118,110 @@ impl ProxmoxVmProvisioner {
         })
     }
 
-    fn get_cluster_connection(&self, config: &ProvisionConfig, inventory: &Arc<RwLock<Inventory>>) -> Result<ClusterConnection, String> {
-        let inv = inventory.read().map_err(|e| format!("Failed to read inventory: {}", e))?;
+    fn get_cluster_connection(
+        &self,
+        config: &ProvisionConfig,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<ClusterConnection, String> {
+        let inv = inventory
+            .read()
+            .map_err(|e| format!("Failed to read inventory: {}", e))?;
         if !inv.has_host(&config.cluster) {
-            return Err(format!("Cluster '{}' not found in inventory", config.cluster));
+            return Err(format!(
+                "Cluster '{}' not found in inventory",
+                config.cluster
+            ));
         }
         let cluster_host = inv.get_host(&config.cluster);
-        let host = cluster_host.read().map_err(|e| format!("Failed to read host: {}", e))?;
+        let host = cluster_host
+            .read()
+            .map_err(|e| format!("Failed to read host: {}", e))?;
         let vars = host.get_blended_variables();
 
-        let api_host = vars.get("proxmox_api_host")
+        let api_host = vars
+            .get("proxmox_api_host")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| format!("Cluster '{}' missing proxmox_api_host", config.cluster))?;
 
-        let node = config.node.clone()
+        let node = config
+            .node
+            .clone()
             .or_else(|| config.extra.get("node").cloned())
-            .or_else(|| vars.get("proxmox_node").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .or_else(|| {
+                vars.get("proxmox_node")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
             .ok_or_else(|| "No 'node' specified".to_string())?;
 
         // Token auth
         if let (Some(tid), Some(ts)) = (
             vars.get("proxmox_api_token_id").and_then(|v| v.as_str()),
-            vars.get("proxmox_api_token_secret").and_then(|v| v.as_str())
+            vars.get("proxmox_api_token_secret")
+                .and_then(|v| v.as_str()),
         ) {
             return Ok(ClusterConnection {
                 api_host,
-                auth: ProxmoxAuth::Token { token_id: tid.to_string(), token_secret: ts.to_string() },
+                auth: ProxmoxAuth::Token {
+                    token_id: tid.to_string(),
+                    token_secret: ts.to_string(),
+                },
                 node,
             });
         }
 
         // Password auth
-        let username = vars.get("proxmox_api_user").and_then(|v| v.as_str())
+        let username = vars
+            .get("proxmox_api_user")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing proxmox_api_user".to_string())?;
-        let password = vars.get("proxmox_api_password").and_then(|v| v.as_str())
+        let password = vars
+            .get("proxmox_api_password")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing proxmox_api_password".to_string())?;
 
         let (ticket, csrf) = self.get_ticket(&api_host, username, password)?;
         Ok(ClusterConnection {
             api_host,
-            auth: ProxmoxAuth::Password { ticket, csrf_token: csrf },
+            auth: ProxmoxAuth::Password {
+                ticket,
+                csrf_token: csrf,
+            },
             node,
         })
     }
 
-    fn get_ticket(&self, api_host: &str, username: &str, password: &str) -> Result<(String, String), String> {
+    fn get_ticket(
+        &self,
+        api_host: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<(String, String), String> {
         let url = if api_host.contains(':') {
             format!("https://{}/api2/json/access/ticket", api_host)
         } else {
             format!("https://{}:8006/api2/json/access/ticket", api_host)
         };
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .map_err(|e| format!("Runtime: {}", e))?;
 
         rt.block_on(async {
-            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let mut params = HashMap::new();
             params.insert("username", username);
             params.insert("password", password);
 
-            let resp = client.post(&url).form(&params).send().await
+            let resp = client
+                .post(&url)
+                .form(&params)
+                .send()
+                .await
                 .map_err(|e| format!("Auth failed: {}", e))?;
 
             if !resp.status().is_success() {
@@ -165,22 +229,37 @@ impl ProxmoxVmProvisioner {
             }
 
             #[derive(Deserialize)]
-            struct TicketData { ticket: String, #[serde(rename = "CSRFPreventionToken")] csrf: String }
+            struct TicketData {
+                ticket: String,
+                #[serde(rename = "CSRFPreventionToken")]
+                csrf: String,
+            }
             #[derive(Deserialize)]
-            struct TicketResp { data: TicketData }
+            struct TicketResp {
+                data: TicketData,
+            }
 
             let tr: TicketResp = resp.json().await.map_err(|e| format!("Parse: {}", e))?;
             Ok((tr.data.ticket, tr.data.csrf))
         })
     }
 
-    fn apply_auth(&self, conn: &ClusterConnection, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn apply_auth(
+        &self,
+        conn: &ClusterConnection,
+        builder: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
         match &conn.auth {
-            ProxmoxAuth::Token { token_id, token_secret } =>
-                builder.header("Authorization", format!("PVEAPIToken={}={}", token_id, token_secret)),
-            ProxmoxAuth::Password { ticket, csrf_token } =>
-                builder.header("Cookie", format!("PVEAuthCookie={}", ticket))
-                       .header("CSRFPreventionToken", csrf_token),
+            ProxmoxAuth::Token {
+                token_id,
+                token_secret,
+            } => builder.header(
+                "Authorization",
+                format!("PVEAPIToken={}={}", token_id, token_secret),
+            ),
+            ProxmoxAuth::Password { ticket, csrf_token } => builder
+                .header("Cookie", format!("PVEAuthCookie={}", ticket))
+                .header("CSRFPreventionToken", csrf_token),
         }
     }
 
@@ -194,21 +273,28 @@ impl ProxmoxVmProvisioner {
 
     fn find_vm(&self, conn: &ClusterConnection, hostname: &str) -> Result<Option<u64>, String> {
         let url = self.api_url(conn, &format!("/nodes/{}/qemu", conn.node));
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .map_err(|e| format!("Runtime: {}", e))?;
 
         rt.block_on(async {
-            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
-            let resp = self.apply_auth(conn, client.get(&url)).send().await
+            let resp = self
+                .apply_auth(conn, client.get(&url))
+                .send()
+                .await
                 .map_err(|e| format!("API: {}", e))?;
 
             if !resp.status().is_success() {
                 return Err(format!("API: {}", resp.status()));
             }
 
-            let api_resp: ProxmoxApiResponse<Vec<VmListItem>> = resp.json().await
-                .map_err(|e| format!("Parse: {}", e))?;
+            let api_resp: ProxmoxApiResponse<Vec<VmListItem>> =
+                resp.json().await.map_err(|e| format!("Parse: {}", e))?;
 
             if let Some(vms) = api_resp.data {
                 for vm in vms {
@@ -224,23 +310,31 @@ impl ProxmoxVmProvisioner {
     /// Get next available VMID from Proxmox cluster
     fn get_next_vmid(&self, conn: &ClusterConnection) -> Result<u64, String> {
         let url = self.api_url(conn, "/cluster/nextid");
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .map_err(|e| format!("Runtime: {}", e))?;
 
         rt.block_on(async {
-            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
-            let resp = self.apply_auth(conn, client.get(&url)).send().await
+            let resp = self
+                .apply_auth(conn, client.get(&url))
+                .send()
+                .await
                 .map_err(|e| format!("API: {}", e))?;
 
             if !resp.status().is_success() {
                 return Err(format!("Failed to get next VMID: {}", resp.status()));
             }
 
-            let api_resp: ProxmoxApiResponse<String> = resp.json().await
-                .map_err(|e| format!("Parse: {}", e))?;
+            let api_resp: ProxmoxApiResponse<String> =
+                resp.json().await.map_err(|e| format!("Parse: {}", e))?;
 
-            api_resp.data
+            api_resp
+                .data
                 .ok_or_else(|| "No VMID returned".to_string())?
                 .parse::<u64>()
                 .map_err(|_| "Invalid VMID from API".to_string())
@@ -248,13 +342,23 @@ impl ProxmoxVmProvisioner {
     }
 
     /// Create an empty VM configured for PXE boot
-    fn create_empty_vm(&self, conn: &ClusterConnection, config: &ProvisionConfig, hostname: &str, vmid: u64) -> Result<String, String> {
+    fn create_empty_vm(
+        &self,
+        conn: &ClusterConnection,
+        config: &ProvisionConfig,
+        hostname: &str,
+        vmid: u64,
+    ) -> Result<String, String> {
         let url = self.api_url(conn, &format!("/nodes/{}/qemu", conn.node));
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .map_err(|e| format!("Runtime: {}", e))?;
 
         rt.block_on(async {
-            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
 
             let mut params: HashMap<String, String> = HashMap::new();
@@ -277,11 +381,20 @@ impl ProxmoxVmProvisioner {
 
             // Disk - empty disk on specified storage
             // Format: storage:size where size is in GB (e.g., "moosefs:20")
-            let storage = config.storage.as_ref().map(|s| s.as_str()).unwrap_or("local-lvm");
-            let disk_size = config.rootfs_size.as_ref()
+            let storage = config
+                .storage
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or("local-lvm");
+            let disk_size = config
+                .rootfs_size
+                .as_ref()
                 .map(|s| s.trim_end_matches('G').trim_end_matches('g'))
                 .unwrap_or("20");
-            params.insert("scsi0".to_string(), format!("{}:{},iothread=1", storage, disk_size));
+            params.insert(
+                "scsi0".to_string(),
+                format!("{}:{},iothread=1", storage, disk_size),
+            );
 
             // Network with optional MAC address
             let net_config = if let Some(ref net0) = config.net0 {
@@ -297,7 +410,11 @@ impl ProxmoxVmProvisioner {
             params.insert("boot".to_string(), "order=net0;scsi0".to_string());
 
             // BIOS - SeaBIOS for PXE (OVMF/UEFI can work but SeaBIOS is simpler)
-            let bios = config.extra.get("bios").map(|s| s.as_str()).unwrap_or("seabios");
+            let bios = config
+                .extra
+                .get("bios")
+                .map(|s| s.as_str())
+                .unwrap_or("seabios");
             params.insert("bios".to_string(), bios.to_string());
 
             // Enable QEMU guest agent (will work after OS install)
@@ -307,7 +424,9 @@ impl ProxmoxVmProvisioner {
             params.insert("ostype".to_string(), "l26".to_string()); // Linux 2.6+ kernel
 
             // Start on create? Default true for PXE boot
-            let start = config.start_on_create.as_ref()
+            let start = config
+                .start_on_create
+                .as_ref()
                 .map(|s| s == "true" || s == "1" || s == "yes")
                 .unwrap_or(true);
             if start {
@@ -321,7 +440,11 @@ impl ProxmoxVmProvisioner {
                 }
             }
 
-            let resp = self.apply_auth(conn, client.post(&url)).form(&params).send().await
+            let resp = self
+                .apply_auth(conn, client.post(&url))
+                .form(&params)
+                .send()
+                .await
                 .map_err(|e| format!("Create VM failed: {}", e))?;
 
             if !resp.status().is_success() {
@@ -332,7 +455,9 @@ impl ProxmoxVmProvisioner {
             // Extract MAC address from net config for return
             let mac = if net_config.contains("=") {
                 // Format: virtio=XX:XX:XX:XX:XX:XX,bridge=...
-                net_config.split(',').next()
+                net_config
+                    .split(',')
+                    .next()
                     .and_then(|s| s.split('=').nth(1))
                     .map(|s| s.to_string())
             } else {
@@ -350,12 +475,21 @@ impl ProxmoxVmProvisioner {
         })
     }
 
-    async fn get_vm_mac(&self, conn: &ClusterConnection, vmid: u64) -> Result<Option<String>, String> {
+    async fn get_vm_mac(
+        &self,
+        conn: &ClusterConnection,
+        vmid: u64,
+    ) -> Result<Option<String>, String> {
         let url = self.api_url(conn, &format!("/nodes/{}/qemu/{}/config", conn.node, vmid));
-        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
             .map_err(|e| format!("HTTP: {}", e))?;
 
-        let resp = self.apply_auth(conn, client.get(&url)).send().await
+        let resp = self
+            .apply_auth(conn, client.get(&url))
+            .send()
+            .await
             .map_err(|e| format!("Get config: {}", e))?;
 
         if !resp.status().is_success() {
@@ -367,8 +501,8 @@ impl ProxmoxVmProvisioner {
             net0: Option<String>,
         }
 
-        let api_resp: ProxmoxApiResponse<VmConfig> = resp.json().await
-            .map_err(|e| format!("Parse: {}", e))?;
+        let api_resp: ProxmoxApiResponse<VmConfig> =
+            resp.json().await.map_err(|e| format!("Parse: {}", e))?;
 
         if let Some(cfg) = api_resp.data {
             if let Some(net0) = cfg.net0 {
@@ -385,12 +519,19 @@ impl ProxmoxVmProvisioner {
     }
 
     fn stop_vm(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
-        let url = self.api_url(conn, &format!("/nodes/{}/qemu/{}/status/stop", conn.node, vmid));
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
+        let url = self.api_url(
+            conn,
+            &format!("/nodes/{}/qemu/{}/status/stop", conn.node, vmid),
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .map_err(|e| format!("Runtime: {}", e))?;
 
         rt.block_on(async {
-            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let _ = self.apply_auth(conn, client.post(&url)).send().await;
             Ok(())
@@ -402,14 +543,21 @@ impl ProxmoxVmProvisioner {
         std::thread::sleep(std::time::Duration::from_secs(3));
 
         let url = self.api_url(conn, &format!("/nodes/{}/qemu/{}", conn.node, vmid));
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .map_err(|e| format!("Runtime: {}", e))?;
 
         rt.block_on(async {
-            let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
 
-            let resp = self.apply_auth(conn, client.delete(&url)).send().await
+            let resp = self
+                .apply_auth(conn, client.delete(&url))
+                .send()
+                .await
                 .map_err(|e| format!("Delete: {}", e))?;
 
             if !resp.status().is_success() {
@@ -422,21 +570,36 @@ impl ProxmoxVmProvisioner {
 }
 
 impl Provisioner for ProxmoxVmProvisioner {
-    fn exists(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<bool, String> {
+    fn exists(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<bool, String> {
         let conn = self.get_cluster_connection(config, inventory)?;
         let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
 
         // Check by VMID if specified
         if let Some(ref vmid_str) = config.vmid {
             if let Ok(vmid) = vmid_str.parse::<u64>() {
-                let url = self.api_url(&conn, &format!("/nodes/{}/qemu/{}/status/current", conn.node, vmid));
-                let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()
+                let url = self.api_url(
+                    &conn,
+                    &format!("/nodes/{}/qemu/{}/status/current", conn.node, vmid),
+                );
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
                     .map_err(|e| format!("Runtime: {}", e))?;
 
                 return rt.block_on(async {
-                    let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build()
+                    let client = reqwest::Client::builder()
+                        .danger_accept_invalid_certs(true)
+                        .build()
                         .map_err(|e| format!("HTTP: {}", e))?;
-                    let resp = self.apply_auth(&conn, client.get(&url)).send().await
+                    let resp = self
+                        .apply_auth(&conn, client.get(&url))
+                        .send()
+                        .await
                         .map_err(|e| format!("API: {}", e))?;
                     Ok(resp.status().is_success())
                 });
@@ -446,7 +609,12 @@ impl Provisioner for ProxmoxVmProvisioner {
         Ok(self.find_vm(&conn, hostname)?.is_some())
     }
 
-    fn ensure_exists(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<ProvisionResult, String> {
+    fn ensure_exists(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<ProvisionResult, String> {
         let inv_name = inventory_name.to_string();
         let host_vars = {
             let inv = inventory.read().map_err(|e| format!("Inventory: {}", e))?;
@@ -470,7 +638,9 @@ impl Provisioner for ProxmoxVmProvisioner {
 
         // Get VMID - use specified or auto-assign from Proxmox
         let vmid = if let Some(ref vmid_str) = config.vmid {
-            vmid_str.parse::<u64>().map_err(|_| "Invalid vmid".to_string())?
+            vmid_str
+                .parse::<u64>()
+                .map_err(|_| "Invalid vmid".to_string())?
         } else {
             self.get_next_vmid(&conn)?
         };
@@ -486,12 +656,22 @@ impl Provisioner for ProxmoxVmProvisioner {
         Ok(ProvisionResult::Created)
     }
 
-    fn get_ip(&self, _config: &ProvisionConfig, _inventory_name: &str, _inventory: &Arc<RwLock<Inventory>>) -> Result<Option<String>, String> {
+    fn get_ip(
+        &self,
+        _config: &ProvisionConfig,
+        _inventory_name: &str,
+        _inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<Option<String>, String> {
         // IP comes from Dragonfly after PXE boot, not from Proxmox
         Ok(None)
     }
 
-    fn destroy(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<(), String> {
+    fn destroy(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<(), String> {
         let conn = self.get_cluster_connection(config, inventory)?;
         let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
 

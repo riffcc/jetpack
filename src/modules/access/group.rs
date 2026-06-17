@@ -14,103 +14,148 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::inventory::hosts::HostOSType;
-use crate::tasks::*;
 use crate::handle::handle::TaskHandle;
+use crate::inventory::hosts::HostOSType;
 use crate::tasks::fields::Field;
-use serde::{Deserialize};
-use std::collections::{HashSet};
+use crate::tasks::*;
+use serde::Deserialize;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::vec::Vec;
 
 const MODULE: &str = "group";
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct GroupTask {
-    pub name:           Option<String>,
-    pub group:          String,
-    pub gid:            Option<String>,
-    pub users:          Option<HashSet<String>>,
-    pub append:         Option<String>,
-    pub system:         Option<String>,
-    pub remove:         Option<String>,
-    pub with:           Option<PreLogicInput>,
-    pub and:            Option<PostLogicInput>
+    pub name: Option<String>,
+    pub group: String,
+    pub gid: Option<String>,
+    pub users: Option<HashSet<String>>,
+    pub append: Option<String>,
+    pub system: Option<String>,
+    pub remove: Option<String>,
+    pub with: Option<PreLogicInput>,
+    pub and: Option<PostLogicInput>,
 }
 
 struct GroupAction {
-    pub group:          String,
-    pub gid:            Option<u64>,
-    pub users:          Option<HashSet<String>>,
-    pub append:         bool,
-    pub system:         bool,
-    pub remove:         bool,
+    pub group: String,
+    pub gid: Option<u64>,
+    pub users: Option<HashSet<String>>,
+    pub append: bool,
+    pub system: bool,
+    pub remove: bool,
 }
 
 struct GroupDetails {
-    exists:     bool,
-    gid:        Option<u64>,
-    users:      Option<HashSet<String>>,
+    exists: bool,
+    gid: Option<u64>,
+    users: Option<HashSet<String>>,
 }
 
 impl IsTask for GroupTask {
-
-    fn get_module(&self) -> String { String::from(MODULE) }
-    fn get_name(&self) -> Option<String> { self.name.clone() }
-    fn get_with(&self) -> Option<PreLogicInput> { self.with.clone() }
-
-    fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(
-            EvaluatedTask {
-                action: Arc::new(GroupAction {
-                    group:          handle.template.string_no_spaces(request, tm, &String::from("group"), &self.group)?,
-                    gid:            handle.template.integer_option(request, tm, &String::from("gid"), &self.gid, None)?,
-                    users:          {
-                        match &self.users {
-                            Some(users) => {
-                                let mut templated_users: HashSet<String> = HashSet::new();
-                                for user in users {
-                                    templated_users.insert(handle.template.string_no_spaces(request, tm, &String::from("users"), user)?);
-                                }
-                                Some(templated_users)
-                            },
-                            None => {None}
-                        }
-                    },
-                    append:         handle.template.boolean_option_default_false(&request, tm, &String::from("append"), &self.append)?,
-                    system:         handle.template.boolean_option_default_false(&request, tm, &String::from("system"), &self.system)?,
-                    remove:         handle.template.boolean_option_default_false(&request, tm, &String::from("remove"), &self.remove)?,
-                }),
-                with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-                and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-            }
-        );
+    fn get_module(&self) -> String {
+        String::from(MODULE)
+    }
+    fn get_name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    fn get_with(&self) -> Option<PreLogicInput> {
+        self.with.clone()
     }
 
+    fn evaluate(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        return Ok(EvaluatedTask {
+            action: Arc::new(GroupAction {
+                group: handle.template.string_no_spaces(
+                    request,
+                    tm,
+                    &String::from("group"),
+                    &self.group,
+                )?,
+                gid: handle.template.integer_option(
+                    request,
+                    tm,
+                    &String::from("gid"),
+                    &self.gid,
+                    None,
+                )?,
+                users: {
+                    match &self.users {
+                        Some(users) => {
+                            let mut templated_users: HashSet<String> = HashSet::new();
+                            for user in users {
+                                templated_users.insert(handle.template.string_no_spaces(
+                                    request,
+                                    tm,
+                                    &String::from("users"),
+                                    user,
+                                )?);
+                            }
+                            Some(templated_users)
+                        }
+                        None => None,
+                    }
+                },
+                append: handle.template.boolean_option_default_false(
+                    &request,
+                    tm,
+                    &String::from("append"),
+                    &self.append,
+                )?,
+                system: handle.template.boolean_option_default_false(
+                    &request,
+                    tm,
+                    &String::from("system"),
+                    &self.system,
+                )?,
+                remove: handle.template.boolean_option_default_false(
+                    &request,
+                    tm,
+                    &String::from("remove"),
+                    &self.remove,
+                )?,
+            }),
+            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
+        });
+    }
 }
 
 impl IsAction for GroupAction {
-
-    fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-
+    fn dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-
             TaskRequestType::Query => {
                 let os_type = handle.host.read().unwrap().os_type.unwrap();
                 if os_type != HostOSType::Linux {
-                    return Err(handle.response.is_failed(request, &String::from("this group module only supports Linux")));
+                    return Err(handle.response.is_failed(
+                        request,
+                        &String::from("this group module only supports Linux"),
+                    ));
                 }
                 let actual: GroupDetails = self.get_group_details(handle, request)?;
                 match (actual.exists, self.remove) {
-                    (false, true)  => return Ok(handle.response.is_matched(request)),
+                    (false, true) => return Ok(handle.response.is_matched(request)),
                     (false, false) => return Ok(handle.response.needs_creation(request)),
-                    (true, true)   => return Ok(handle.response.needs_removal(request)),
-                    (true, false)  => {
-
-                        let mut changes : Vec<Field> = Vec::new();
-                        if GroupAction::u64_wants_change(&self.gid, &actual.gid) { changes.push(Field::Gid); }
-                        if self.users_wants_change(&actual) { changes.push(Field::Users); }
+                    (true, true) => return Ok(handle.response.needs_removal(request)),
+                    (true, false) => {
+                        let mut changes: Vec<Field> = Vec::new();
+                        if GroupAction::u64_wants_change(&self.gid, &actual.gid) {
+                            changes.push(Field::Gid);
+                        }
+                        if self.users_wants_change(&actual) {
+                            changes.push(Field::Users);
+                        }
 
                         match changes.len() {
                             0 => return Ok(handle.response.is_matched(request)),
@@ -118,7 +163,7 @@ impl IsAction for GroupAction {
                         }
                     }
                 }
-            },
+            }
 
             TaskRequestType::Create => {
                 let cmd = self.create_group_command();
@@ -128,37 +173,53 @@ impl IsAction for GroupAction {
                     handle.remote.run(request, &cmd, CheckRc::Checked)?;
                 }
                 return Ok(handle.response.is_created(request));
-            },
+            }
 
             TaskRequestType::Modify => {
                 let actual: GroupDetails = self.get_group_details(handle, request)?;
-                if self.modify_group_command(&actual, &request.changes).is_some() {
-                    let cmd = self.modify_group_command(&actual, &request.changes).unwrap();
+                if self
+                    .modify_group_command(&actual, &request.changes)
+                    .is_some()
+                {
+                    let cmd = self
+                        .modify_group_command(&actual, &request.changes)
+                        .unwrap();
                     handle.remote.run(request, &cmd, CheckRc::Checked)?;
                 }
-                if self.modify_group_users_command(&actual, &request.changes).is_some() {
-                    let cmd = self.modify_group_users_command(&actual, &request.changes).unwrap();
+                if self
+                    .modify_group_users_command(&actual, &request.changes)
+                    .is_some()
+                {
+                    let cmd = self
+                        .modify_group_users_command(&actual, &request.changes)
+                        .unwrap();
                     handle.remote.run(request, &cmd, CheckRc::Checked)?;
                 }
-                return Ok(handle.response.is_modified(request, request.changes.clone()));
-            },
+                return Ok(handle
+                    .response
+                    .is_modified(request, request.changes.clone()));
+            }
 
             TaskRequestType::Remove => {
                 let cmd = self.delete_group_command();
                 handle.remote.run(request, &cmd, CheckRc::Checked)?;
-                return Ok(handle.response.is_removed(request))
+                return Ok(handle.response.is_removed(request));
             }
 
             // no passive or execute leg
-            _ => { return Err(handle.response.not_supported(request)); }
-
+            _ => {
+                return Err(handle.response.not_supported(request));
+            }
         }
     }
 }
 
 impl GroupAction {
-
-    fn get_group_details (&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<GroupDetails,Arc<TaskResponse>> {
+    fn get_group_details(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<GroupDetails, Arc<TaskResponse>> {
         let cmd = self.get_group_command();
         let result = handle.remote.run(request, &cmd, CheckRc::Unchecked)?;
         let (rc, out) = cmd_info(&result);
@@ -167,10 +228,10 @@ impl GroupAction {
             // return early if group does not exist (rc = 2)
             2 => {
                 return Ok(GroupDetails {
-                    exists:   false,
-                    gid:      None,
-                    users:    None,
-                })
+                    exists: false,
+                    gid: None,
+                    users: None,
+                });
             }
             0 => {
                 let items: Vec<&str> = out.split(":").collect();
@@ -193,11 +254,16 @@ impl GroupAction {
                 }
                 return Ok(GroupDetails {
                     exists: true,
-                    gid:    Some(items[2].parse().unwrap()),
+                    gid: Some(items[2].parse().unwrap()),
                     users: Some(users),
-                })
+                });
             }
-            x => { return Err(handle.response.is_failed(request, &format!("failure getting group details, rc: '{}'", x))); }
+            x => {
+                return Err(handle.response.is_failed(
+                    request,
+                    &format!("failure getting group details, rc: '{}'", x),
+                ));
+            }
         }
     }
 
@@ -215,7 +281,7 @@ impl GroupAction {
             cmd.push_str(&format!(" -g '{}'", self.gid.as_ref().unwrap()));
         }
         if self.system && self.gid.is_none() {
-             cmd.push_str(&format!(" -r"));
+            cmd.push_str(&format!(" -r"));
         }
         cmd.push_str(&format!(" '{}'", self.group));
         return cmd;
@@ -224,7 +290,11 @@ impl GroupAction {
     fn create_group_users_command(&self) -> Option<String> {
         if self.users.is_some() {
             let final_users: Vec<String> = self.users.as_ref().unwrap().iter().cloned().collect();
-            return Some(format!("gpasswd -M '{}' '{}'", final_users.join(","), self.group));
+            return Some(format!(
+                "gpasswd -M '{}' '{}'",
+                final_users.join(","),
+                self.group
+            ));
         } else {
             return None;
         }
@@ -242,7 +312,11 @@ impl GroupAction {
         return None;
     }
 
-    fn modify_group_users_command(&self, actual: &GroupDetails, changes: &Vec<Field>) -> Option<String> {
+    fn modify_group_users_command(
+        &self,
+        actual: &GroupDetails,
+        changes: &Vec<Field>,
+    ) -> Option<String> {
         if self.users.is_some() && changes.contains(&Field::Users) {
             match self.append {
                 true => {
@@ -251,22 +325,36 @@ impl GroupAction {
                         Some(actual_users) => {
                             let mut users = self.users.clone().unwrap();
                             for user in actual_users {
-                                 users.insert(user.clone());
+                                users.insert(user.clone());
                             }
                             let final_users: Vec<String> = users.iter().cloned().collect();
-                            return Some(format!("gpasswd -M '{}' '{}'",final_users.join(","), self.group))
-                        },
+                            return Some(format!(
+                                "gpasswd -M '{}' '{}'",
+                                final_users.join(","),
+                                self.group
+                            ));
+                        }
                         // otherwise we just take the new ones
                         None => {
-                            let final_users: Vec<String> = self.users.as_ref().unwrap().iter().cloned().collect();
-                            return Some(format!("gpasswd -M '{}' '{}'",final_users.join(","), self.group))
+                            let final_users: Vec<String> =
+                                self.users.as_ref().unwrap().iter().cloned().collect();
+                            return Some(format!(
+                                "gpasswd -M '{}' '{}'",
+                                final_users.join(","),
+                                self.group
+                            ));
                         }
                     }
-                },
+                }
                 // just replace existing users with new users
                 false => {
-                    let final_users: Vec<String> = self.users.as_ref().unwrap().iter().cloned().collect();
-                    return Some(format!("gpasswd -M '{}' '{}'", final_users.join(","), self.group))
+                    let final_users: Vec<String> =
+                        self.users.as_ref().unwrap().iter().cloned().collect();
+                    return Some(format!(
+                        "gpasswd -M '{}' '{}'",
+                        final_users.join(","),
+                        self.group
+                    ));
                 }
             }
         }
@@ -274,15 +362,15 @@ impl GroupAction {
     }
 
     fn delete_group_command(&self) -> String {
-        return format!("groupdel '{}'", self.group)
+        return format!("groupdel '{}'", self.group);
     }
 
     fn u64_wants_change(our: &Option<u64>, actual: &Option<u64>) -> bool {
         if our.is_some() {
             if actual.is_none() {
-                return true
+                return true;
             }
-            if ! our.as_ref().unwrap().eq(actual.as_ref().unwrap()) {
+            if !our.as_ref().unwrap().eq(actual.as_ref().unwrap()) {
                 return true;
             }
         }
@@ -292,19 +380,18 @@ impl GroupAction {
     fn users_wants_change(&self, actual: &GroupDetails) -> bool {
         if self.users.is_none() {
             // no preference about configuration on the remote system
-            return false
+            return false;
         }
         if actual.users.is_none() {
             // no remote users yet
             return true;
         }
-        let actual_users  = actual.users.as_ref().unwrap();
+        let actual_users = actual.users.as_ref().unwrap();
         let desired_users = self.users.clone().unwrap();
         if self.append {
-            return ! desired_users.is_subset(&actual_users);
+            return !desired_users.is_subset(&actual_users);
         } else {
-            return desired_users != *actual_users
+            return desired_users != *actual_users;
         }
     }
-
 }

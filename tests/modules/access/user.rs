@@ -123,7 +123,7 @@ gecos: "Application User"
 
     let task: Result<UserTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Create application user".to_string()));
     assert_eq!(task.user, "appuser");
@@ -140,7 +140,7 @@ user: testuser
 
     let task: Result<UserTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.user, "testuser");
     assert!(task.name.is_none());
@@ -160,7 +160,7 @@ and:
 
     let task: Result<UserTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.user.contains("{{ username }}"));
     assert!(task.with.is_some());

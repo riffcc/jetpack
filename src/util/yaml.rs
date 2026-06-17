@@ -14,19 +14,18 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::path::Path;
-use std::fs::read_to_string;
 use crate::util::terminal::banner;
+use std::fs::read_to_string;
+use std::path::Path;
 
-const YAML_ERROR_SHOW_LINES:usize = 10;
-const YAML_ERROR_WIDTH:usize = 180; // things will wrap in terminal anyway
+const YAML_ERROR_SHOW_LINES: usize = 10;
+const YAML_ERROR_WIDTH: usize = 180; // things will wrap in terminal anyway
 
 // ==============================================================================================================
 // PUBLIC API
 // ==============================================================================================================
 
 pub fn show_yaml_error_in_context(yaml_error: &serde_yaml::Error, path: &Path) {
-
     println!("");
 
     let location = yaml_error.location();
@@ -38,10 +37,14 @@ pub fn show_yaml_error_in_context(yaml_error: &serde_yaml::Error, path: &Path) {
     }
 
     if location.is_none() {
-        let markdown_table = format!("|:-|\n\
+        let markdown_table = format!(
+            "|:-|\n\
                                       |Error reading YAML file: {}|\n\
                                       |{}|\n\
-                                      |-", path.display(), yaml_error_str);
+                                      |-",
+            path.display(),
+            yaml_error_str
+        );
         crate::util::terminal::markdown_print(&markdown_table);
         return;
     }
@@ -51,16 +54,27 @@ pub fn show_yaml_error_in_context(yaml_error: &serde_yaml::Error, path: &Path) {
     let error_line = location.line();
     let error_column = location.column();
 
-    let lines: Vec<String> = read_to_string(path).unwrap().lines().map(String::from).collect();
+    let lines: Vec<String> = read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
     let line_count = lines.len();
 
-    banner(&format!("Error reading YAML file: {}, {}", path.display(), yaml_error_str).to_string());
+    banner(
+        &format!(
+            "Error reading YAML file: {}, {}",
+            path.display(),
+            yaml_error_str
+        )
+        .to_string(),
+    );
 
     let show_start: usize;
-    let mut show_stop : usize = error_line + YAML_ERROR_SHOW_LINES;
-    
+    let mut show_stop: usize = error_line + YAML_ERROR_SHOW_LINES;
+
     if error_line < YAML_ERROR_SHOW_LINES {
-        show_start = 0; 
+        show_start = 0;
     } else {
         show_start = error_line - YAML_ERROR_SHOW_LINES;
     }
@@ -76,7 +90,7 @@ pub fn show_yaml_error_in_context(yaml_error: &serde_yaml::Error, path: &Path) {
     for line in lines.iter() {
         count = count + 1;
         if count >= show_start && count <= show_stop {
-            if count ==  error_line {
+            if count == error_line {
                 println!("     {count:5}:{error_column:5} | >>> | {}", line);
             } else {
                 println!("     {count:5}       |     | {}", line);
@@ -85,15 +99,11 @@ pub fn show_yaml_error_in_context(yaml_error: &serde_yaml::Error, path: &Path) {
     }
 
     println!("");
-
 }
 
 pub fn blend_variables(a: &mut serde_yaml::Value, b: serde_yaml::Value) {
-
     match (a, b) {
-
-        (_a @ &mut serde_yaml::Value::Mapping(_), serde_yaml::Value::Null) => {
-        },
+        (_a @ &mut serde_yaml::Value::Mapping(_), serde_yaml::Value::Null) => {}
 
         (a @ &mut serde_yaml::Value::Mapping(_), serde_yaml::Value::Mapping(b)) => {
             let a = a.as_mapping_mut().unwrap();
@@ -106,16 +116,12 @@ pub fn blend_variables(a: &mut serde_yaml::Value, b: serde_yaml::Value) {
                 }
                 if !a.contains_key(&k) {
                     a.insert(k.to_owned(), v.to_owned());
-                }
-                else {
+                } else {
                     blend_variables(&mut a[&k], v);
                 }
-
             }
         }
-        (a, b) => {
-            *a = b
-        },
+        (a, b) => *a = b,
     }
 }
 
@@ -130,9 +136,9 @@ mod tests {
     fn test_blend_variables_null_into_mapping() {
         let mut a = serde_yaml::from_str("key: value").unwrap();
         let b = serde_yaml::Value::Null;
-        
+
         blend_variables(&mut a, b);
-        
+
         assert_eq!(a["key"], "value");
     }
 
@@ -140,9 +146,9 @@ mod tests {
     fn test_blend_variables_mapping_into_mapping() {
         let mut a = serde_yaml::from_str("key1: value1").unwrap();
         let b = serde_yaml::from_str("key2: value2").unwrap();
-        
+
         blend_variables(&mut a, b);
-        
+
         assert_eq!(a["key1"], "value1");
         assert_eq!(a["key2"], "value2");
     }
@@ -151,9 +157,9 @@ mod tests {
     fn test_blend_variables_override_value() {
         let mut a = serde_yaml::from_str("key: old_value").unwrap();
         let b = serde_yaml::from_str("key: new_value").unwrap();
-        
+
         blend_variables(&mut a, b);
-        
+
         assert_eq!(a["key"], "new_value");
     }
 
@@ -161,9 +167,9 @@ mod tests {
     fn test_blend_variables_merge_sequences() {
         let mut a = serde_yaml::from_str("list: [1, 2]").unwrap();
         let b = serde_yaml::from_str("list: [3, 4]").unwrap();
-        
+
         blend_variables(&mut a, b);
-        
+
         let list = a["list"].as_sequence().unwrap();
         assert_eq!(list.len(), 4);
         assert_eq!(list[0], 1);
@@ -174,17 +180,23 @@ mod tests {
 
     #[test]
     fn test_blend_variables_nested_mappings() {
-        let mut a = serde_yaml::from_str("
+        let mut a = serde_yaml::from_str(
+            "
 parent:
   child1: value1
-").unwrap();
-        let b = serde_yaml::from_str("
+",
+        )
+        .unwrap();
+        let b = serde_yaml::from_str(
+            "
 parent:
   child2: value2
-").unwrap();
-        
+",
+        )
+        .unwrap();
+
         blend_variables(&mut a, b);
-        
+
         assert_eq!(a["parent"]["child1"], "value1");
         assert_eq!(a["parent"]["child2"], "value2");
     }
@@ -194,9 +206,9 @@ parent:
         // When 'a' is a non-mapping, it gets completely replaced by 'b'
         let mut a = serde_yaml::Value::String("original".to_string());
         let b = serde_yaml::from_str("key: value").unwrap();
-        
+
         blend_variables(&mut a, b);
-        
+
         // 'a' should now be the mapping from 'b'
         assert!(a.is_mapping());
         assert_eq!(a["key"], "value");
@@ -208,11 +220,11 @@ parent:
         let file_path = temp_dir.path().join("test.yaml");
         let mut file = File::create(&file_path).unwrap();
         writeln!(file, "invalid: yaml: content").unwrap();
-        
+
         // Create a YAML error without location info
         let yaml_content = "invalid: yaml: content";
         let error = serde_yaml::from_str::<serde_yaml::Value>(yaml_content).unwrap_err();
-        
+
         // This should not panic
         show_yaml_error_in_context(&error, &file_path);
     }
@@ -222,17 +234,17 @@ parent:
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.yaml");
         let mut file = File::create(&file_path).unwrap();
-        
+
         // Write a file with multiple lines
         for i in 1..25 {
             writeln!(file, "line{}: value{}", i, i).unwrap();
         }
         writeln!(file, "invalid: [unclosed").unwrap();
-        
+
         // Try to parse the invalid file
         let content = fs::read_to_string(&file_path).unwrap();
         let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
-        
+
         // This should not panic and should show context
         show_yaml_error_in_context(&error, &file_path);
     }
@@ -242,14 +254,14 @@ parent:
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.yaml");
         let mut file = File::create(&file_path).unwrap();
-        
+
         writeln!(file, "invalid: [unclosed").unwrap();
         writeln!(file, "line2: value2").unwrap();
         writeln!(file, "line3: value3").unwrap();
-        
+
         let content = fs::read_to_string(&file_path).unwrap();
         let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
-        
+
         // This should handle edge case where error is near start
         show_yaml_error_in_context(&error, &file_path);
     }
@@ -259,14 +271,14 @@ parent:
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.yaml");
         let mut file = File::create(&file_path).unwrap();
-        
+
         writeln!(file, "line1: value1").unwrap();
         writeln!(file, "line2: value2").unwrap();
         writeln!(file, "invalid: [unclosed").unwrap();
-        
+
         let content = fs::read_to_string(&file_path).unwrap();
         let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
-        
+
         // This should handle edge case where error is near end
         show_yaml_error_in_context(&error, &file_path);
     }
@@ -276,14 +288,14 @@ parent:
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.yaml");
         let mut file = File::create(&file_path).unwrap();
-        
+
         // Create invalid YAML that will generate a long error message
         let long_content = "a".repeat(200);
         writeln!(file, "key: [{}unclosed", long_content).unwrap();
-        
+
         let content = fs::read_to_string(&file_path).unwrap();
         let error = serde_yaml::from_str::<serde_yaml::Value>(&content).unwrap_err();
-        
+
         // This should truncate long error messages - just verify it doesn't panic
         show_yaml_error_in_context(&error, &file_path);
     }

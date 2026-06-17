@@ -68,7 +68,11 @@ fn read_zone_file(zones_path: &Path, zone: &str) -> Result<BTreeMap<String, Valu
 }
 
 /// Write records to a zone file
-fn write_zone_file(zones_path: &Path, zone: &str, records: &BTreeMap<String, Value>) -> Result<(), String> {
+fn write_zone_file(
+    zones_path: &Path,
+    zone: &str,
+    records: &BTreeMap<String, Value>,
+) -> Result<(), String> {
     let zone_file = zones_path.join(format!("{}.yaml", zone));
 
     // Ensure zones directory exists
@@ -88,7 +92,11 @@ fn write_zone_file(zones_path: &Path, zone: &str, records: &BTreeMap<String, Val
 }
 
 /// Get an A record's IP address from the zone file
-pub fn get_a_record(zones_path: &Path, zone: &str, hostname: &str) -> Result<Option<String>, String> {
+pub fn get_a_record(
+    zones_path: &Path,
+    zone: &str,
+    hostname: &str,
+) -> Result<Option<String>, String> {
     let records = read_zone_file(zones_path, zone)?;
 
     if let Some(record_value) = records.get(hostname) {
@@ -108,7 +116,12 @@ pub fn get_a_record(zones_path: &Path, zone: &str, hostname: &str) -> Result<Opt
 /// Add an A record to the zone file
 /// Returns true if the record was added or updated, false if unchanged
 /// If the hostname already has A records, the IP is added to the values list
-pub fn add_a_record(zones_path: &Path, zone: &str, hostname: &str, ip: &str) -> Result<bool, String> {
+pub fn add_a_record(
+    zones_path: &Path,
+    zone: &str,
+    hostname: &str,
+    ip: &str,
+) -> Result<bool, String> {
     let mut records = read_zone_file(zones_path, zone)?;
 
     // Check if record already exists
@@ -137,8 +150,14 @@ pub fn add_a_record(zones_path: &Path, zone: &str, hostname: &str, ip: &str) -> 
 
     // Create or update the A record
     let mut record = Mapping::new();
-    record.insert(Value::String("type".to_string()), Value::String("A".to_string()));
-    record.insert(Value::String("value".to_string()), Value::String(ip.to_string()));
+    record.insert(
+        Value::String("type".to_string()),
+        Value::String("A".to_string()),
+    );
+    record.insert(
+        Value::String("value".to_string()),
+        Value::String(ip.to_string()),
+    );
 
     records.insert(hostname.to_string(), Value::Mapping(record));
 
@@ -149,7 +168,12 @@ pub fn add_a_record(zones_path: &Path, zone: &str, hostname: &str, ip: &str) -> 
 
 /// Set multiple A records for a hostname (used for group service records)
 /// Replaces any existing record with a multi-value A record
-pub fn set_a_records(zones_path: &Path, zone: &str, hostname: &str, ips: &[String]) -> Result<bool, String> {
+pub fn set_a_records(
+    zones_path: &Path,
+    zone: &str,
+    hostname: &str,
+    ips: &[String],
+) -> Result<bool, String> {
     let mut records = read_zone_file(zones_path, zone)?;
 
     // Check if already matches
@@ -158,11 +182,11 @@ pub fn set_a_records(zones_path: &Path, zone: &str, hostname: &str, ips: &[Strin
             if record_type.as_str() == Some("A") {
                 if let Some(values) = existing.get("values") {
                     if let Some(arr) = values.as_sequence() {
-                        let existing_ips: Vec<&str> = arr.iter()
-                            .filter_map(|v| v.as_str())
-                            .collect();
-                        if existing_ips.len() == ips.len() &&
-                           ips.iter().all(|ip| existing_ips.contains(&ip.as_str())) {
+                        let existing_ips: Vec<&str> =
+                            arr.iter().filter_map(|v| v.as_str()).collect();
+                        if existing_ips.len() == ips.len()
+                            && ips.iter().all(|ip| existing_ips.contains(&ip.as_str()))
+                        {
                             return Ok(false); // Already matches
                         }
                     }
@@ -181,14 +205,18 @@ pub fn set_a_records(zones_path: &Path, zone: &str, hostname: &str, ips: &[Strin
 
     // Create the A record with multiple values
     let mut record = Mapping::new();
-    record.insert(Value::String("type".to_string()), Value::String("A".to_string()));
+    record.insert(
+        Value::String("type".to_string()),
+        Value::String("A".to_string()),
+    );
 
     if ips.len() == 1 {
-        record.insert(Value::String("value".to_string()), Value::String(ips[0].clone()));
+        record.insert(
+            Value::String("value".to_string()),
+            Value::String(ips[0].clone()),
+        );
     } else {
-        let values: Vec<Value> = ips.iter()
-            .map(|ip| Value::String(ip.clone()))
-            .collect();
+        let values: Vec<Value> = ips.iter().map(|ip| Value::String(ip.clone())).collect();
         record.insert(Value::String("values".to_string()), Value::Sequence(values));
     }
 
@@ -201,7 +229,12 @@ pub fn set_a_records(zones_path: &Path, zone: &str, hostname: &str, ips: &[Strin
 
 /// Add a CNAME record
 /// Returns true if the record was added or updated, false if unchanged
-pub fn add_cname_record(zones_path: &Path, zone: &str, alias: &str, target: &str) -> Result<bool, String> {
+pub fn add_cname_record(
+    zones_path: &Path,
+    zone: &str,
+    alias: &str,
+    target: &str,
+) -> Result<bool, String> {
     let mut records = read_zone_file(zones_path, zone)?;
 
     // Ensure target has trailing dot (FQDN)
@@ -226,8 +259,14 @@ pub fn add_cname_record(zones_path: &Path, zone: &str, alias: &str, target: &str
 
     // Create the CNAME record
     let mut record = Mapping::new();
-    record.insert(Value::String("type".to_string()), Value::String("CNAME".to_string()));
-    record.insert(Value::String("value".to_string()), Value::String(target_fqdn));
+    record.insert(
+        Value::String("type".to_string()),
+        Value::String("CNAME".to_string()),
+    );
+    record.insert(
+        Value::String("value".to_string()),
+        Value::String(target_fqdn),
+    );
 
     records.insert(alias.to_string(), Value::Mapping(record));
 
@@ -239,7 +278,12 @@ pub fn add_cname_record(zones_path: &Path, zone: &str, alias: &str, target: &str
 /// Add a PTR record for reverse DNS
 /// ip should be just the host part (e.g., "2" for 10.10.10.2)
 /// target should be the FQDN
-pub fn add_ptr_record(zones_path: &Path, zone: &str, ip_host: &str, target: &str) -> Result<bool, String> {
+pub fn add_ptr_record(
+    zones_path: &Path,
+    zone: &str,
+    ip_host: &str,
+    target: &str,
+) -> Result<bool, String> {
     let mut records = read_zone_file(zones_path, zone)?;
 
     // Ensure target has trailing dot (FQDN)
@@ -264,8 +308,14 @@ pub fn add_ptr_record(zones_path: &Path, zone: &str, ip_host: &str, target: &str
 
     // Create the PTR record
     let mut record = Mapping::new();
-    record.insert(Value::String("type".to_string()), Value::String("PTR".to_string()));
-    record.insert(Value::String("value".to_string()), Value::String(target_fqdn));
+    record.insert(
+        Value::String("type".to_string()),
+        Value::String("PTR".to_string()),
+    );
+    record.insert(
+        Value::String("value".to_string()),
+        Value::String(target_fqdn),
+    );
 
     records.insert(ip_host.to_string(), Value::Mapping(record));
 
@@ -309,13 +359,17 @@ mod tests {
         let lines: Vec<&str> = content.lines().collect();
 
         // Find the key lines (those that start without whitespace and contain a colon)
-        let keys: Vec<&str> = lines.iter()
+        let keys: Vec<&str> = lines
+            .iter()
             .filter(|l| !l.starts_with(' ') && !l.starts_with('-') && l.contains(':'))
             .map(|l| l.trim_end_matches(':'))
             .collect();
 
-        assert_eq!(keys, vec!["alpha", "middle", "zebra"],
-            "Zone file keys must be in alphabetical order for OctoDNS compatibility");
+        assert_eq!(
+            keys,
+            vec!["alpha", "middle", "zebra"],
+            "Zone file keys must be in alphabetical order for OctoDNS compatibility"
+        );
     }
 
     #[test]

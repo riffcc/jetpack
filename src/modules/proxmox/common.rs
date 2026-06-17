@@ -20,8 +20,8 @@
 //! Provides shared authentication, HTTP client setup, and response parsing
 //! for all Proxmox modules (lxc, migrate, node, etc.)
 
-use crate::tasks::*;
 use crate::handle::handle::TaskHandle;
+use crate::tasks::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -44,7 +44,10 @@ pub struct ProxmoxApiConfig {
 impl ProxmoxApiConfig {
     /// Create authorization header value for Proxmox API token auth.
     pub fn get_auth_header(&self) -> String {
-        format!("PVEAPIToken={}={}", self.api_token_id, self.api_token_secret)
+        format!(
+            "PVEAPIToken={}={}",
+            self.api_token_id, self.api_token_secret
+        )
     }
 
     /// Build full API URL from path.
@@ -54,19 +57,35 @@ impl ProxmoxApiConfig {
 
     /// Create a reqwest client configured for Proxmox.
     /// Accepts invalid certs (Proxmox uses self-signed by default).
-    pub fn create_client(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<reqwest::Client, Arc<TaskResponse>> {
+    pub fn create_client(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<reqwest::Client, Arc<TaskResponse>> {
         reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to create HTTP client: {}", e)))
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to create HTTP client: {}", e))
+            })
     }
 
     /// Create a tokio runtime for async operations.
-    pub fn create_runtime(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<tokio::runtime::Runtime, Arc<TaskResponse>> {
+    pub fn create_runtime(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<tokio::runtime::Runtime, Arc<TaskResponse>> {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|e| handle.response.is_failed(request, &format!("Failed to create async runtime: {}", e)))
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to create async runtime: {}", e))
+            })
     }
 }
 

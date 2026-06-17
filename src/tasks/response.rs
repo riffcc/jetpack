@@ -5,27 +5,27 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::sync::Arc;
 //use std::collections::HashMap;
 use crate::connection::command::CommandResult;
-use crate::tasks::logic::{PreLogicEvaluated,PostLogicEvaluated};
 use crate::tasks::fields::Field;
+use crate::tasks::logic::{PostLogicEvaluated, PreLogicEvaluated};
 use std::vec::Vec;
 
 // task responses are returns from module calls - they are not
 // created directly but by helper functions in handle.rs, see
 // the various modules for examples/usage
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum TaskStatus {
     IsCreated,
     IsRemoved,
@@ -39,7 +39,7 @@ pub enum TaskStatus {
     NeedsModification,
     NeedsExecution,
     NeedsPassive,
-    Failed
+    Failed,
 }
 
 #[derive(Debug)]
@@ -49,7 +49,7 @@ pub struct TaskResponse {
     pub msg: Option<String>,
     pub command_result: Arc<Option<CommandResult>>,
     pub with: Arc<Option<PreLogicEvaluated>>,
-    pub and: Arc<Option<PostLogicEvaluated>>
+    pub and: Arc<Option<PostLogicEvaluated>>,
 }
 
 //impl TaskResponse {

@@ -14,21 +14,21 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::registry::list::Task;
 use crate::connection::connection::Connection;
 use crate::handle::handle::TaskHandle;
-use crate::playbooks::traversal::RunState;
+use crate::handle::template::BlendTarget;
 use crate::inventory::hosts::Host;
-use crate::playbooks::traversal::HandlerMode;
 use crate::playbooks::language::Play;
+use crate::playbooks::templar::TemplateMode;
+use crate::playbooks::traversal::HandlerMode;
+use crate::playbooks::traversal::RunState;
+use crate::registry::list::Task;
+use crate::tasks::logic::template_items;
 use crate::tasks::request::SudoDetails;
 use crate::tasks::*;
-use crate::handle::template::BlendTarget;
-use crate::playbooks::templar::TemplateMode;
-use crate::tasks::logic::template_items;
-use std::sync::{Arc,RwLock,Mutex};
-use std::collections::HashMap;
 use rayon::prelude::*;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 use std::{thread, time};
 
 // this module contains the guts of running tasks inside per-host threads
@@ -49,126 +49,208 @@ pub fn async_run_single_task(
 ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
     let check = run_state.visitor.read().unwrap().is_check_mode();
 
-    run_state.visitor.read().unwrap().on_host_task_start(&run_state.context, host);
+    run_state
+        .visitor
+        .read()
+        .unwrap()
+        .on_host_task_start(&run_state.context, host);
 
-    let result = run_task_on_host(run_state, Arc::clone(connection), host, play, task, HandlerMode::NormalTasks);
+    let result = run_task_on_host(
+        run_state,
+        Arc::clone(connection),
+        host,
+        play,
+        task,
+        HandlerMode::NormalTasks,
+    );
 
     match &result {
-        Ok(x) => {
-            match check {
-                false => run_state.visitor.read().unwrap().on_host_task_ok(&run_state.context, x, host),
-                true => run_state.visitor.read().unwrap().on_host_task_check_ok(&run_state.context, x, host),
+        Ok(x) => match check {
+            false => run_state
+                .visitor
+                .read()
+                .unwrap()
+                .on_host_task_ok(&run_state.context, x, host),
+            true => {
+                run_state
+                    .visitor
+                    .read()
+                    .unwrap()
+                    .on_host_task_check_ok(&run_state.context, x, host)
             }
-        }
+        },
         Err(x) => {
-            run_state.visitor.read().unwrap().on_host_task_failed(&run_state.context, x, host);
+            run_state
+                .visitor
+                .read()
+                .unwrap()
+                .on_host_task_failed(&run_state.context, x, host);
         }
     }
 
     result
 }
 
-pub fn fsm_run_task(run_state: &Arc<RunState>, play: &Play, task: &Task, are_handlers: HandlerMode) -> Result<(), String> {
-
+pub fn fsm_run_task(
+    run_state: &Arc<RunState>,
+    play: &Play,
+    task: &Task,
+    are_handlers: HandlerMode,
+) -> Result<(), String> {
     // if running in check mode various functions will short circuit early
-    let check =  run_state.visitor.read().unwrap().is_check_mode();
+    let check = run_state.visitor.read().unwrap().is_check_mode();
 
     // the hosts to configure are not those specified in the batch but the subset of those that have not yet failed
-    let hosts : HashMap<String, Arc<RwLock<Host>>> = run_state.context.read().unwrap().get_remaining_hosts();
-    let mut host_objects : Vec<Arc<RwLock<Host>>> = Vec::new();
-    for (_,v) in hosts { host_objects.push(Arc::clone(&v)); }
+    let hosts: HashMap<String, Arc<RwLock<Host>>> =
+        run_state.context.read().unwrap().get_remaining_hosts();
+    let mut host_objects: Vec<Arc<RwLock<Host>>> = Vec::new();
+    for (_, v) in hosts {
+        host_objects.push(Arc::clone(&v));
+    }
 
     // use rayon to process hosts in different threads
-    let _total : i64 = host_objects.par_iter().map(|host| {
+    let _total: i64 = host_objects
+        .par_iter()
+        .map(|host| {
+            // get the connection to each host, which should be left open until the play ends
+            let connection_result = run_state
+                .connection_factory
+                .read()
+                .unwrap()
+                .get_connection(&run_state.context, &host);
+            match connection_result {
+                Ok(_) => {
+                    let connection = connection_result.unwrap();
+                    run_state
+                        .visitor
+                        .read()
+                        .unwrap()
+                        .on_host_task_start(&run_state.context, &host);
+                    // the actual task is invoked here
+                    let task_response =
+                        run_task_on_host(&run_state, connection, &host, play, task, are_handlers);
 
-        // get the connection to each host, which should be left open until the play ends
-        let connection_result = run_state.connection_factory.read().unwrap().get_connection(&run_state.context, &host);
-        match connection_result {
-            Ok(_)  => {
-                let connection = connection_result.unwrap();
-                run_state.visitor.read().unwrap().on_host_task_start(&run_state.context, &host);
-                // the actual task is invoked here
-                let task_response = run_task_on_host(&run_state,connection,&host,play,task,are_handlers);
-
-                match task_response {
-                    Ok(x) => {
-                        match check {
-                            // output slightly differs in check vs non-check modes
-                            false => run_state.visitor.read().unwrap().on_host_task_ok(&run_state.context, &x, &host),
-                            true => run_state.visitor.read().unwrap().on_host_task_check_ok(&run_state.context, &x, &host)
+                    match task_response {
+                        Ok(x) => {
+                            match check {
+                                // output slightly differs in check vs non-check modes
+                                false => run_state.visitor.read().unwrap().on_host_task_ok(
+                                    &run_state.context,
+                                    &x,
+                                    &host,
+                                ),
+                                true => run_state.visitor.read().unwrap().on_host_task_check_ok(
+                                    &run_state.context,
+                                    &x,
+                                    &host,
+                                ),
+                            }
+                        }
+                        Err(x) => {
+                            // hosts with task failures are removed from the pool
+                            run_state.context.write().unwrap().fail_host(&host);
+                            run_state.visitor.read().unwrap().on_host_task_failed(
+                                &run_state.context,
+                                &x,
+                                &host,
+                            );
                         }
                     }
-                    Err(x) => {
-                        // hosts with task failures are removed from the pool
-                        run_state.context.write().unwrap().fail_host(&host);
-                        run_state.visitor.read().unwrap().on_host_task_failed(&run_state.context, &x, &host);
-                    },
                 }
-            },
-            Err(x) => {
-                // hosts with connection failures are removed from the pool
-                run_state.visitor.read().unwrap().debug_host(&host, &x);
-                run_state.context.write().unwrap().fail_host(&host);
-                run_state.visitor.read().unwrap().on_host_connect_failed(&run_state.context, &host);
+                Err(x) => {
+                    // hosts with connection failures are removed from the pool
+                    run_state.visitor.read().unwrap().debug_host(&host, &x);
+                    run_state.context.write().unwrap().fail_host(&host);
+                    run_state
+                        .visitor
+                        .read()
+                        .unwrap()
+                        .on_host_connect_failed(&run_state.context, &host);
+                }
             }
-        }
-        // rayon needs some math to add up, hence the 1. It seems to short-circuit without some work to do.
-        return 1;
-
-    }).sum();
+            // rayon needs some math to add up, hence the 1. It seems to short-circuit without some work to do.
+            return 1;
+        })
+        .sum();
     return Ok(());
 }
 
-fn get_actual_connection(run_state: &Arc<RunState>, host: &Arc<RwLock<Host>>, task: &Task, input_connection: Arc<Mutex<dyn Connection>>) -> Result<(Option<String>,Arc<Mutex<dyn Connection>>), String> {
-    
+fn get_actual_connection(
+    run_state: &Arc<RunState>,
+    host: &Arc<RwLock<Host>>,
+    task: &Task,
+    input_connection: Arc<Mutex<dyn Connection>>,
+) -> Result<(Option<String>, Arc<Mutex<dyn Connection>>), String> {
     // usually the connection we already have is the one we will use, but this is not the case for using the delegate_to feature
     // this is a bit complex...
 
     return match task.get_with() {
-        
         // if the task has a with section then the task might be delegated
         Some(task_with) => match task_with.delegate_to {
-
             // we have found the delegate_to keyword
             Some(pre_delegate) => {
-
                 // we need to store the variable 'delegate_host' into the host's facts storage so it can be used in module parameters.
                 let hn = host.read().unwrap().name.clone();
                 let mut mapping = serde_yaml::Mapping::new();
-                mapping.insert(serde_yaml::Value::String(String::from("delegate_host")), serde_yaml::Value::String(hn.clone()));
+                mapping.insert(
+                    serde_yaml::Value::String(String::from("delegate_host")),
+                    serde_yaml::Value::String(hn.clone()),
+                );
                 host.write().unwrap().update_facts2(mapping);
-                
+
                 // the delegate_to parameter could be a variable
-                let delegate = run_state.context.read().unwrap().render_template(&pre_delegate, host, BlendTarget::NotTemplateModule, TemplateMode::Strict)?;
+                let delegate = run_state.context.read().unwrap().render_template(
+                    &pre_delegate,
+                    host,
+                    BlendTarget::NotTemplateModule,
+                    TemplateMode::Strict,
+                )?;
 
                 if delegate.eq(&hn.clone()) {
-                    // delegating to the same host will deadlock since the connection is wrapped in a mutex, 
+                    // delegating to the same host will deadlock since the connection is wrapped in a mutex,
                     // so just return the original connection if that is requested
-                    return Ok((None, input_connection))
-                }
-                else if delegate.eq(&String::from("localhost")) {
+                    return Ok((None, input_connection));
+                } else if delegate.eq(&String::from("localhost")) {
                     // localhost delegation has some security implications (see docs) so require a CLI flag for access
                     if run_state.allow_localhost_delegation {
-                        return Ok((Some(delegate.clone()), run_state.connection_factory.read().unwrap().get_local_connection(&run_state.context)?))
+                        return Ok((
+                            Some(delegate.clone()),
+                            run_state
+                                .connection_factory
+                                .read()
+                                .unwrap()
+                                .get_local_connection(&run_state.context)?,
+                        ));
                     } else {
-                        return Err(format!("localhost delegation has potential security implementations, pass --allow-localhost-delegation to sign off"));
+                        return Err(format!(
+                            "localhost delegation has potential security implementations, pass --allow-localhost-delegation to sign off"
+                        ));
                     }
-                }
-                else {
+                } else {
                     // with some pre-checks out of the way, allow delegation to the host if it's in inventory
                     let has_host = run_state.inventory.read().unwrap().has_host(&delegate);
-                    if ! has_host {
-                        return Err(format!("cannot delegate to a host not found in inventory: {}", delegate));
+                    if !has_host {
+                        return Err(format!(
+                            "cannot delegate to a host not found in inventory: {}",
+                            delegate
+                        ));
                     }
                     let host = run_state.inventory.read().unwrap().get_host(&delegate);
-                    return Ok((Some(delegate.clone()), run_state.connection_factory.read().unwrap().get_connection(&run_state.context, &host)?));
-                } 
-            },
+                    return Ok((
+                        Some(delegate.clone()),
+                        run_state
+                            .connection_factory
+                            .read()
+                            .unwrap()
+                            .get_connection(&run_state.context, &host)?,
+                    ));
+                }
+            }
             // there was no delegate keyword, use the original connection
-            None => Ok((None, input_connection))
+            None => Ok((None, input_connection)),
         },
         // there was no 'with' block, use teh original connection
-        None => Ok((None, input_connection))
+        None => Ok((None, input_connection)),
     };
 }
 
@@ -178,8 +260,8 @@ fn run_task_on_host(
     host: &Arc<RwLock<Host>>,
     play: &Play,
     task: &Task,
-    are_handlers: HandlerMode) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
-
+    are_handlers: HandlerMode,
+) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
     // to run a task we must first validate the object, which renders the YAML inputs into versions where the program
     // has applied more pre-processing
     let validate = TaskRequest::validate();
@@ -190,26 +272,42 @@ fn run_task_on_host(
     let (delegated, connection, handle) = match gac_result {
         // construct the TaskHandle if the original connection is to be used
         Ok((None, ref conn)) => (
-            None, 
-            conn, 
-            Arc::new(TaskHandle::new(Arc::clone(run_state), Arc::clone(conn), Arc::clone(host)))
+            None,
+            conn,
+            Arc::new(TaskHandle::new(
+                Arc::clone(run_state),
+                Arc::clone(conn),
+                Arc::clone(host),
+            )),
         ),
         // construct the TaskHandle if a delegate connection is to be used
         Ok((Some(delegate), ref conn)) => (
-            Some(delegate.clone()), 
-            conn, 
-            Arc::new(TaskHandle::new(Arc::clone(run_state), Arc::clone(conn), Arc::clone(host)))
+            Some(delegate.clone()),
+            conn,
+            Arc::new(TaskHandle::new(
+                Arc::clone(run_state),
+                Arc::clone(conn),
+                Arc::clone(host),
+            )),
         ),
         // something went wrong when processing delegates, create a throw-away handle just so we can use the response functions
         Err(msg) => {
-            let tmp_handle = Arc::new(TaskHandle::new(Arc::clone(run_state), Arc::clone(&input_connection), Arc::clone(host)));
+            let tmp_handle = Arc::new(TaskHandle::new(
+                Arc::clone(run_state),
+                Arc::clone(&input_connection),
+                Arc::clone(host),
+            ));
             return Err(tmp_handle.response.is_failed(&validate, &msg));
         }
     };
 
     // if we are delegating, tell the user
     if delegated.is_some() {
-        run_state.visitor.read().unwrap().on_host_delegate(host, &delegated.unwrap());
+        run_state
+            .visitor
+            .read()
+            .unwrap()
+            .on_host_delegate(host, &delegated.unwrap());
     }
 
     // process the YAML inputs of the task and turn them into something we can  use
@@ -219,21 +317,23 @@ fn run_task_on_host(
 
     if evaluated.with.is_some() {
         let with_ref = evaluated.with.as_ref().as_ref().unwrap();
-        
+
         // Check condition
         if let Some(ref condition) = with_ref.condition {
-            let cond = handle.template.test_condition(&validate, TemplateMode::Strict, condition)?;
-            if ! cond {
+            let cond =
+                handle
+                    .template
+                    .test_condition(&validate, TemplateMode::Strict, condition)?;
+            if !cond {
                 return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
             }
         }
-        
     }
 
     // see if we are iterating over a list of items or not
     let items_input = match evaluated.with.is_some() {
         true => &evaluated.with.as_ref().as_ref().unwrap().items,
-        false => &None
+        false => &None,
     };
 
     // mapping to store the 'item' variable when using 'with_items'
@@ -241,16 +341,18 @@ fn run_task_on_host(
 
     // storing the last result of the items loop so we always have something to return
     // if a failure occurs it will be returned immediately
-    let mut last : Option<Result<Arc<TaskResponse>,Arc<TaskResponse>>> = None;
+    let mut last: Option<Result<Arc<TaskResponse>, Arc<TaskResponse>>> = None;
 
     // even if we are not iterating over a list of items, make a list of one item to simplify the logic
     let evaluated_items = template_items(&handle, &validate, TemplateMode::Strict, &items_input)?;
 
     // walking over each item or just the single task if 'with_items' was not used
     for item in evaluated_items.iter() {
-            
         // store the 'items' variable for use in module parameters
-        mapping.insert(serde_yaml::Value::String(String::from("item")), item.clone());
+        mapping.insert(
+            serde_yaml::Value::String(String::from("item")),
+            item.clone(),
+        );
         host.write().unwrap().update_facts2(mapping.clone());
 
         // re-evaluate the task, allowing the 'items' to be plugged in.
@@ -261,36 +363,51 @@ fn run_task_on_host(
             if let Some(ref skip_path_raw) = original_with.skip_if_exists {
                 // Import needed types
                 use crate::handle::template::BlendTarget;
-                
+
                 // Template the path using the context directly
-                let template_result = handle.run_state.context.read().unwrap()
-                    .render_template(skip_path_raw, &handle.host, BlendTarget::NotTemplateModule, TemplateMode::Strict);
-                
+                let template_result = handle.run_state.context.read().unwrap().render_template(
+                    skip_path_raw,
+                    &handle.host,
+                    BlendTarget::NotTemplateModule,
+                    TemplateMode::Strict,
+                );
+
                 match template_result {
                     Ok(templated) => {
                         // Check if template was fully resolved
                         if templated.contains("{{") {
                             // Template variable not found - FAIL FAST
-                            return Err(handle.response.is_failed(&validate, 
-                                &format!("skip_if_exists: undefined variable in template '{}'", skip_path_raw)));
+                            return Err(handle.response.is_failed(
+                                &validate,
+                                &format!(
+                                    "skip_if_exists: undefined variable in template '{}'",
+                                    skip_path_raw
+                                ),
+                            ));
                         }
-                        
+
                         // Screen the templated result for illegal path characters
                         let skip_path = match crate::tasks::cmd_library::screen_path(&templated) {
                             Ok(path) => path,
-                            Err(e) => return Err(handle.response.is_failed(&validate, 
-                                &format!("skip_if_exists path invalid: {}", e)))
+                            Err(e) => {
+                                return Err(handle.response.is_failed(
+                                    &validate,
+                                    &format!("skip_if_exists path invalid: {}", e),
+                                ));
+                            }
                         };
-                        
+
                         use std::path::Path;
                         if Path::new(&skip_path).exists() {
                             return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
                         }
-                    },
+                    }
                     Err(e) => {
                         // Template error - FAIL FAST
-                        return Err(handle.response.is_failed(&validate, 
-                            &format!("skip_if_exists template error: {}", e)));
+                        return Err(handle.response.is_failed(
+                            &validate,
+                            &format!("skip_if_exists template error: {}", e),
+                        ));
                     }
                 }
             }
@@ -298,46 +415,66 @@ fn run_task_on_host(
 
         // see if there is any retry or delay logic in the task
         let mut retries = match evaluated.and.as_ref().is_some() {
-            false => 0, true => evaluated.and.as_ref().as_ref().unwrap().retry
+            false => 0,
+            true => evaluated.and.as_ref().as_ref().unwrap().retry,
         };
-            let delay = match evaluated.and.as_ref().is_some() {
-            false => 1, true => evaluated.and.as_ref().as_ref().unwrap().delay
+        let delay = match evaluated.and.as_ref().is_some() {
+            false => 1,
+            true => evaluated.and.as_ref().as_ref().unwrap().delay,
         };
-    
+
         // run the task as many times as defined by retry logic
         loop {
-            
             // here we finally call the actual task, everything around this is just support
             // for delegation, loops, and retries!
-            match run_task_on_host_inner(run_state, &connection, host, play, task, are_handlers, &handle, &validate, &evaluated) {
+            match run_task_on_host_inner(
+                run_state,
+                &connection,
+                host,
+                play,
+                task,
+                are_handlers,
+                &handle,
+                &validate,
+                &evaluated,
+            ) {
                 Err(e) => match retries {
                     // retries are used up
-                    0 => { return Err(e); },
+                    0 => {
+                        return Err(e);
+                    }
                     // we have retries left
-                    _ => { 
+                    _ => {
                         retries = retries - 1;
-                        run_state.visitor.read().unwrap().on_host_task_retry(&run_state.context, host, retries, delay);
+                        run_state.visitor.read().unwrap().on_host_task_retry(
+                            &run_state.context,
+                            host,
+                            retries,
+                            delay,
+                        );
                         if delay > 0 {
                             let duration = time::Duration::from_secs(delay);
                             thread::sleep(duration);
                         }
                     }
                 },
-                Ok(x) => { last = Some(Ok(x)); break }
+                Ok(x) => {
+                    last = Some(Ok(x));
+                    break;
+                }
             }
         }
-    
     }
 
     // looping over a list of no items should be impossible unless someone passed in a variable that was
     // an empty list
     if last.is_some() {
         return last.unwrap();
+    } else {
+        return Err(handle
+            .response
+            .is_failed(&validate, &String::from("with/items contained no entries")));
     }
-    else {
-        return Err(handle.response.is_failed(&validate, &String::from("with/items contained no entries")));    
-    }
-
 }
 
 // the "on this host" method body from _task
@@ -345,15 +482,15 @@ fn run_task_on_host_inner(
     run_state: &Arc<RunState>,
     _connection: &Arc<Mutex<dyn Connection>>,
     host: &Arc<RwLock<Host>>,
-    play: &Play, 
+    play: &Play,
     _task: &Task,
-    are_handlers: HandlerMode, 
+    are_handlers: HandlerMode,
     handle: &Arc<TaskHandle>,
     validate: &Arc<TaskRequest>,
-    evaluated: &EvaluatedTask) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
-
+    evaluated: &EvaluatedTask,
+) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
     let play_count = run_state.context.read().unwrap().play_count;
-    let modify_mode = ! run_state.visitor.read().unwrap().is_check_mode();
+    let modify_mode = !run_state.visitor.read().unwrap().is_check_mode();
 
     // access any pre and post-task modifier logic
     let action = &evaluated.action;
@@ -361,28 +498,28 @@ fn run_task_on_host_inner(
     let post_logic = &evaluated.and;
 
     // get the sudo settings from the play if available, if not see if they were set from the CLI
-    let mut sudo : Option<String> = match play.sudo.is_some() {
+    let mut sudo: Option<String> = match play.sudo.is_some() {
         true => play.sudo.clone(),
         // minor FIXME: parameters like this are usually set on the run_state
-        false => run_state.context.read().unwrap().sudo.clone() 
+        false => run_state.context.read().unwrap().sudo.clone(),
     };
     // see if the sudo template is configured, if not use the most basic default
     let sudo_template = match &play.sudo_template {
         None => String::from("/usr/bin/sudo -u '{{jet_sudo_user}}' {{jet_command}}"),
-        Some(x) => x.clone()
+        Some(x) => x.clone(),
     };
-    
+
     // is 'with' provided?
     if pre_logic.is_some() {
         let logic = pre_logic.as_ref().as_ref().unwrap();
         let my_host = host.read().unwrap();
-        if are_handlers == HandlerMode::Handlers  {
+        if are_handlers == HandlerMode::Handlers {
             // if we are running handlers at the moment, skip any un-notified handlers
-            if ! my_host.is_notified(play_count, &logic.subscribe.as_ref().unwrap().clone()) {
-                return Ok(handle.response.is_skipped(&Arc::clone(&validate))); 
+            if !my_host.is_notified(play_count, &logic.subscribe.as_ref().unwrap().clone()) {
+                return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
             }
         }
-        
+
         // if sudo was requested on the specific task override any sudo computations above
         if logic.sudo.is_some() {
             sudo = Some(logic.sudo.as_ref().unwrap().clone());
@@ -390,8 +527,8 @@ fn run_task_on_host_inner(
     }
 
     let sudo_details = SudoDetails {
-        user     : sudo.clone(),
-        template : sudo_template.clone()
+        user: sudo.clone(),
+        template: sudo_template.clone(),
     };
 
     // we're about to get to the task finite state machine guts.
@@ -410,8 +547,10 @@ fn run_task_on_host_inner(
     if run_state.visitor.read().unwrap().is_check_mode() {
         match qrc {
             Ok(ref qrc_ok) => match qrc_ok.status {
-                TaskStatus::NeedsPassive => { /* allow modules like !facts or set to execute */ },
-                _ => { return qrc; }
+                TaskStatus::NeedsPassive => { /* allow modules like !facts or set to execute */ }
+                _ => {
+                    return qrc;
+                }
             },
             _ => {}
         }
@@ -419,13 +558,10 @@ fn run_task_on_host_inner(
 
     // with the query completed, what action to perform next depends on the query results
 
-    let prelim_result : Result<Arc<TaskResponse>,Arc<TaskResponse>> = match qrc {
+    let prelim_result: Result<Arc<TaskResponse>, Arc<TaskResponse>> = match qrc {
         Ok(ref qrc_ok) => match qrc_ok.status {
-
             // matched indicates we don't need to do anything
-            TaskStatus::IsMatched => {
-                Ok(handle.response.is_matched(&Arc::clone(&query)))
-            },
+            TaskStatus::IsMatched => Ok(handle.response.is_matched(&Arc::clone(&query))),
 
             TaskStatus::NeedsCreation => match modify_mode {
                 true => {
@@ -435,15 +571,19 @@ fn run_task_on_host_inner(
                         Ok(ref crc_ok) => match crc_ok.status {
                             TaskStatus::IsCreated => crc,
                             // these are all module coding errors, should they occur, and cannot happen in normal operation
-                            _ => { panic!("module internal fsm state invalid (on create): {:?}", crc); }
+                            _ => {
+                                panic!("module internal fsm state invalid (on create): {:?}", crc);
+                            }
                         },
                         Err(ref crc_err) => match crc_err.status {
-                            TaskStatus::Failed  => crc,
-                            _ => { panic!("module internal fsm state invalid (on create), {:?}", crc); }
-                        }
+                            TaskStatus::Failed => crc,
+                            _ => {
+                                panic!("module internal fsm state invalid (on create), {:?}", crc);
+                            }
+                        },
                     }
-                },
-                false => Ok(handle.response.is_created(&Arc::clone(&query)))
+                }
+                false => Ok(handle.response.is_created(&Arc::clone(&query))),
             },
 
             TaskStatus::NeedsRemoval => match modify_mode {
@@ -453,14 +593,18 @@ fn run_task_on_host_inner(
                     match rrc {
                         Ok(ref rrc_ok) => match rrc_ok.status {
                             TaskStatus::IsRemoved => rrc,
-                            _ => { panic!("module internal fsm state invalid (on remove): {:?}", rrc); }
+                            _ => {
+                                panic!("module internal fsm state invalid (on remove): {:?}", rrc);
+                            }
                         },
                         Err(ref rrc_err) => match rrc_err.status {
-                            TaskStatus::Failed  => rrc,
-                            _ => { panic!("module internal fsm state invalid (on remove): {:?}", rrc); }
-                        }
+                            TaskStatus::Failed => rrc,
+                            _ => {
+                                panic!("module internal fsm state invalid (on remove): {:?}", rrc);
+                            }
+                        },
                     }
-                },
+                }
                 false => Ok(handle.response.is_removed(&Arc::clone(&query))),
             },
 
@@ -471,15 +615,21 @@ fn run_task_on_host_inner(
                     match mrc {
                         Ok(ref mrc_ok) => match mrc_ok.status {
                             TaskStatus::IsModified => mrc,
-                            _ => { panic!("module internal fsm state invalid (on modify): {:?}", mrc); }
-                        }
-                        Err(ref mrc_err)  => match mrc_err.status {
-                            TaskStatus::Failed  => mrc,
-                            _ => { panic!("module internal fsm state invalid (on modify): {:?}", mrc); }
-                        }
+                            _ => {
+                                panic!("module internal fsm state invalid (on modify): {:?}", mrc);
+                            }
+                        },
+                        Err(ref mrc_err) => match mrc_err.status {
+                            TaskStatus::Failed => mrc,
+                            _ => {
+                                panic!("module internal fsm state invalid (on modify): {:?}", mrc);
+                            }
+                        },
                     }
-                },
-                false => Ok(handle.response.is_modified(&Arc::clone(&query), qrc_ok.changes.clone()))
+                }
+                false => Ok(handle
+                    .response
+                    .is_modified(&Arc::clone(&query), qrc_ok.changes.clone())),
             },
 
             TaskStatus::NeedsExecution => match modify_mode {
@@ -490,15 +640,19 @@ fn run_task_on_host_inner(
                         Ok(ref erc_ok) => match erc_ok.status {
                             TaskStatus::IsExecuted => erc,
                             TaskStatus::IsPassive => erc,
-                            _ => { panic!("module internal fsm state invalid (on execute): {:?}", erc); }
-                        }
-                        Err(ref erc_err)  => match erc_err.status {
-                            TaskStatus::Failed  => erc,
-                            _ => { panic!("module internal fsm state invalid (on execute): {:?}", erc); }
-                        }
+                            _ => {
+                                panic!("module internal fsm state invalid (on execute): {:?}", erc);
+                            }
+                        },
+                        Err(ref erc_err) => match erc_err.status {
+                            TaskStatus::Failed => erc,
+                            _ => {
+                                panic!("module internal fsm state invalid (on execute): {:?}", erc);
+                            }
+                        },
                     }
-                },
-                false => Ok(handle.response.is_executed(&Arc::clone(&query)))
+                }
+                false => Ok(handle.response.is_executed(&Arc::clone(&query))),
             },
 
             TaskStatus::NeedsPassive => {
@@ -507,43 +661,50 @@ fn run_task_on_host_inner(
                 match prc {
                     Ok(ref prc_ok) => match prc_ok.status {
                         TaskStatus::IsPassive => prc,
-                        _ => { panic!("module internal fsm state invalid (on passive): {:?}", prc); }
-                    }
-                    Err(ref prc_err)  => match prc_err.status {
-                        TaskStatus::Failed  => prc,
-                        _ => { panic!("module internal fsm state invalid (on passive): {:?}", prc); }
-                    }
+                        _ => {
+                            panic!("module internal fsm state invalid (on passive): {:?}", prc);
+                        }
+                    },
+                    Err(ref prc_err) => match prc_err.status {
+                        TaskStatus::Failed => prc,
+                        _ => {
+                            panic!("module internal fsm state invalid (on passive): {:?}", prc);
+                        }
+                    },
                 }
-            },
+            }
 
             // these panic states should never really happen unless there is a module coding error
             // it is unacceptable for a module to deliberately panic, they should
             // always return a TaskResponse.
-
-            TaskStatus::Failed => { panic!("module returned failure inside an Ok(): {:?}", qrc); },           
-            _ => { panic!("module internal fsm state unknown (on query): {:?}", qrc); }
-
+            TaskStatus::Failed => {
+                panic!("module returned failure inside an Ok(): {:?}", qrc);
+            }
+            _ => {
+                panic!("module internal fsm state unknown (on query): {:?}", qrc);
+            }
         },
         Err(x) => match x.status {
             TaskStatus::Failed => Err(x),
-            _ => { panic!("module returned a non-failure code inside an Err: {:?}", x); }
-        }
+            _ => {
+                panic!("module returned a non-failure code inside an Err: {:?}", x);
+            }
+        },
     };
 
     // now that we've got a result, whether we use that result depends
     // on whether ignore_errors was set.
 
     let result = match prelim_result {
-        Ok(x) => Ok(x), 
-        Err(y) =>  {
+        Ok(x) => Ok(x),
+        Err(y) => {
             if post_logic.is_some() {
                 let logic = post_logic.as_ref().as_ref().unwrap();
                 match logic.ignore_errors {
                     true => Ok(y),
-                    false => Err(y)
+                    false => Err(y),
                 }
-            }
-            else {
+            } else {
                 Err(y)
             }
         }
@@ -557,11 +718,18 @@ fn run_task_on_host_inner(
             let notify = logic.notify.as_ref().unwrap().clone();
             let status = &result.as_ref().unwrap().status;
             match status {
-                TaskStatus::IsCreated | TaskStatus::IsModified | TaskStatus::IsRemoved | TaskStatus::IsExecuted => {
-                    run_state.visitor.read().unwrap().on_notify_handler(host, &notify.clone());
+                TaskStatus::IsCreated
+                | TaskStatus::IsModified
+                | TaskStatus::IsRemoved
+                | TaskStatus::IsExecuted => {
+                    run_state
+                        .visitor
+                        .read()
+                        .unwrap()
+                        .on_notify_handler(host, &notify.clone());
                     host.write().unwrap().notify(play_count, &notify.clone());
-                },
-                _ => { }
+                }
+                _ => {}
             }
         }
     }

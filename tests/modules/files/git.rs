@@ -66,7 +66,10 @@ fn test_git_task_with_ssh_options() {
 
     assert!(task.ssh_options.is_some());
     let opts = task.ssh_options.unwrap();
-    assert_eq!(opts.get("IdentityFile"), Some(&"~/.ssh/deploy_key".to_string()));
+    assert_eq!(
+        opts.get("IdentityFile"),
+        Some(&"~/.ssh/deploy_key".to_string())
+    );
     assert_eq!(opts.get("Port"), Some(&"2222".to_string()));
 }
 
@@ -112,7 +115,7 @@ attributes:
 
     let task: Result<GitTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Deploy application code".to_string()));
     assert_eq!(task.repo, "https://github.com/mycompany/myapp.git");
@@ -131,7 +134,7 @@ path: /tmp/simple-repo
 
     let task: Result<GitTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.repo, "https://github.com/simple/repo.git");
     assert_eq!(task.path, "/tmp/simple-repo");
@@ -152,7 +155,7 @@ and:
 
     let task: Result<GitTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.repo.contains("{{ git_repo_url }}"));
     assert!(task.path.contains("{{ app_name }}"));
@@ -175,10 +178,13 @@ ssh_options:
 
     let task: Result<GitTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.ssh_options.is_some());
     let opts = task.ssh_options.unwrap();
     assert_eq!(opts.len(), 3);
-    assert_eq!(opts.get("IdentityFile"), Some(&"/home/deploy/.ssh/id_rsa".to_string()));
+    assert_eq!(
+        opts.get("IdentityFile"),
+        Some(&"/home/deploy/.ssh/id_rsa".to_string())
+    );
 }

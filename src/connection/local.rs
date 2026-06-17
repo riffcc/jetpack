@@ -14,55 +14,65 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::connection::connection::Connection;
 use crate::connection::command::CommandResult;
-use crate::playbooks::context::PlaybookContext;
-use crate::connection::factory::ConnectionFactory;
 use crate::connection::command::Forward;
+use crate::connection::connection::Connection;
+use crate::connection::factory::ConnectionFactory;
+use crate::playbooks::context::PlaybookContext;
 
-use crate::inventory::hosts::Host;
 use crate::handle::response::Response;
-use crate::tasks::{TaskRequest,TaskResponse};
+use crate::inventory::hosts::Host;
+use crate::tasks::{TaskRequest, TaskResponse};
 
+use crate::Inventory;
+use crate::util::io::jet_file_open;
+use std::env;
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
-use std::process::Command;
-use crate::Inventory;
-use crate::util::io::jet_file_open;
-use std::fs::File;
-use std::path::Path;
-use std::io::Write;
-use std::env;
 
 // implementation for both the local connection factory and local connections
 
 #[allow(dead_code)]
 pub struct LocalFactory {
     local_connection: Arc<Mutex<dyn Connection>>,
-    inventory: Arc<RwLock<Inventory>>
+    inventory: Arc<RwLock<Inventory>>,
 }
 
 impl LocalFactory {
     pub fn new(inventory: &Arc<RwLock<Inventory>>) -> Self {
-
         // we require a localhost to be in the inventory and immediately construct a connection to it
 
-        let host = inventory.read().expect("inventory read").get_host(&String::from("localhost"));
+        let host = inventory
+            .read()
+            .expect("inventory read")
+            .get_host(&String::from("localhost"));
         let mut lc = LocalConnection::new(&Arc::clone(&host));
         lc.connect().expect("connection ok");
         Self {
             inventory: Arc::clone(&inventory),
-            local_connection: Arc::new(Mutex::new(lc))
+            local_connection: Arc::new(Mutex::new(lc)),
         }
     }
 }
 impl ConnectionFactory for LocalFactory {
-    fn get_connection(&self, _context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) -> Result<Arc<Mutex<dyn Connection>>,String> {
+    fn get_connection(
+        &self,
+        _context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+    ) -> Result<Arc<Mutex<dyn Connection>>, String> {
         // rather than producing new connections, this always returns a clone of the already established local connection from the constructor
         // In local mode, all hosts are actually localhost, so copy the OS type from localhost to the target host
         {
-            let localhost = self.inventory.read().expect("inventory read").get_host(&String::from("localhost"));
+            let localhost = self
+                .inventory
+                .read()
+                .expect("inventory read")
+                .get_host(&String::from("localhost"));
             let localhost_os = localhost.read().expect("localhost read").os_type;
             if let Some(os_type) = localhost_os {
                 let mut host_write = host.write().expect("host write");
@@ -71,14 +81,16 @@ impl ConnectionFactory for LocalFactory {
                 }
             }
         }
-        let conn : Arc<Mutex<dyn Connection>> = Arc::clone(&self.local_connection);
+        let conn: Arc<Mutex<dyn Connection>> = Arc::clone(&self.local_connection);
         return Ok(conn);
     }
-    fn get_local_connection(&self, _context: &Arc<RwLock<PlaybookContext>>) -> Result<Arc<Mutex<dyn Connection>>, String> {
-        let conn : Arc<Mutex<dyn Connection>> = Arc::clone(&self.local_connection);
+    fn get_local_connection(
+        &self,
+        _context: &Arc<RwLock<PlaybookContext>>,
+    ) -> Result<Arc<Mutex<dyn Connection>>, String> {
+        let conn: Arc<Mutex<dyn Connection>> = Arc::clone(&self.local_connection);
         return Ok(conn);
     }
-
 }
 
 pub struct LocalConnection {
@@ -87,7 +99,9 @@ pub struct LocalConnection {
 
 impl LocalConnection {
     pub fn new(host: &Arc<RwLock<Host>>) -> Self {
-        Self { host: Arc::clone(&host) }
+        Self {
+            host: Arc::clone(&host),
+        }
     }
 
     fn trim_newlines(&self, s: &mut String) {
@@ -101,94 +115,152 @@ impl LocalConnection {
 }
 
 impl Connection for LocalConnection {
-
-    fn whoami(&self) -> Result<String,String> {
+    fn whoami(&self) -> Result<String, String> {
         // get the currently logged in user.
         let user_result = env::var("USER");
         return match user_result {
             Ok(x) => Ok(x),
-            Err(y) => Err(format!("environment variable $USER: {y}"))
+            Err(y) => Err(format!("environment variable $USER: {y}")),
         };
     }
 
-    fn connect(&mut self) -> Result<(),String> {
+    fn connect(&mut self) -> Result<(), String> {
         // upon connection make sure the localhost detection routine runs
         let result = detect_os(&self.host);
         if result.is_ok() {
             return Ok(());
-        }
-        else {
+        } else {
             let (_rc, out) = result.unwrap_err();
             return Err(out);
         }
     }
 
-    fn run_command(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, cmd: &String, _forward: Forward) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
+    fn run_command(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        cmd: &String,
+        _forward: Forward,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let mut base = Command::new("sh");
         let cmd2 = format!("LANG=C {}", cmd);
         let command = base.arg("-c").arg(cmd2).arg("2>&1");
         match command.output() {
-            Ok(x) => {
-                match x.status.code() {
-                    Some(rc) => {
-                        let mut out = convert_out(&x.stdout,&x.stderr);
-                        self.trim_newlines(&mut out);
-                        return Ok(response.command_ok(request,&Arc::new(Some(CommandResult { cmd: cmd.clone(), out: out.clone(), rc: rc }))));
-                    },
-                    None => {
-                        return Err(response.command_failed(request, &Arc::new(Some(CommandResult { cmd: cmd.clone(), out: String::from(""), rc: 418 }))));
-                    }
+            Ok(x) => match x.status.code() {
+                Some(rc) => {
+                    let mut out = convert_out(&x.stdout, &x.stderr);
+                    self.trim_newlines(&mut out);
+                    return Ok(response.command_ok(
+                        request,
+                        &Arc::new(Some(CommandResult {
+                            cmd: cmd.clone(),
+                            out: out.clone(),
+                            rc: rc,
+                        })),
+                    ));
+                }
+                None => {
+                    return Err(response.command_failed(
+                        request,
+                        &Arc::new(Some(CommandResult {
+                            cmd: cmd.clone(),
+                            out: String::from(""),
+                            rc: 418,
+                        })),
+                    ));
                 }
             },
             Err(_x) => {
-                return Err(response.command_failed(request, &Arc::new(Some(CommandResult { cmd: cmd.clone(), out: String::from(""), rc: 404 }))));
+                return Err(response.command_failed(
+                    request,
+                    &Arc::new(Some(CommandResult {
+                        cmd: cmd.clone(),
+                        out: String::from(""),
+                        rc: 404,
+                    })),
+                ));
             }
         };
     }
 
-    fn fetch_file(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, remote_path: &String) -> Result<Vec<u8>, Arc<TaskResponse>> {
-        std::fs::read(Path::new(remote_path)).map_err(|e| {
-            response.is_failed(request, &format!("fetch failed: {:?}", e))
-        })
+    fn fetch_file(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        remote_path: &String,
+    ) -> Result<Vec<u8>, Arc<TaskResponse>> {
+        std::fs::read(Path::new(remote_path))
+            .map_err(|e| response.is_failed(request, &format!("fetch failed: {:?}", e)))
     }
 
-    fn copy_file(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, src: &Path, remote_path: &String) -> Result<(), Arc<TaskResponse>> {
+    fn copy_file(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        src: &Path,
+        remote_path: &String,
+    ) -> Result<(), Arc<TaskResponse>> {
         // FIXME: this (temporary) implementation currently loads the file contents into memory which we do not want
         // copy the files with system calls instead.
         let remote_path2 = Path::new(remote_path);
         let result = std::fs::copy(src, &remote_path2);
         return match result {
             Ok(_x) => Ok(()),
-            Err(e) => { return Err(response.is_failed(&request, &format!("copy failed: {:?}", e))) }
-        }
+            Err(e) => return Err(response.is_failed(&request, &format!("copy failed: {:?}", e))),
+        };
     }
 
-    fn write_data(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, data: &String, remote_path: &String) -> Result<(),Arc<TaskResponse>> {
+    fn write_data(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        data: &String,
+        remote_path: &String,
+    ) -> Result<(), Arc<TaskResponse>> {
         let path = Path::new(&remote_path);
         if path.exists() {
             let mut file = match jet_file_open(path) {
                 Ok(x) => x,
-                Err(y) => return Err(response.is_failed(&request, &format!("failed to open: {}: {:?}", remote_path, y)))
+                Err(y) => {
+                    return Err(response.is_failed(
+                        &request,
+                        &format!("failed to open: {}: {:?}", remote_path, y),
+                    ));
+                }
             };
             let write_result = write!(file, "{}", data);
             match write_result {
-                Ok(_) => {},
-                Err(y) => return Err(response.is_failed(&request, &format!("failed to write: {}: {:?}", remote_path, y)))
+                Ok(_) => {}
+                Err(y) => {
+                    return Err(response.is_failed(
+                        &request,
+                        &format!("failed to write: {}: {:?}", remote_path, y),
+                    ));
+                }
             };
         } else {
             let mut file = match File::create(&path) {
                 Ok(x) => x,
-                Err(y) => return Err(response.is_failed(&request, &format!("failed to create: {}: {:?}", remote_path, y)))
+                Err(y) => {
+                    return Err(response.is_failed(
+                        &request,
+                        &format!("failed to create: {}: {:?}", remote_path, y),
+                    ));
+                }
             };
             let write_result = write!(file, "{}", data);
             match write_result {
-                Ok(_) => {},
-                Err(y) => return Err(response.is_failed(&request, &format!("failed to write: {}: {:?}", remote_path, y)))
+                Ok(_) => {}
+                Err(y) => {
+                    return Err(response.is_failed(
+                        &request,
+                        &format!("failed to write: {}: {:?}", remote_path, y),
+                    ));
+                }
             };
         }
         return Ok(());
     }
-
 }
 
 pub fn convert_out(output: &Vec<u8>, err: &Vec<u8>) -> String {
@@ -207,26 +279,28 @@ pub fn convert_out(output: &Vec<u8>, err: &Vec<u8>) -> String {
     return base.trim().to_string();
 }
 
-fn detect_os(host: &Arc<RwLock<Host>>) -> Result<(),(i32, String)> {
+fn detect_os(host: &Arc<RwLock<Host>>) -> Result<(), (i32, String)> {
     // upon connection we run uname -a on connect to check the OS type.
-    
+
     let mut base = Command::new("uname");
     let command = base.arg("-a");
     return match command.output() {
         Ok(x) => match x.status.code() {
-            Some(0)      => {
-                let out = convert_out(&x.stdout,&x.stderr);
+            Some(0) => {
+                let out = convert_out(&x.stdout, &x.stderr);
                 {
                     match host.write().unwrap().set_os_info(&out) {
-                        Ok(_) => { },
-                        Err(_) => { return Err((500, String::from("failed to set OS info"))); }
+                        Ok(_) => {}
+                        Err(_) => {
+                            return Err((500, String::from("failed to set OS info")));
+                        }
                     }
                 }
                 Ok(())
             }
             Some(status) => Err((status, convert_out(&x.stdout, &x.stderr))),
-            _            => Err((418, String::from("uname -a failed without status code")))
+            _ => Err((418, String::from("uname -a failed without status code"))),
         },
-        Err(_x) => Err((418, String::from("uname -a failed without status code")))
-    }
+        Err(_x) => Err((418, String::from("uname -a failed without status code"))),
+    };
 }

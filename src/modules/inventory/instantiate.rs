@@ -67,14 +67,14 @@
 //! - Existing fields not in the new config are preserved
 //! - This allows incremental updates without losing customizations
 
-use crate::tasks::*;
-use crate::tasks::logic::{PreLogicInput, PostLogicInput};
 use crate::handle::handle::TaskHandle;
+use crate::tasks::logic::{PostLogicInput, PreLogicInput};
+use crate::tasks::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 const MODULE: &str = "instantiate";
 
@@ -149,7 +149,7 @@ struct InstantiateAction {
     pub node_distribution: Vec<(String, String)>, // (hostname, node)
     pub provision_template: ProvisionTemplate,
     pub groups: Vec<String>,
-    pub vmid_start: Option<u64>,  // Optional - Proxmox auto-assigns if not specified
+    pub vmid_start: Option<u64>, // Optional - Proxmox auto-assigns if not specified
     pub ip_template: Option<String>,
     pub ip_start: u64,
     pub gateway: Option<String>,
@@ -175,9 +175,11 @@ fn expand_pattern(pattern: &str) -> Result<Vec<String>, String> {
                 let start_str = parts[0];
                 let end_str = parts[1];
 
-                let start: u64 = start_str.parse()
+                let start: u64 = start_str
+                    .parse()
                     .map_err(|_| format!("Invalid range start: {}", start_str))?;
-                let end: u64 = end_str.parse()
+                let end: u64 = end_str
+                    .parse()
                     .map_err(|_| format!("Invalid range end: {}", end_str))?;
 
                 // Determine padding width from the original string
@@ -209,7 +211,8 @@ fn expand_pattern(pattern: &str) -> Result<Vec<String>, String> {
 
 /// Distribute hostnames across nodes (round-robin)
 fn distribute_to_nodes(hostnames: &[String], nodes: &[String]) -> Vec<(String, String)> {
-    hostnames.iter()
+    hostnames
+        .iter()
         .enumerate()
         .map(|(i, hostname)| {
             let node = &nodes[i % nodes.len()];
@@ -219,59 +222,90 @@ fn distribute_to_nodes(hostnames: &[String], nodes: &[String]) -> Vec<(String, S
 }
 
 impl IsTask for InstantiateTask {
-    fn get_module(&self) -> String { String::from(MODULE) }
-    fn get_name(&self) -> Option<String> { self.name.clone() }
-    fn get_with(&self) -> Option<PreLogicInput> { self.with.clone() }
+    fn get_module(&self) -> String {
+        String::from(MODULE)
+    }
+    fn get_name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    fn get_with(&self) -> Option<PreLogicInput> {
+        self.with.clone()
+    }
 
-    fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        let inventory_path = handle.template.string(request, tm, &String::from("inventory_path"), &self.inventory_path)?;
-        let pattern = handle.template.string(request, tm, &String::from("pattern"), &self.pattern)?;
+    fn evaluate(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        let inventory_path = handle.template.string(
+            request,
+            tm,
+            &String::from("inventory_path"),
+            &self.inventory_path,
+        )?;
+        let pattern =
+            handle
+                .template
+                .string(request, tm, &String::from("pattern"), &self.pattern)?;
 
         let hostnames = expand_pattern(&pattern).map_err(|e| {
-            handle.response.is_failed(request, &format!("Failed to expand pattern: {}", e))
+            handle
+                .response
+                .is_failed(request, &format!("Failed to expand pattern: {}", e))
         })?;
 
         if self.nodes.is_empty() {
-            return Err(handle.response.is_failed(request, &String::from("nodes list cannot be empty")));
+            return Err(handle
+                .response
+                .is_failed(request, &String::from("nodes list cannot be empty")));
         }
 
         let node_distribution = distribute_to_nodes(&hostnames, &self.nodes);
 
         let groups = self.groups.clone().unwrap_or_default();
         let ip_start = self.ip_start.unwrap_or(1);
-        let state = self.state.clone().unwrap_or_else(|| String::from("present"));
+        let state = self
+            .state
+            .clone()
+            .unwrap_or_else(|| String::from("present"));
 
         // Template the provision fields that might have variables
         let mut provision_template = self.provision.clone();
         if let Some(ref keys) = provision_template.authorized_keys {
-            provision_template.authorized_keys = Some(
-                handle.template.string(request, tm, &String::from("authorized_keys"), keys)?
-            );
+            provision_template.authorized_keys = Some(handle.template.string(
+                request,
+                tm,
+                &String::from("authorized_keys"),
+                keys,
+            )?);
         }
 
-        Ok(
-            EvaluatedTask {
-                action: Arc::new(InstantiateAction {
-                    inventory_path: PathBuf::from(inventory_path),
-                    hostnames,
-                    node_distribution,
-                    provision_template,
-                    groups,
-                    vmid_start: self.vmid_start,
-                    ip_template: self.ip_template.clone(),
-                    ip_start,
-                    gateway: self.gateway.clone(),
-                    state,
-                }),
-                with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-                and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-            }
-        )
+        Ok(EvaluatedTask {
+            action: Arc::new(InstantiateAction {
+                inventory_path: PathBuf::from(inventory_path),
+                hostnames,
+                node_distribution,
+                provision_template,
+                groups,
+                vmid_start: self.vmid_start,
+                ip_template: self.ip_template.clone(),
+                ip_start,
+                gateway: self.gateway.clone(),
+                state,
+            }),
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
 impl IsAction for InstantiateAction {
-    fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
             TaskRequestType::Query => self.query(handle, request),
             TaskRequestType::Execute => self.execute(handle, request),
@@ -281,7 +315,11 @@ impl IsAction for InstantiateAction {
 }
 
 impl InstantiateAction {
-    fn query(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn query(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         // Check if all host_vars exist and match
         let host_vars_dir = self.inventory_path.join("host_vars");
 
@@ -316,16 +354,24 @@ impl InstantiateAction {
         Ok(handle.response.is_matched(request))
     }
 
-    fn execute(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn execute(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let host_vars_dir = self.inventory_path.join("host_vars");
         let groups_dir = self.inventory_path.join("groups");
 
         // Ensure directories exist
         fs::create_dir_all(&host_vars_dir).map_err(|e| {
-            handle.response.is_failed(request, &format!("Failed to create host_vars dir: {}", e))
+            handle
+                .response
+                .is_failed(request, &format!("Failed to create host_vars dir: {}", e))
         })?;
         fs::create_dir_all(&groups_dir).map_err(|e| {
-            handle.response.is_failed(request, &format!("Failed to create groups dir: {}", e))
+            handle
+                .response
+                .is_failed(request, &format!("Failed to create groups dir: {}", e))
         })?;
 
         if self.state == "absent" {
@@ -342,15 +388,15 @@ impl InstantiateAction {
             let mut provision = serde_yaml::Mapping::new();
             provision.insert(
                 serde_yaml::Value::String("type".to_string()),
-                serde_yaml::Value::String(self.provision_template.provision_type.clone())
+                serde_yaml::Value::String(self.provision_template.provision_type.clone()),
             );
             provision.insert(
                 serde_yaml::Value::String("cluster".to_string()),
-                serde_yaml::Value::String(self.provision_template.cluster.clone())
+                serde_yaml::Value::String(self.provision_template.cluster.clone()),
             );
             provision.insert(
                 serde_yaml::Value::String("node".to_string()),
-                serde_yaml::Value::String(node.clone())
+                serde_yaml::Value::String(node.clone()),
             );
 
             // VMID only if specified (otherwise Proxmox auto-assigns)
@@ -358,7 +404,7 @@ impl InstantiateAction {
                 let vmid = vmid_start + i as u64;
                 provision.insert(
                     serde_yaml::Value::String("vmid".to_string()),
-                    serde_yaml::Value::String(vmid.to_string())
+                    serde_yaml::Value::String(vmid.to_string()),
                 );
             }
 
@@ -366,7 +412,7 @@ impl InstantiateAction {
             let short_hostname = hostname.split('.').next().unwrap_or(hostname);
             provision.insert(
                 serde_yaml::Value::String("hostname".to_string()),
-                serde_yaml::Value::String(short_hostname.to_string())
+                serde_yaml::Value::String(short_hostname.to_string()),
             );
 
             // Network config - different for VM vs LXC
@@ -378,17 +424,17 @@ impl InstantiateAction {
                     // VMs: net0 is just bridge config, IP stored separately for Dragonfly
                     provision.insert(
                         serde_yaml::Value::String("net0".to_string()),
-                        serde_yaml::Value::String("virtio,bridge=vmbr0".to_string())
+                        serde_yaml::Value::String("virtio,bridge=vmbr0".to_string()),
                     );
                     // Store IP for Dragonfly/DHCP reservation
                     provision.insert(
                         serde_yaml::Value::String("ip".to_string()),
-                        serde_yaml::Value::String(ip.clone())
+                        serde_yaml::Value::String(ip.clone()),
                     );
                     if let Some(ref gw) = self.gateway {
                         provision.insert(
                             serde_yaml::Value::String("gateway".to_string()),
-                            serde_yaml::Value::String(gw.clone())
+                            serde_yaml::Value::String(gw.clone()),
                         );
                     }
                 } else {
@@ -396,7 +442,7 @@ impl InstantiateAction {
                     if ip_template == "dhcp" {
                         provision.insert(
                             serde_yaml::Value::String("net0".to_string()),
-                            serde_yaml::Value::String("name=eth0,bridge=vmbr0,ip=dhcp".to_string())
+                            serde_yaml::Value::String("name=eth0,bridge=vmbr0,ip=dhcp".to_string()),
                         );
                     } else {
                         let mut net0 = format!("name=eth0,bridge=vmbr0,ip={}", ip);
@@ -405,7 +451,7 @@ impl InstantiateAction {
                         }
                         provision.insert(
                             serde_yaml::Value::String("net0".to_string()),
-                            serde_yaml::Value::String(net0)
+                            serde_yaml::Value::String(net0),
                         );
                     }
                 }
@@ -413,7 +459,7 @@ impl InstantiateAction {
                 // VM with no IP specified - just bridge
                 provision.insert(
                     serde_yaml::Value::String("net0".to_string()),
-                    serde_yaml::Value::String("virtio,bridge=vmbr0".to_string())
+                    serde_yaml::Value::String("virtio,bridge=vmbr0".to_string()),
                 );
             }
 
@@ -421,67 +467,67 @@ impl InstantiateAction {
             if let Some(ref memory) = self.provision_template.memory {
                 provision.insert(
                     serde_yaml::Value::String("memory".to_string()),
-                    serde_yaml::Value::String(memory.clone())
+                    serde_yaml::Value::String(memory.clone()),
                 );
             }
             if let Some(ref cores) = self.provision_template.cores {
                 provision.insert(
                     serde_yaml::Value::String("cores".to_string()),
-                    serde_yaml::Value::String(cores.clone())
+                    serde_yaml::Value::String(cores.clone()),
                 );
             }
             if let Some(ref ostemplate) = self.provision_template.ostemplate {
                 provision.insert(
                     serde_yaml::Value::String("ostemplate".to_string()),
-                    serde_yaml::Value::String(ostemplate.clone())
+                    serde_yaml::Value::String(ostemplate.clone()),
                 );
             }
             if let Some(ref storage) = self.provision_template.storage {
                 provision.insert(
                     serde_yaml::Value::String("storage".to_string()),
-                    serde_yaml::Value::String(storage.clone())
+                    serde_yaml::Value::String(storage.clone()),
                 );
             }
             if let Some(ref rootfs_size) = self.provision_template.rootfs_size {
                 provision.insert(
                     serde_yaml::Value::String("rootfs_size".to_string()),
-                    serde_yaml::Value::String(rootfs_size.clone())
+                    serde_yaml::Value::String(rootfs_size.clone()),
                 );
             }
             if let Some(ref unprivileged) = self.provision_template.unprivileged {
                 provision.insert(
                     serde_yaml::Value::String("unprivileged".to_string()),
-                    serde_yaml::Value::String(unprivileged.clone())
+                    serde_yaml::Value::String(unprivileged.clone()),
                 );
             }
             if let Some(ref start_on_create) = self.provision_template.start_on_create {
                 provision.insert(
                     serde_yaml::Value::String("start_on_create".to_string()),
-                    serde_yaml::Value::String(start_on_create.clone())
+                    serde_yaml::Value::String(start_on_create.clone()),
                 );
             }
             if let Some(ref features) = self.provision_template.features {
                 provision.insert(
                     serde_yaml::Value::String("features".to_string()),
-                    serde_yaml::Value::String(features.clone())
+                    serde_yaml::Value::String(features.clone()),
                 );
             }
             if let Some(ref authorized_keys) = self.provision_template.authorized_keys {
                 provision.insert(
                     serde_yaml::Value::String("authorized_keys".to_string()),
-                    serde_yaml::Value::String(authorized_keys.clone())
+                    serde_yaml::Value::String(authorized_keys.clone()),
                 );
             }
             if let Some(ref ssh_user) = self.provision_template.ssh_user {
                 provision.insert(
                     serde_yaml::Value::String("ssh_user".to_string()),
-                    serde_yaml::Value::String(ssh_user.clone())
+                    serde_yaml::Value::String(ssh_user.clone()),
                 );
             }
             if let Some(ref nameserver) = self.provision_template.nameserver {
                 provision.insert(
                     serde_yaml::Value::String("nameserver".to_string()),
-                    serde_yaml::Value::String(nameserver.clone())
+                    serde_yaml::Value::String(nameserver.clone()),
                 );
             }
 
@@ -489,7 +535,7 @@ impl InstantiateAction {
             for (key, value) in &self.provision_template.extra {
                 provision.insert(
                     serde_yaml::Value::String(key.clone()),
-                    serde_yaml::Value::String(value.clone())
+                    serde_yaml::Value::String(value.clone()),
                 );
             }
 
@@ -497,13 +543,15 @@ impl InstantiateAction {
             let mut host_vars = serde_yaml::Mapping::new();
             host_vars.insert(
                 serde_yaml::Value::String("provision".to_string()),
-                serde_yaml::Value::Mapping(provision)
+                serde_yaml::Value::Mapping(provision),
             );
 
             // If file exists, merge with LWW semantics
             if host_file.exists() {
                 if let Ok(existing_content) = fs::read_to_string(&host_file) {
-                    if let Ok(existing_doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&existing_content) {
+                    if let Ok(existing_doc) =
+                        serde_yaml::from_str::<serde_yaml::Mapping>(&existing_content)
+                    {
                         // Merge: new values win, but preserve keys not in new config
                         for (key, value) in existing_doc {
                             if key.as_str() != Some("provision") {
@@ -516,9 +564,10 @@ impl InstantiateAction {
             }
 
             // Write host_vars file
-            let vmid_comment = self.vmid_start.map(|start| {
-                format!("\n# VMID: {}", start + i as u64)
-            }).unwrap_or_default();
+            let vmid_comment = self
+                .vmid_start
+                .map(|start| format!("\n# VMID: {}", start + i as u64))
+                .unwrap_or_default();
 
             let yaml_str = format!(
                 "# Auto-generated by instantiate module\n# Hostname: {}\n# Node: {}{}\n\n{}",
@@ -529,7 +578,10 @@ impl InstantiateAction {
             );
 
             fs::write(&host_file, yaml_str).map_err(|e| {
-                handle.response.is_failed(request, &format!("Failed to write host_vars for {}: {}", hostname, e))
+                handle.response.is_failed(
+                    request,
+                    &format!("Failed to write host_vars for {}: {}", hostname, e),
+                )
             })?;
         }
 
@@ -541,7 +593,9 @@ impl InstantiateAction {
             let mut hosts: Vec<String> = if group_file.exists() {
                 if let Ok(content) = fs::read_to_string(&group_file) {
                     if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content) {
-                        if let Some(serde_yaml::Value::Sequence(seq)) = doc.get(&serde_yaml::Value::String("hosts".to_string())) {
+                        if let Some(serde_yaml::Value::Sequence(seq)) =
+                            doc.get(&serde_yaml::Value::String("hosts".to_string()))
+                        {
                             seq.iter()
                                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
                                 .collect()
@@ -573,29 +627,43 @@ impl InstantiateAction {
             group_doc.insert(
                 serde_yaml::Value::String("hosts".to_string()),
                 serde_yaml::Value::Sequence(
-                    hosts.iter().map(|h| serde_yaml::Value::String(h.clone())).collect()
-                )
+                    hosts
+                        .iter()
+                        .map(|h| serde_yaml::Value::String(h.clone()))
+                        .collect(),
+                ),
             );
 
             // Write group file
-            let yaml_str = serde_yaml::to_string(&serde_yaml::Value::Mapping(group_doc))
-                .unwrap_or_default();
+            let yaml_str =
+                serde_yaml::to_string(&serde_yaml::Value::Mapping(group_doc)).unwrap_or_default();
 
             fs::write(&group_file, yaml_str).map_err(|e| {
-                handle.response.is_failed(request, &format!("Failed to write group {}: {}", group, e))
+                handle
+                    .response
+                    .is_failed(request, &format!("Failed to write group {}: {}", group, e))
             })?;
         }
 
         Ok(handle.response.is_created(request))
     }
 
-    fn remove_hosts(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, host_vars_dir: &PathBuf, groups_dir: &PathBuf) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn remove_hosts(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        host_vars_dir: &PathBuf,
+        groups_dir: &PathBuf,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         // Remove host_vars files
         for hostname in &self.hostnames {
             let path = host_vars_dir.join(hostname);
             if path.exists() {
                 fs::remove_file(&path).map_err(|e| {
-                    handle.response.is_failed(request, &format!("Failed to remove host_vars for {}: {}", hostname, e))
+                    handle.response.is_failed(
+                        request,
+                        &format!("Failed to remove host_vars for {}: {}", hostname, e),
+                    )
                 })?;
             }
         }
@@ -606,7 +674,9 @@ impl InstantiateAction {
             if group_file.exists() {
                 if let Ok(content) = fs::read_to_string(&group_file) {
                     if let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content) {
-                        if let Some(serde_yaml::Value::Sequence(seq)) = doc.get_mut(&serde_yaml::Value::String("hosts".to_string())) {
+                        if let Some(serde_yaml::Value::Sequence(seq)) =
+                            doc.get_mut(&serde_yaml::Value::String("hosts".to_string()))
+                        {
                             seq.retain(|v| {
                                 if let Some(s) = v.as_str() {
                                     !self.hostnames.contains(&s.to_string())

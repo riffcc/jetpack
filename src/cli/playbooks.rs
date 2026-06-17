@@ -5,35 +5,35 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::cli::parser::CliParser;
 
-use crate::connection::ssh::SshFactory;
-use crate::connection::local::LocalFactory;
 use crate::connection::chroot::ChrootFactory;
+use crate::connection::local::LocalFactory;
 use crate::connection::no::NoFactory;
-use crate::playbooks::traversal::{playbook_traversal,RunState};
-use crate::playbooks::context::PlaybookContext;
-use crate::playbooks::visitor::{PlaybookVisitor,CheckMode};
+use crate::connection::ssh::SshFactory;
 use crate::inventory::inventory::Inventory;
+use crate::playbooks::context::PlaybookContext;
+use crate::playbooks::traversal::{RunState, playbook_traversal};
+use crate::playbooks::visitor::{CheckMode, PlaybookVisitor};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 
 // code behind *most* playbook related CLI commands, launched from main.rs
 
 enum ConnectionMode {
     Ssh,
     Local,
-    Simulate
+    Simulate,
 }
 
 pub fn playbook_ssh(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
@@ -63,22 +63,25 @@ pub fn playbook_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> 
 
     // Handle --url: download playbook to temp location
     let url_playbook_path: Option<PathBuf> = match &parser.pull_url {
-        Some(url) => {
-            match fetch_playbook_url(url) {
-                Ok(path) => Some(path),
-                Err(e) => {
-                    println!("failed to fetch playbook from URL: {}", e);
-                    return 1;
-                }
+        Some(url) => match fetch_playbook_url(url) {
+            Ok(path) => Some(path),
+            Err(e) => {
+                println!("failed to fetch playbook from URL: {}", e);
+                return 1;
             }
-        }
+        },
         None => None,
     };
 
     return playbook_with_pull(inventory, parser, CheckMode::No, url_playbook_path.as_ref());
 }
 
-fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode, connection_mode: ConnectionMode) -> i32 {
+fn playbook(
+    inventory: &Arc<RwLock<Inventory>>,
+    parser: &CliParser,
+    check_mode: CheckMode,
+    connection_mode: ConnectionMode,
+) -> i32 {
     let run_state = Arc::new(RunState {
         // every object gets an inventory, though with local modes it's empty.
         inventory: Arc::clone(inventory),
@@ -94,9 +97,14 @@ fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: 
         context: Arc::new(RwLock::new(PlaybookContext::new(parser))),
         visitor: Arc::new(RwLock::new(PlaybookVisitor::new(check_mode))),
         connection_factory: match connection_mode {
-            ConnectionMode::Ssh => Arc::new(RwLock::new(SshFactory::new(inventory, parser.forward_agent, parser.login_password.clone(), None))),
+            ConnectionMode::Ssh => Arc::new(RwLock::new(SshFactory::new(
+                inventory,
+                parser.forward_agent,
+                parser.login_password.clone(),
+                None,
+            ))),
             ConnectionMode::Local => Arc::new(RwLock::new(LocalFactory::new(inventory))),
-            ConnectionMode::Simulate => Arc::new(RwLock::new(NoFactory::new()))
+            ConnectionMode::Simulate => Arc::new(RwLock::new(NoFactory::new())),
         },
         tags: parser.tags.clone(),
         allow_localhost_delegation: parser.allow_localhost_delegation,
@@ -111,12 +119,24 @@ fn playbook(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: 
         fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
     return match playbook_traversal(&run_state) {
-        Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),
-        Err(s) => { println!("{}", s); 1 }
+        Ok(_) => run_state
+            .visitor
+            .read()
+            .unwrap()
+            .get_exit_status(&run_state.context),
+        Err(s) => {
+            println!("{}", s);
+            1
+        }
     };
 }
 
-fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, check_mode: CheckMode, url_playbook: Option<&PathBuf>) -> i32 {
+fn playbook_with_pull(
+    inventory: &Arc<RwLock<Inventory>>,
+    parser: &CliParser,
+    check_mode: CheckMode,
+    url_playbook: Option<&PathBuf>,
+) -> i32 {
     // If a URL-fetched playbook exists, add it to playbook_paths
     let playbook_paths = if let Some(pb_path) = url_playbook {
         let paths = Arc::new(RwLock::new(vec![pb_path.clone()]));
@@ -152,7 +172,10 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
     // Choose connection factory: ChrootFactory if --chroot, otherwise LocalFactory
     let connection_factory: Arc<RwLock<dyn crate::connection::factory::ConnectionFactory>> =
         if let Some(ref chroot_path) = parser.chroot_path {
-            Arc::new(RwLock::new(ChrootFactory::new(inventory, chroot_path.clone())))
+            Arc::new(RwLock::new(ChrootFactory::new(
+                inventory,
+                chroot_path.clone(),
+            )))
         } else {
             Arc::new(RwLock::new(LocalFactory::new(inventory)))
         };
@@ -181,8 +204,15 @@ fn playbook_with_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser, ch
         fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
     return match playbook_traversal(&run_state) {
-        Ok(_)  => run_state.visitor.read().unwrap().get_exit_status(&run_state.context),
-        Err(s) => { println!("{}", s); 1 }
+        Ok(_) => run_state
+            .visitor
+            .read()
+            .unwrap()
+            .get_exit_status(&run_state.context),
+        Err(s) => {
+            println!("{}", s);
+            1
+        }
     };
 }
 
@@ -235,13 +265,14 @@ fn fetch_playbook_url(url: &str) -> Result<PathBuf, String> {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("tar extraction failed ({}): {}", output.status, stderr));
+            return Err(format!(
+                "tar extraction failed ({}): {}",
+                output.status, stderr
+            ));
         }
 
         find_playbook_in_dir(&extract_dir)
-    } else if url.ends_with(".git")
-        || url.starts_with("git@")
-    {
+    } else if url.ends_with(".git") || url.starts_with("git@") {
         // Git clone
         let repo_dir = temp_dir.join("repo");
         let _ = std::fs::remove_dir_all(&repo_dir);
@@ -292,11 +323,20 @@ fn is_tarball_url(url: &str) -> bool {
 /// then falls back to `curl` if wget is not found.
 fn curl_download(url: &str, dest: &str) -> Result<(), String> {
     // Try wget first (Alpine/BusyBox has it built-in)
-    match std::process::Command::new("wget").arg("-q").arg("-O").arg(dest).arg(url).output() {
+    match std::process::Command::new("wget")
+        .arg("-q")
+        .arg("-O")
+        .arg(dest)
+        .arg(url)
+        .output()
+    {
         Ok(output) if output.status.success() => return Ok(()),
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("download failed (wget {}): {}", output.status, stderr));
+            return Err(format!(
+                "download failed (wget {}): {}",
+                output.status, stderr
+            ));
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             // wget not found, fall through to curl
@@ -321,7 +361,10 @@ fn curl_download(url: &str, dest: &str) -> Result<(), String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("download failed (curl {}): {}", output.status, stderr));
+        return Err(format!(
+            "download failed (curl {}): {}",
+            output.status, stderr
+        ));
     }
 
     Ok(())
@@ -330,7 +373,13 @@ fn curl_download(url: &str, dest: &str) -> Result<(), String> {
 /// Search a directory for a playbook entry point.
 /// Returns the path to the playbook file, or the directory itself if no standard name found.
 fn find_playbook_in_dir(dir: &PathBuf) -> Result<PathBuf, String> {
-    for candidate in &["playbook.yml", "site.yml", "main.yml", "playbook.yaml", "site.yaml"] {
+    for candidate in &[
+        "playbook.yml",
+        "site.yml",
+        "main.yml",
+        "playbook.yaml",
+        "site.yaml",
+    ] {
         let path = dir.join(candidate);
         if path.exists() {
             return Ok(path);
@@ -340,4 +389,3 @@ fn find_playbook_in_dir(dir: &PathBuf) -> Result<PathBuf, String> {
     // (implicit role/module discovery will still work)
     Ok(dir.clone())
 }
-

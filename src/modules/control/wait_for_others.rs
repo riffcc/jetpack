@@ -28,8 +28,8 @@
 //! - `strict`: if any host fails to reach the barrier, all waiting hosts get
 //!   an error. Use when ALL hosts must succeed to continue.
 
-use crate::tasks::*;
 use crate::handle::handle::TaskHandle;
+use crate::tasks::*;
 use serde::Deserialize;
 use std::sync::Arc;
 

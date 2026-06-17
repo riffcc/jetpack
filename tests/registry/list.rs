@@ -9,7 +9,7 @@ gid: "1001"
 "#;
     let group_task: Result<Task, _> = serde_yaml::from_str(group_yaml);
     assert!(group_task.is_err()); // Should fail without module field
-    
+
     // Test with module field
     let group_yaml_with_module = r#"
 !group
@@ -51,7 +51,7 @@ msg: Test message
         Task::Echo(_) => assert!(true),
         _ => panic!("Expected Echo task"),
     }
-    
+
     // Test Debug task
     let debug_yaml = r#"
 !debug
@@ -79,7 +79,7 @@ path: /tmp/test.txt
         Task::File(_) => assert!(true),
         _ => panic!("Expected File task"),
     }
-    
+
     // Test Copy task
     let copy_yaml = r#"
 !copy
@@ -107,7 +107,7 @@ package: nginx
         Task::Apt(_) => assert!(true),
         _ => panic!("Expected Apt task"),
     }
-    
+
     // Test Homebrew task
     let brew_yaml = r#"
 !homebrew
@@ -144,7 +144,7 @@ msg: Test
 "#;
     let task: Task = serde_yaml::from_str(echo_yaml).unwrap();
     assert_eq!(task.get_module(), "echo");
-    
+
     let file_yaml = r#"
 !file
 path: /tmp/test
@@ -162,7 +162,7 @@ msg: Hello
 "#;
     let task: Task = serde_yaml::from_str(echo_yaml).unwrap();
     assert_eq!(task.get_name(), Some("Test Echo Task".to_string()));
-    
+
     let file_yaml = r#"
 !file
 path: /tmp/test
@@ -181,13 +181,13 @@ fn test_task_list_deserialization() {
 - !shell
   cmd: ls -la
 "#;
-    
+
     let tasks: Result<Vec<Task>, _> = serde_yaml::from_str(tasks_yaml);
     assert!(tasks.is_ok());
-    
+
     let tasks = tasks.unwrap();
     assert_eq!(tasks.len(), 3);
-    
+
     // Verify task types
     match &tasks[0] {
         Task::Echo(_) => assert!(true),

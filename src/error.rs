@@ -5,17 +5,17 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::fmt;
 use std::error::Error as StdError;
+use std::fmt;
 use std::io;
 
 /// Main error type for JetPack operations
@@ -23,40 +23,40 @@ use std::io;
 pub enum JetpackError {
     /// Configuration errors
     Config(String),
-    
+
     /// Inventory loading errors
     Inventory(String),
-    
+
     /// Playbook parsing errors
     PlaybookParse(String),
-    
+
     /// Task execution errors
     TaskExecution(String),
-    
+
     /// Connection errors
     Connection(String),
-    
+
     /// Module errors
     Module(String),
-    
+
     /// Template errors
     Template(String),
-    
+
     /// IO errors
     Io(io::Error),
-    
+
     /// YAML parsing errors
     Yaml(serde_yaml::Error),
-    
+
     /// SSH errors
     Ssh(String),
-    
+
     /// Variable errors
     Variable(String),
-    
+
     /// Authentication errors
     Auth(String),
-    
+
     /// Other errors
     Other(String),
 }
@@ -130,7 +130,7 @@ impl<T> ErrorContext<T> for std::result::Result<T, String> {
     fn context(self, context: &str) -> Result<T> {
         self.map_err(|e| JetpackError::Other(format!("{}: {}", context, e)))
     }
-    
+
     fn with_context<F>(self, f: F) -> Result<T>
     where
         F: FnOnce() -> String,

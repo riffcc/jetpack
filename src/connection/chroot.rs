@@ -22,22 +22,22 @@
 //! This is used by `jetp pull --chroot <path>` for provisioning
 //! OS images before first boot.
 
-use crate::connection::connection::Connection;
+use crate::Inventory;
 use crate::connection::command::{CommandResult, Forward};
+use crate::connection::connection::Connection;
 use crate::connection::factory::ConnectionFactory;
 use crate::connection::local::convert_out;
-use crate::playbooks::context::PlaybookContext;
-use crate::inventory::hosts::Host;
 use crate::handle::response::Response;
+use crate::inventory::hosts::Host;
+use crate::playbooks::context::PlaybookContext;
 use crate::tasks::{TaskRequest, TaskResponse};
-use crate::Inventory;
 use crate::util::io::jet_file_open;
 
-use std::sync::{Arc, Mutex, RwLock};
-use std::process::Command;
-use std::path::Path;
 use std::fs::File;
 use std::io::Write;
+use std::path::Path;
+use std::process::Command;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Factory that creates ChrootConnection instances.
 ///
@@ -50,7 +50,10 @@ pub struct ChrootFactory {
 
 impl ChrootFactory {
     pub fn new(inventory: &Arc<RwLock<Inventory>>, chroot_path: String) -> Self {
-        let host = inventory.read().expect("inventory read").get_host(&String::from("localhost"));
+        let host = inventory
+            .read()
+            .expect("inventory read")
+            .get_host(&String::from("localhost"));
         let mut cc = ChrootConnection::new(&host, chroot_path);
         cc.connect().expect("chroot connection ok");
         Self {
@@ -68,7 +71,11 @@ impl ConnectionFactory for ChrootFactory {
     ) -> Result<Arc<Mutex<dyn Connection>>, String> {
         // Copy OS type from detected chroot OS to all hosts
         {
-            let localhost = self.inventory.read().expect("inventory read").get_host(&String::from("localhost"));
+            let localhost = self
+                .inventory
+                .read()
+                .expect("inventory read")
+                .get_host(&String::from("localhost"));
             let localhost_os = localhost.read().expect("localhost read").os_type;
             if let Some(os_type) = localhost_os {
                 let mut host_write = host.write().expect("host write");
@@ -145,11 +152,7 @@ impl Connection for ChrootConnection {
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let mut base = Command::new("chroot");
         let cmd2 = format!("LANG=C {}", cmd);
-        let command = base
-            .arg(&self.chroot_path)
-            .arg("sh")
-            .arg("-c")
-            .arg(&cmd2);
+        let command = base.arg(&self.chroot_path).arg("sh").arg("-c").arg(&cmd2);
 
         match command.output() {
             Ok(x) => match x.status.code() {
@@ -192,9 +195,8 @@ impl Connection for ChrootConnection {
         remote_path: &String,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         let actual_src = self.resolve_path(remote_path);
-        std::fs::read(Path::new(&actual_src)).map_err(|e| {
-            response.is_failed(request, &format!("chroot fetch failed: {:?}", e))
-        })
+        std::fs::read(Path::new(&actual_src))
+            .map_err(|e| response.is_failed(request, &format!("chroot fetch failed: {:?}", e)))
     }
 
     fn copy_file(
@@ -221,10 +223,7 @@ impl Connection for ChrootConnection {
 
         match std::fs::copy(src, dest_path) {
             Ok(_) => Ok(()),
-            Err(e) => Err(response.is_failed(
-                request,
-                &format!("copy to chroot failed: {:?}", e),
-            )),
+            Err(e) => Err(response.is_failed(request, &format!("copy to chroot failed: {:?}", e))),
         }
     }
 
@@ -257,7 +256,7 @@ impl Connection for ChrootConnection {
                     return Err(response.is_failed(
                         request,
                         &format!("failed to open: {}: {:?}", actual_path, y),
-                    ))
+                    ));
                 }
             }
         } else {
@@ -267,7 +266,7 @@ impl Connection for ChrootConnection {
                     return Err(response.is_failed(
                         request,
                         &format!("failed to create: {}: {:?}", actual_path, y),
-                    ))
+                    ));
                 }
             }
         };
@@ -283,10 +282,7 @@ impl Connection for ChrootConnection {
 }
 
 /// Detect OS inside the chroot by running `chroot <path> uname -a`.
-fn detect_chroot_os(
-    host: &Arc<RwLock<Host>>,
-    chroot_path: &str,
-) -> Result<(), (i32, String)> {
+fn detect_chroot_os(host: &Arc<RwLock<Host>>, chroot_path: &str) -> Result<(), (i32, String)> {
     let mut base = Command::new("chroot");
     let command = base.arg(chroot_path).arg("uname").arg("-a");
 
@@ -300,7 +296,10 @@ fn detect_chroot_os(
                 }
             }
             Some(status) => Err((status, convert_out(&x.stdout, &x.stderr))),
-            _ => Err((418, String::from("chroot uname -a failed without status code"))),
+            _ => Err((
+                418,
+                String::from("chroot uname -a failed without status code"),
+            )),
         },
         Err(_x) => Err((418, String::from("chroot uname -a failed"))),
     }

@@ -46,7 +46,10 @@ impl RecordingConnection {
 
     /// Decide the return code per command (e.g. simulate a missing file).
     pub fn with_rc<F: Fn(&str) -> i32 + Send + Sync + 'static>(rc_for: F) -> Self {
-        Self { log: Arc::new(Mutex::new(Vec::new())), rc_for: Box::new(rc_for) }
+        Self {
+            log: Arc::new(Mutex::new(Vec::new())),
+            rc_for: Box::new(rc_for),
+        }
     }
 
     /// Shared handle to the recorded command log, cloneable before the
@@ -61,15 +64,32 @@ impl Connection for RecordingConnection {
         Ok(())
     }
 
-    fn write_data(&self, _response: &Arc<Response>, _request: &Arc<TaskRequest>, _data: &String, _remote_path: &String) -> Result<(), Arc<TaskResponse>> {
+    fn write_data(
+        &self,
+        _response: &Arc<Response>,
+        _request: &Arc<TaskRequest>,
+        _data: &String,
+        _remote_path: &String,
+    ) -> Result<(), Arc<TaskResponse>> {
         Ok(())
     }
 
-    fn copy_file(&self, _response: &Arc<Response>, _request: &Arc<TaskRequest>, _src: &Path, _dest: &String) -> Result<(), Arc<TaskResponse>> {
+    fn copy_file(
+        &self,
+        _response: &Arc<Response>,
+        _request: &Arc<TaskRequest>,
+        _src: &Path,
+        _dest: &String,
+    ) -> Result<(), Arc<TaskResponse>> {
         Ok(())
     }
 
-    fn fetch_file(&self, _response: &Arc<Response>, _request: &Arc<TaskRequest>, _remote_path: &String) -> Result<Vec<u8>, Arc<TaskResponse>> {
+    fn fetch_file(
+        &self,
+        _response: &Arc<Response>,
+        _request: &Arc<TaskRequest>,
+        _remote_path: &String,
+    ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         Ok(Vec::new())
     }
 
@@ -77,10 +97,23 @@ impl Connection for RecordingConnection {
         Ok(String::from("root"))
     }
 
-    fn run_command(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, cmd: &String, _forward: Forward) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn run_command(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        cmd: &String,
+        _forward: Forward,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         self.log.lock().unwrap().push(cmd.clone());
         let rc = (self.rc_for)(cmd);
-        Ok(response.command_ok(request, &Arc::new(Some(CommandResult { cmd: cmd.clone(), out: String::new(), rc }))))
+        Ok(response.command_ok(
+            request,
+            &Arc::new(Some(CommandResult {
+                cmd: cmd.clone(),
+                out: String::new(),
+                rc,
+            })),
+        ))
     }
 }
 
@@ -92,7 +125,8 @@ pub fn test_handle(connection: Arc<Mutex<dyn Connection>>) -> Arc<TaskHandle> {
     let parser = CliParser::new();
     let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
     let visitor = Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No)));
-    let connection_factory: Arc<RwLock<dyn ConnectionFactory>> = Arc::new(RwLock::new(NoFactory::new()));
+    let connection_factory: Arc<RwLock<dyn ConnectionFactory>> =
+        Arc::new(RwLock::new(NoFactory::new()));
 
     let run_state = Arc::new(RunState {
         inventory,
@@ -123,5 +157,8 @@ pub fn test_handle(connection: Arc<Mutex<dyn Connection>>) -> Arc<TaskHandle> {
 
 /// A no-sudo Query-phase `TaskRequest`.
 pub fn query_request() -> Arc<TaskRequest> {
-    TaskRequest::query(&SudoDetails { user: None, template: String::new() })
+    TaskRequest::query(&SudoDetails {
+        user: None,
+        template: String::new(),
+    })
 }
