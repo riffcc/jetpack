@@ -64,7 +64,7 @@ impl Templar {
                 for _ in 0..8 {
                     let next = HANDLEBARS
                         .render_template(&rendered, &data)
-                        .map_err(|y| format!("Template error: {}", y.desc))?;
+                        .map_err(|y| format!("Template error: {}", y))?;
                     if next == rendered || !next.contains("{{") {
                         return Ok(next);
                     }

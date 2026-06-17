@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use handlebars::{Handlebars, RenderError, HelperDef, RenderContext, ScopedJson, JsonValue, Helper, Context, handlebars_helper};
+use handlebars::{Handlebars, RenderError, RenderErrorReason, HelperDef, RenderContext, ScopedJson, JsonValue, Helper, Context, handlebars_helper};
 
 //#[allow(non_camel_case_types)]
 pub struct IsDefined;
@@ -21,16 +21,16 @@ pub struct IsDefined;
 impl HelperDef for IsDefined {
     fn call_inner<'reg: 'rc, 'rc>(
         &self,
-        h: &Helper<'reg, 'rc>,
+        h: &Helper<'rc>,
         _: &'reg Handlebars,
         _: &'rc Context,
         _: &mut RenderContext<'reg, 'rc>,
-    ) -> Result<ScopedJson<'reg, 'rc>, RenderError> {
+    ) -> Result<ScopedJson<'rc>, RenderError> {
         let params = h.params();
         if params.len() != 1 {
-            return Err(RenderError::new(
+            return Err(RenderErrorReason::Other(
                 "is_defined: requires one parameter".to_owned(),
-            ));
+            ).into());
         }
         let result = h.param(0)
             .and_then(|x| {
@@ -40,7 +40,7 @@ impl HelperDef for IsDefined {
                     Some(true)
                 }
             })
-            .ok_or_else(|| RenderError::new("is_defined: Couldn't read parameter".to_owned()))?;
+            .ok_or_else(|| RenderError::from(RenderErrorReason::Other("is_defined: Couldn't read parameter".to_owned())))?;
 
         Ok(ScopedJson::Derived(JsonValue::from(result)))
     }

@@ -27,7 +27,7 @@ serde_json = { version = "1.0.105", features = ["preserve_order"] }
 termimad = "0.20"
 inline_colorization = "0.1.5"
 rayon = "1.7.0"
-handlebars = "4.3.7"
+handlebars = "6.4.1"
 sha2 = "0.10.8"
 guid-create = "0.3.1"
 expanduser = "1.2.2"
