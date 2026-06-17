@@ -17,4 +17,3 @@
 pub mod parser;
 pub mod playbooks;
 pub mod show;
-pub mod version;

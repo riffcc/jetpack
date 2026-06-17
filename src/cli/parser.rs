@@ -17,7 +17,7 @@
 // we don't use any parsing libraries here because they are a bit too automagical
 // this may change later.
 
-use crate::cli::version::{BUILD_TIME, GIT_BRANCH, GIT_VERSION};
+include!(concat!(env!("OUT_DIR"), "/version.rs"));
 use crate::inventory::loading::convert_json_vars;
 use crate::util::io::directory_as_string;
 use crate::util::io::jet_file_open;
