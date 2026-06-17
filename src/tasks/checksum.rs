@@ -20,5 +20,5 @@ pub fn sha512(data: &String) -> String {
     let mut hasher = Sha512::new();
     hasher.update(data.as_bytes());
     let result = hasher.finalize();
-    format!("{result:x}")
+    hex::encode(result)
 }
