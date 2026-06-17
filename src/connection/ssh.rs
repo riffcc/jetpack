@@ -310,7 +310,7 @@ impl Connection for SshConnection {
                 for identity in &identities {
                     if identity.comment() == comment {
                         let result = handle
-                            .authenticate_publickey_with(&username, identity.clone(), None, &mut agent)
+                            .authenticate_publickey_with(&username, identity.public_key().into_owned(), None, &mut agent)
                             .await
                             .map_err(|e| {
                                 format!(
@@ -348,7 +348,7 @@ impl Connection for SshConnection {
                     match handle
                         .authenticate_publickey_with(
                             &username,
-                            identity.clone(),
+                            identity.public_key().into_owned(),
                             None,
                             &mut agent,
                         )

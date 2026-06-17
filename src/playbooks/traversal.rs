@@ -1241,7 +1241,7 @@ fn handle_instantiate(run_state: &Arc<RunState>, play: &Play, spec: &Instantiate
         // Load the host_vars we just wrote
         drop(inv);
         if let Ok(vars) = serde_yaml::from_str::<serde_yaml::Mapping>(&yaml_str) {
-            let mut inv = run_state.inventory.write().unwrap();
+            let inv = run_state.inventory.write().unwrap();
             if inv.has_host(&hostname.to_string()) {
                 let host = inv.get_host(&hostname.to_string());
                 let mut h = host.write().unwrap();

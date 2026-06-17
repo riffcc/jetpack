@@ -256,7 +256,7 @@ impl Inventory {
         }
 
         // Find hosts NOT on this node that depend on these services
-        for (hostname, host) in &self.hosts {
+        for (_hostname, host) in &self.hosts {
             if let Ok(h) = host.read() {
                 // Skip hosts on the same node (they'll be down anyway)
                 if h.get_runs_on().as_deref() == Some(node_name) {

@@ -46,6 +46,12 @@ pub struct SelfLocateTask {
     pub and: Option<PostLogicInput>,
 }
 
+// Proxmox API credentials are accepted by the task and templated through here
+// for the optional Proxmox API-query detection path (see module header), but
+// the current detection logic does not consume them. Kept rather than removed
+// because SelfLocateTask uses #[serde(deny_unknown_fields)] — dropping them
+// would cause playbooks that specify these fields to fail to deserialize.
+#[allow(dead_code)]
 struct SelfLocateAction {
     pub save: String,
     pub api_host: Option<String>,
