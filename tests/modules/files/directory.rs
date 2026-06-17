@@ -70,7 +70,7 @@ attributes:
 
     let task: Result<DirectoryTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Create web directory".to_string()));
     assert_eq!(task.path, "/var/www/html");
@@ -86,7 +86,7 @@ path: /tmp/simple_dir
 
     let task: Result<DirectoryTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.path, "/tmp/simple_dir");
     assert!(task.remove.is_none());
@@ -106,7 +106,7 @@ and:
 
     let task: Result<DirectoryTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.with.is_some());
     assert!(task.and.is_some());

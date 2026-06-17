@@ -10,8 +10,8 @@
 //!
 //! Useful after provisioning VMs/LXCs to wait for them to boot and SSH to be ready.
 
+use crate::handle::handle::{CheckRc, TaskHandle};
 use crate::tasks::*;
-use crate::handle::handle::{TaskHandle, CheckRc};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::thread;
@@ -97,7 +97,10 @@ impl IsAction for WaitForHostAction {
 
                 loop {
                     // Try a simple command to test connectivity
-                    let result = handle.remote.run(request, &String::from("echo ok"), CheckRc::Unchecked);
+                    let result =
+                        handle
+                            .remote
+                            .run(request, &String::from("echo ok"), CheckRc::Unchecked);
 
                     match result {
                         Ok(response) => {
@@ -116,10 +119,7 @@ impl IsAction for WaitForHostAction {
                     if start.elapsed() >= timeout_duration {
                         return Err(handle.response.is_failed(
                             request,
-                            &format!(
-                                "Timeout waiting for host after {} seconds",
-                                self.timeout
-                            ),
+                            &format!("Timeout waiting for host after {} seconds", self.timeout),
                         ));
                     }
 

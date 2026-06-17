@@ -14,15 +14,15 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::handle::handle::{CheckRc, TaskHandle};
+use crate::modules::packages::common::{PackageDetails, PackageManagementModule};
 use crate::tasks::*;
-use crate::modules::packages::common::{PackageManagementModule,PackageDetails};
-use crate::handle::handle::{TaskHandle,CheckRc};
-use serde::{Deserialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 const MODULE: &str = "homebrew";
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct HomebrewTask {
     pub name: Option<String>,
@@ -31,7 +31,7 @@ pub struct HomebrewTask {
     pub update: Option<String>,
     pub remove: Option<String>,
     pub with: Option<PreLogicInput>,
-    pub and: Option<PostLogicInput>
+    pub and: Option<PostLogicInput>,
 }
 
 struct HomebrewAction {
@@ -42,37 +42,71 @@ struct HomebrewAction {
 }
 
 impl IsTask for HomebrewTask {
-
-    fn get_module(&self) -> String { String::from(MODULE) }
-    fn get_name(&self) -> Option<String> { self.name.clone() }
-    fn get_with(&self) -> Option<PreLogicInput> { self.with.clone() }
-
-    fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(
-            EvaluatedTask {
-                action: Arc::new(HomebrewAction {
-                    package:    handle.template.string_no_spaces(request, tm, &String::from("package"), &self.package)?,
-                    version:    handle.template.string_option_no_spaces(&request, tm, &String::from("version"), &self.version)?,
-                    update:     handle.template.boolean_option_default_false(&request, tm, &String::from("update"), &self.update)?,
-                    remove:     handle.template.boolean_option_default_false(&request, tm, &String::from("remove"), &self.remove)?
-                }),
-                with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-                and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?)
-            }
-        );
+    fn get_module(&self) -> String {
+        String::from(MODULE)
+    }
+    fn get_name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    fn get_with(&self) -> Option<PreLogicInput> {
+        self.with.clone()
     }
 
+    fn evaluate(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        return Ok(EvaluatedTask {
+            action: Arc::new(HomebrewAction {
+                package: handle.template.string_no_spaces(
+                    request,
+                    tm,
+                    &String::from("package"),
+                    &self.package,
+                )?,
+                version: handle.template.string_option_no_spaces(
+                    &request,
+                    tm,
+                    &String::from("version"),
+                    &self.version,
+                )?,
+                update: handle.template.boolean_option_default_false(
+                    &request,
+                    tm,
+                    &String::from("update"),
+                    &self.update,
+                )?,
+                remove: handle.template.boolean_option_default_false(
+                    &request,
+                    tm,
+                    &String::from("remove"),
+                    &self.remove,
+                )?,
+            }),
+            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
+        });
+    }
 }
 
 impl IsAction for HomebrewAction {
-    fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        return self.common_dispatch(handle,request);
+    fn dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        return self.common_dispatch(handle, request);
     }
 }
 
 impl PackageManagementModule for HomebrewAction {
-
-    fn initial_setup(&self, _handle: &Arc<TaskHandle>, _request: &Arc<TaskRequest>) -> Result<(),Arc<TaskResponse>> {
+    fn initial_setup(
+        &self,
+        _handle: &Arc<TaskHandle>,
+        _request: &Arc<TaskRequest>,
+    ) -> Result<(), Arc<TaskResponse>> {
         // nothing to do here, see how this was used in yum_dnf.rs
         return Ok(());
     }
@@ -89,72 +123,108 @@ impl PackageManagementModule for HomebrewAction {
         return self.version.clone();
     }
 
-    fn get_remote_version(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<PackageDetails>,Arc<TaskResponse>> {
-        let cmd = format!("{} info {} | head -n 1 | cut -f 4 -d ' '", self.brew_cmd(), self.package.clone());
+    fn get_remote_version(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
+        let cmd = format!(
+            "{} info {} | head -n 1 | cut -f 4 -d ' '",
+            self.brew_cmd(),
+            self.package.clone()
+        );
         let result = handle.remote.run_unsafe(request, &cmd, CheckRc::Unchecked);
         match result {
             Ok(r) => {
-                let (rc,out) = cmd_info(&r);
+                let (rc, out) = cmd_info(&r);
                 if rc == 0 {
                     let details = self.parse_remote_package_details(handle, &out.clone());
                     return details;
                 } else {
                     return Ok(None);
                 }
-            },
+            }
             Err(e) => {
                 return Err(e);
             }
         }
     }
 
-    fn get_local_version(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Option<PackageDetails>,Arc<TaskResponse>> {
+    fn get_local_version(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         let cmd = format!("{} info {}", self.brew_cmd(), self.package);
         let result = handle.remote.run(request, &cmd, CheckRc::Unchecked);
         match result {
             Ok(r) => {
-                let (rc,out) = cmd_info(&r);
+                let (rc, out) = cmd_info(&r);
                 if rc == 0 {
                     let details = self.parse_local_package_details(handle, &out.clone())?;
                     return Ok(details);
                 } else {
                     return Ok(None);
                 }
-            },
-            Err(e) => return Err(e)
+            }
+            Err(e) => return Err(e),
         }
     }
 
-    fn install_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
+    fn install_package(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = match self.version.is_none() {
             true => format!("{} install '{}'", self.brew_cmd(), self.package),
-            false => format!("{} install '{}@{}'", self.brew_cmd(), self.package, self.version.as_ref().unwrap())
+            false => format!(
+                "{} install '{}@{}'",
+                self.brew_cmd(),
+                self.package,
+                self.version.as_ref().unwrap()
+            ),
         };
         return handle.remote.run(request, &cmd, CheckRc::Checked);
     }
 
-    fn update_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
+    fn update_package(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = match self.version.is_none() {
             true => format!("{} upgrade '{}'", self.brew_cmd(), self.package),
-            false => format!("{} upgrade '{}@{}'", self.brew_cmd(), self.package, self.version.as_ref().unwrap())
+            false => format!(
+                "{} upgrade '{}@{}'",
+                self.brew_cmd(),
+                self.package,
+                self.version.as_ref().unwrap()
+            ),
         };
         return handle.remote.run(request, &cmd, CheckRc::Checked);
     }
 
-    fn remove_package(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>,Arc<TaskResponse>> {
+    fn remove_package(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("{} uninstall '{}'", self.brew_cmd(), self.package);
         return handle.remote.run(request, &cmd, CheckRc::Checked);
     }
-
 }
 
 impl HomebrewAction {
-
     fn brew_cmd(&self) -> &'static str {
         "if command -v brew >/dev/null 2>&1; then brew; elif [ -x /opt/homebrew/bin/brew ]; then /opt/homebrew/bin/brew; else brew; fi"
     }
 
-    pub fn parse_local_package_details(&self, _handle: &Arc<TaskHandle>, out: &String) -> Result<Option<PackageDetails>,Arc<TaskResponse>> {
+    pub fn parse_local_package_details(
+        &self,
+        _handle: &Arc<TaskHandle>,
+        out: &String,
+    ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         let mut version: Option<String> = None;
 
         for line in out.lines() {
@@ -172,17 +242,22 @@ impl HomebrewAction {
             }
         }
         return match version {
-            Some(v) => {
-                Ok(Some(PackageDetails { name: self.package.clone(), version: v.trim().to_string() }))
-            },
-            None => {
-                Ok(None)
-            }
+            Some(v) => Ok(Some(PackageDetails {
+                name: self.package.clone(),
+                version: v.trim().to_string(),
+            })),
+            None => Ok(None),
         };
     }
 
-    pub fn parse_remote_package_details(&self, _handle: &Arc<TaskHandle>, out: &String) -> Result<Option<PackageDetails>,Arc<TaskResponse>> {
-        return Ok(Some(PackageDetails { name: self.package.clone(), version: out.trim().to_string() }));
+    pub fn parse_remote_package_details(
+        &self,
+        _handle: &Arc<TaskHandle>,
+        out: &String,
+    ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
+        return Ok(Some(PackageDetails {
+            name: self.package.clone(),
+            version: out.trim().to_string(),
+        }));
     }
-
 }

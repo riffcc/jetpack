@@ -14,18 +14,18 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::tasks::*;
 use crate::handle::handle::TaskHandle;
 use crate::tasks::fields::Field;
+use crate::tasks::files::Recurse;
+use crate::tasks::*;
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize};
 use std::sync::Arc;
 use std::vec::Vec;
-use crate::tasks::files::Recurse;
 
 const MODULE: &str = "copy";
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct CopyTask {
     pub name: Option<String>,
@@ -34,7 +34,7 @@ pub struct CopyTask {
     pub recursive: Option<bool>,
     pub attributes: Option<FileAttributesInput>,
     pub with: Option<PreLogicInput>,
-    pub and: Option<PostLogicInput>
+    pub and: Option<PostLogicInput>,
 }
 struct CopyAction {
     pub src: PathBuf,
@@ -44,13 +44,25 @@ struct CopyAction {
 }
 
 impl IsTask for CopyTask {
+    fn get_module(&self) -> String {
+        String::from(MODULE)
+    }
+    fn get_name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    fn get_with(&self) -> Option<PreLogicInput> {
+        self.with.clone()
+    }
 
-    fn get_module(&self) -> String { String::from(MODULE) }
-    fn get_name(&self) -> Option<String> { self.name.clone() }
-    fn get_with(&self) -> Option<PreLogicInput> { self.with.clone() }
-
-    fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        let src_str = handle.template.string(&request, tm, &String::from("src"), &self.src)?;
+    fn evaluate(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        let src_str = handle
+            .template
+            .string(&request, tm, &String::from("src"), &self.src)?;
         let recursive = self.recursive.unwrap_or(false);
 
         let src_path = if recursive {
@@ -72,45 +84,53 @@ impl IsTask for CopyTask {
                 p
             }
         } else {
-            handle.template.find_file_path(request, tm, &String::from("src"), &src_str)?
+            handle
+                .template
+                .find_file_path(request, tm, &String::from("src"), &src_str)?
         };
 
-        return Ok(
-            EvaluatedTask {
-                action: Arc::new(CopyAction {
-                    src: src_path,
-                    dest:       handle.template.path(&request, tm, &String::from("dest"), &self.dest)?,
-                    recursive,
-                    attributes: FileAttributesInput::template(&handle, &request, tm, &self.attributes)?
-                }),
-                with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-                and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-            }
-        );
+        return Ok(EvaluatedTask {
+            action: Arc::new(CopyAction {
+                src: src_path,
+                dest: handle
+                    .template
+                    .path(&request, tm, &String::from("dest"), &self.dest)?,
+                recursive,
+                attributes: FileAttributesInput::template(&handle, &request, tm, &self.attributes)?,
+            }),
+            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
+        });
     }
-
 }
 
 impl IsAction for CopyAction {
-
-    fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-
+    fn dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-
             TaskRequestType::Query => {
                 if self.recursive {
                     // For recursive directory copy: check whether the remote directory
                     // already exists.  If it does we treat it as matched (idempotent);
                     // if not, we need to create the whole tree.
                     match handle.remote.get_is_directory(request, &self.dest) {
-                        Ok(true)  => return Ok(handle.response.is_matched(request)),
+                        Ok(true) => return Ok(handle.response.is_matched(request)),
                         Ok(false) => return Ok(handle.response.needs_creation(request)),
-                        Err(e)    => return Err(e),
+                        Err(e) => return Err(e),
                     }
                 }
 
-                let mut changes : Vec<Field> = Vec::new();
-                let remote_mode = handle.remote.query_common_file_attributes(request, &self.dest, &self.attributes, &mut changes, Recurse::No)?;
+                let mut changes: Vec<Field> = Vec::new();
+                let remote_mode = handle.remote.query_common_file_attributes(
+                    request,
+                    &self.dest,
+                    &self.attributes,
+                    &mut changes,
+                    Recurse::No,
+                )?;
                 if remote_mode.is_none() {
                     return Ok(handle.response.needs_creation(request));
                 }
@@ -119,53 +139,75 @@ impl IsAction for CopyAction {
                 let src_path = self.src.as_path();
                 let local_512 = handle.local.get_sha512(request, &src_path, true)?;
                 let remote_512 = handle.remote.get_sha512(request, &self.dest)?;
-                if ! remote_512.eq(&local_512) {
+                if !remote_512.eq(&local_512) {
                     changes.push(Field::Content);
                 }
-                if ! changes.is_empty() {
+                if !changes.is_empty() {
                     return Ok(handle.response.needs_modification(request, &changes));
                 }
                 return Ok(handle.response.is_matched(request));
-            },
+            }
 
             TaskRequestType::Create => {
                 self.do_copy(handle, request, None)?;
                 return Ok(handle.response.is_created(request));
-            },
+            }
 
             TaskRequestType::Modify => {
                 if self.recursive {
                     // Re-copy the whole tree on modify (dest dir existed but was flagged).
                     self.do_copy(handle, request, None)?;
-                    return Ok(handle.response.is_modified(request, request.changes.clone()));
+                    return Ok(handle
+                        .response
+                        .is_modified(request, request.changes.clone()));
                 }
                 if request.changes.contains(&Field::Content) {
                     self.do_copy(handle, request, Some(request.changes.clone()))?;
+                } else {
+                    handle.remote.process_common_file_attributes(
+                        request,
+                        &self.dest,
+                        &self.attributes,
+                        &request.changes,
+                        Recurse::No,
+                    )?;
                 }
-                else {
-                    handle.remote.process_common_file_attributes(request, &self.dest, &self.attributes, &request.changes, Recurse::No)?;
-                }
-                return Ok(handle.response.is_modified(request, request.changes.clone()));
-            },
+                return Ok(handle
+                    .response
+                    .is_modified(request, request.changes.clone()));
+            }
 
-            _ => { return Err(handle.response.not_supported(request)); }
-
+            _ => {
+                return Err(handle.response.not_supported(request));
+            }
         }
     }
-
 }
 
 impl CopyAction {
-
-    pub fn do_copy(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, _changes: Option<Vec<Field>>) -> Result<(), Arc<TaskResponse>> {
+    pub fn do_copy(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        _changes: Option<Vec<Field>>,
+    ) -> Result<(), Arc<TaskResponse>> {
         if self.recursive {
             return self.copy_dir_recursive(handle, request, &self.src, &self.dest);
         }
-        handle.remote.copy_file(request, &self.src, &self.dest, |f| { /* after save */
-            match handle.remote.process_all_common_file_attributes(request, &f, &self.attributes, Recurse::No) {
-                Ok(_x) => Ok(()), Err(y) => Err(y)
-            }
-        })?;
+        handle
+            .remote
+            .copy_file(request, &self.src, &self.dest, |f| {
+                /* after save */
+                match handle.remote.process_all_common_file_attributes(
+                    request,
+                    &f,
+                    &self.attributes,
+                    Recurse::No,
+                ) {
+                    Ok(_x) => Ok(()),
+                    Err(y) => Err(y),
+                }
+            })?;
         return Ok(());
     }
 
@@ -182,18 +224,26 @@ impl CopyAction {
         remote_dir: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         // Ensure the remote directory exists.
-        handle.remote.create_directory(request, &remote_dir.to_string())?;
+        handle
+            .remote
+            .create_directory(request, &remote_dir.to_string())?;
 
         let entries = std::fs::read_dir(local_dir).map_err(|e| {
             handle.response.is_failed(
                 request,
-                &format!("failed to read local directory '{}': {}", local_dir.display(), e),
+                &format!(
+                    "failed to read local directory '{}': {}",
+                    local_dir.display(),
+                    e
+                ),
             )
         })?;
 
         for entry in entries {
             let entry = entry.map_err(|e| {
-                handle.response.is_failed(request, &format!("directory entry error: {}", e))
+                handle
+                    .response
+                    .is_failed(request, &format!("directory entry error: {}", e))
             })?;
             let local_path = entry.path();
             let name = entry.file_name();
@@ -203,12 +253,13 @@ impl CopyAction {
             if local_path.is_dir() {
                 self.copy_dir_recursive(handle, request, &local_path, &remote_path)?;
             } else if local_path.is_file() {
-                handle.remote.copy_file(request, &local_path, &remote_path, |_f| Ok(()))?;
+                handle
+                    .remote
+                    .copy_file(request, &local_path, &remote_path, |_f| Ok(()))?;
             }
             // Symlinks and other special files are intentionally skipped.
         }
 
         Ok(())
     }
-
 }

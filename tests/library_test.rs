@@ -1,6 +1,5 @@
-use jetpack::{JetpackConfig, PlaybookRunner, NullOutputHandler};
+use jetpack::{JetpackConfig, NullOutputHandler, PlaybookRunner};
 use std::sync::Arc;
-use std::path::PathBuf;
 
 #[test]
 fn test_config_builder() {
@@ -11,7 +10,7 @@ fn test_config_builder() {
         .port(2222)
         .threads(4)
         .local();
-    
+
     assert_eq!(config.default_user, "testuser");
     assert_eq!(config.default_port, 2222);
     assert_eq!(config.threads, 4);
@@ -20,13 +19,10 @@ fn test_config_builder() {
 
 #[test]
 fn test_runner_creation() {
-    let config = JetpackConfig::new()
-        .playbook("/tmp/test.yml")
-        .local();
-    
-    let runner = PlaybookRunner::new(config)
-        .with_output_handler(Arc::new(NullOutputHandler));
-    
+    let config = JetpackConfig::new().playbook("/tmp/test.yml").local();
+
+    let _runner = PlaybookRunner::new(config).with_output_handler(Arc::new(NullOutputHandler));
+
     // Just verify it can be created
     assert!(true);
 }
@@ -38,7 +34,7 @@ fn test_builder_api() {
         .local()
         .user("admin")
         .threads(2);
-    
+
     // Just verify the builder works
     assert!(true);
 }

@@ -84,7 +84,7 @@ update: "yes"
 
     let task: Result<AptTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Install web server".to_string()));
     assert_eq!(task.package, "nginx");
@@ -100,7 +100,7 @@ package: git
 
     let task: Result<AptTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.package, "git");
     assert!(task.name.is_none());
@@ -122,7 +122,7 @@ and:
 
     let task: Result<AptTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.package.contains("{{ package_name }}"));
     assert!(task.with.is_some());

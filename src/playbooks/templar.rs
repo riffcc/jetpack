@@ -5,18 +5,18 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use serde_yaml;
-use once_cell::sync::Lazy;
 use handlebars::Handlebars;
+use once_cell::sync::Lazy;
+use serde_yaml;
 
 use crate::playbooks::t_helpers::register_helpers;
 
@@ -38,25 +38,27 @@ static HANDLEBARS: Lazy<Handlebars> = Lazy::new(|| {
 // before templates are evaluated. You will notice there is no way
 // to evaluate templates in unstrict mode. This is by design.
 
-#[derive(PartialEq,Copy,Clone,Debug)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum TemplateMode {
     Strict,
-    Off
+    Off,
 }
 
-pub struct Templar {
-}
+pub struct Templar {}
 
 impl Templar {
-
     pub fn new() -> Self {
-        return Self {
-        };
+        return Self {};
     }
 
     // evaluate a string
 
-    pub fn render(&self, template: &String, data: serde_yaml::Mapping, template_mode: TemplateMode) -> Result<String, String> {
+    pub fn render(
+        &self,
+        template: &String,
+        data: serde_yaml::Mapping,
+        template_mode: TemplateMode,
+    ) -> Result<String, String> {
         match template_mode {
             TemplateMode::Off => Ok(String::from("empty")),
             TemplateMode::Strict => {
@@ -74,10 +76,15 @@ impl Templar {
             }
         }
     }
-    
+
     // used for with/cond and also in the shell module
 
-    pub fn test_condition(&self, expr: &String, data: serde_yaml::Mapping, template_mode: TemplateMode) -> Result<bool, String> {
+    pub fn test_condition(
+        &self,
+        expr: &String,
+        data: serde_yaml::Mapping,
+        template_mode: TemplateMode,
+    ) -> Result<bool, String> {
         if template_mode == TemplateMode::Off {
             /* this is only used to get back the raw 'items' collection inside the task FSM */
             return Ok(true);
@@ -86,24 +93,25 @@ impl Templar {
         let template = format!("{{{{#if {expr} }}}}true{{{{ else }}}}false{{{{/if}}}}");
         let result = self.render(&template, data, TemplateMode::Strict);
         match result {
-            Ok(x) => { 
+            Ok(x) => {
                 if x.as_str().eq("true") {
                     return Ok(true);
                 } else {
                     return Ok(false);
                 }
-            },
-            Err(y) => { 
+            }
+            Err(y) => {
                 if y.find("Couldn't read parameter").is_some() {
-                    return Err(format!("failed to parse conditional: {}: one or more parameters may be undefined", expr))
-                }
-                else {
-                    return Err(format!("failed to parse conditional: {}: {}", expr, y))
+                    return Err(format!(
+                        "failed to parse conditional: {}: one or more parameters may be undefined",
+                        expr
+                    ));
+                } else {
+                    return Err(format!("failed to parse conditional: {}: {}", expr, y));
                 }
             }
         };
     }
-
 }
 
 #[cfg(test)]
@@ -120,7 +128,10 @@ mod tests {
         );
         data.insert(
             serde_yaml::Value::String("codex_desktop_remote_root".to_string()),
-            serde_yaml::Value::String("{{ JET_USER_HOME }}/projects/riffenvironment/projects/codex-desktop-linux".to_string()),
+            serde_yaml::Value::String(
+                "{{ JET_USER_HOME }}/projects/riffenvironment/projects/codex-desktop-linux"
+                    .to_string(),
+            ),
         );
 
         let result = templar

@@ -13,10 +13,10 @@
 // - /proc/1/environ (container detection)
 // - Proxmox API query (optional, requires credentials)
 
-use crate::tasks::*;
-use crate::handle::handle::TaskHandle;
 use crate::connection::command::cmd_info;
+use crate::handle::handle::TaskHandle;
 use crate::inventory::dependencies::{DependencyBuilder, VirtualizationType};
+use crate::tasks::*;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -60,40 +60,80 @@ struct SelfLocateAction {
 }
 
 impl IsTask for SelfLocateTask {
-    fn get_module(&self) -> String { String::from(MODULE) }
-    fn get_name(&self) -> Option<String> { self.name.clone() }
-    fn get_with(&self) -> Option<PreLogicInput> { self.with.clone() }
+    fn get_module(&self) -> String {
+        String::from(MODULE)
+    }
+    fn get_name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    fn get_with(&self) -> Option<PreLogicInput> {
+        self.with.clone()
+    }
 
-    fn evaluate(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>, tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+    fn evaluate(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         Ok(EvaluatedTask {
             action: Arc::new(SelfLocateAction {
-                save: handle.template.string_no_spaces(request, tm.clone(), &String::from("save"), &self.save)?,
-                api_host: handle.template.string_option(request, tm.clone(), &String::from("api_host"), &self.api_host)?,
-                api_token_id: handle.template.string_option(request, tm.clone(), &String::from("api_token_id"), &self.api_token_id)?,
-                api_token_secret: handle.template.string_option(request, tm.clone(), &String::from("api_token_secret"), &self.api_token_secret)?,
+                save: handle.template.string_no_spaces(
+                    request,
+                    tm.clone(),
+                    &String::from("save"),
+                    &self.save,
+                )?,
+                api_host: handle.template.string_option(
+                    request,
+                    tm.clone(),
+                    &String::from("api_host"),
+                    &self.api_host,
+                )?,
+                api_token_id: handle.template.string_option(
+                    request,
+                    tm.clone(),
+                    &String::from("api_token_id"),
+                    &self.api_token_id,
+                )?,
+                api_token_secret: handle.template.string_option(
+                    request,
+                    tm.clone(),
+                    &String::from("api_token_secret"),
+                    &self.api_token_secret,
+                )?,
             }),
-            with: Arc::new(PreLogicInput::template(handle, request, tm.clone(), &self.with)?),
+            with: Arc::new(PreLogicInput::template(
+                handle,
+                request,
+                tm.clone(),
+                &self.with,
+            )?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
         })
     }
 }
 
 impl IsAction for SelfLocateAction {
-    fn dispatch(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn dispatch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                Ok(handle.response.needs_passive(request))
-            },
-            TaskRequestType::Passive => {
-                self.run_detection(handle, request)
-            },
+            TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
+            TaskRequestType::Passive => self.run_detection(handle, request),
             _ => Err(handle.response.not_supported(request)),
         }
     }
 }
 
 impl SelfLocateAction {
-    fn run_detection(&self, handle: &Arc<TaskHandle>, request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    fn run_detection(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         // Build the detection script
         let detect_script = r#"
 # Detect virtualization type
@@ -163,7 +203,9 @@ echo "WORKLOAD_ID=$WORKLOAD_ID"
 
         // Run detection using shell
         let shell_cmd = format!("/bin/sh -c '{}'", detect_script.replace("'", "'\"'\"'"));
-        let task_result = handle.remote.run_unsafe(request, &shell_cmd, CheckRc::Unchecked)?;
+        let task_result = handle
+            .remote
+            .run_unsafe(request, &shell_cmd, CheckRc::Unchecked)?;
         let (_rc, output) = cmd_info(&task_result);
 
         // Parse output
@@ -211,12 +253,14 @@ echo "WORKLOAD_ID=$WORKLOAD_ID"
         }
 
         // Save to host variable
-        handle.host.write().unwrap().update_variables(
-            serde_yaml::Mapping::from_iter([(
+        handle
+            .host
+            .write()
+            .unwrap()
+            .update_variables(serde_yaml::Mapping::from_iter([(
                 serde_yaml::Value::String(self.save.clone()),
                 serde_yaml::Value::Mapping(result),
-            )])
-        );
+            )]));
 
         Ok(handle.response.is_passive(request))
     }

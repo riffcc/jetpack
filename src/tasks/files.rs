@@ -5,55 +5,54 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::handle::handle::TaskHandle;
+use crate::tasks::TemplateMode;
 use crate::tasks::request::TaskRequest;
 use crate::tasks::response::TaskResponse;
-use crate::tasks::TemplateMode;
-use std::sync::Arc;
 use serde::Deserialize;
+use std::sync::Arc;
 
 // this is storage behind all 'and' and 'with' statements in the program, which
 // are mostly implemented in task_fsm
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct FileAttributesInput {
     pub owner: Option<String>,
     pub group: Option<String>,
-    pub mode: Option<String>
+    pub mode: Option<String>,
 }
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct FileAttributesEvaluated {
     pub owner: Option<String>,
     pub group: Option<String>,
-    pub mode: Option<String>
+    pub mode: Option<String>,
 }
 
-#[derive(Deserialize,Debug,Copy,Clone,PartialEq)]
+#[derive(Deserialize, Debug, Copy, Clone, PartialEq)]
 pub enum Recurse {
     No,
-    Yes
+    Yes,
 }
 
 impl FileAttributesInput {
-
     // given an octal string (0o755, 0755, or bare 755), return whether it is valid
     pub fn is_octal_string(mode: &String) -> bool {
         let octal_part = Self::strip_octal_prefix(mode.as_str());
         match i32::from_str_radix(octal_part, 8) {
             Ok(_x) => true,
-            Err(_y) => false
+            Err(_y) => false,
         }
     }
 
@@ -86,8 +85,12 @@ impl FileAttributesInput {
     */
 
     // template **all** the fields in FileAttributesInput fields, checking values and returning errors as needed
-    pub fn template(handle: &TaskHandle, request: &Arc<TaskRequest>, tm: TemplateMode, input: &Option<Self>) -> Result<Option<FileAttributesEvaluated>,Arc<TaskResponse>> {
-
+    pub fn template(
+        handle: &TaskHandle,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+        input: &Option<Self>,
+    ) -> Result<Option<FileAttributesEvaluated>, Arc<TaskResponse>> {
         if tm == TemplateMode::Off {
             return Ok(None);
         }
@@ -95,9 +98,9 @@ impl FileAttributesInput {
         if input.is_none() {
             return Ok(None);
         }
-        
+
         let input2 = input.as_ref().unwrap();
-        let final_mode_value : Option<String>;
+        let final_mode_value: Option<String>;
 
         // owner & group is easy but mode is complex
         // makes sure mode is octal and not accidentally enter decimal or hex or leave off the octal prefix
@@ -105,9 +108,12 @@ impl FileAttributesInput {
         // that might read the file and encourage users to use YAML-spec required input here even though YAML isn't doing
         // the evaluation.
 
-        if input2.mode.is_some()  {
+        if input2.mode.is_some() {
             let mode_input = input2.mode.as_ref().unwrap();
-            let templated_mode_string = handle.template.string(request, tm, &String::from("mode"), &mode_input)?;
+            let templated_mode_string =
+                handle
+                    .template
+                    .string(request, tm, &String::from("mode"), &mode_input)?;
 
             // Accept both 0o755 (Rust-style) and 0755 (traditional Unix octal prefix).
             // Plain digits like "755" are NOT accepted — an explicit prefix is required to
@@ -119,22 +125,29 @@ impl FileAttributesInput {
                 // Unix/C-style: 0755 → "755"
                 templated_mode_string[1..].to_string()
             } else {
-                return Err(handle.response.is_failed(request, &format!(
-                    "field (mode) must have an octal prefix: \
+                return Err(handle.response.is_failed(
+                    request,
+                    &format!(
+                        "field (mode) must have an octal prefix: \
                      use 0o755 (Rust-style) or 0755 (Unix-style), was {}",
-                    templated_mode_string
-                )));
+                        templated_mode_string
+                    ),
+                ));
             };
 
             // Validate that the stripped digits are valid octal.
             match i32::from_str_radix(&octal_no_prefix, 8) {
                 Ok(_x) => {
                     final_mode_value = Some(octal_no_prefix);
-                },
+                }
                 Err(_y) => {
-                    return Err(handle.response.is_failed(request, &format!(
-                        "field (mode) has invalid octal digits: {}", templated_mode_string
-                    )));
+                    return Err(handle.response.is_failed(
+                        request,
+                        &format!(
+                            "field (mode) has invalid octal digits: {}",
+                            templated_mode_string
+                        ),
+                    ));
                 }
             };
         } else {
@@ -143,16 +156,24 @@ impl FileAttributesInput {
         }
 
         return Ok(Some(FileAttributesEvaluated {
-            owner:         handle.template.string_option_no_spaces(request, tm, &String::from("owner"), &input2.owner)?,
-            group:         handle.template.string_option_no_spaces(request, tm, &String::from("group"), &input2.group)?,
-            mode:          final_mode_value,
+            owner: handle.template.string_option_no_spaces(
+                request,
+                tm,
+                &String::from("owner"),
+                &input2.owner,
+            )?,
+            group: handle.template.string_option_no_spaces(
+                request,
+                tm,
+                &String::from("group"),
+                &input2.group,
+            )?,
+            mode: final_mode_value,
         }));
     }
 }
 
-
 impl FileAttributesEvaluated {
-
     // if the action has an evaluated Attributes section, the mode will be stored as an octal string like "777", but we need
     // an integer for some internal APIs like the SSH connection put requests.
 
@@ -174,5 +195,4 @@ impl FileAttributesEvaluated {
         };
     }
     */
-
 }

@@ -59,7 +59,7 @@ attributes:
 
     let task: Result<CopyTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Deploy application config".to_string()));
     assert_eq!(task.src, "files/production.conf");
@@ -76,7 +76,7 @@ dest: /tmp/README.md
 
     let task: Result<CopyTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.src, "README.md");
     assert_eq!(task.dest, "/tmp/README.md");
@@ -97,7 +97,7 @@ and:
 
     let task: Result<CopyTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.with.is_some());
     assert!(task.and.is_some());

@@ -5,44 +5,43 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::util::io::{path_as_string,directory_as_string};
-use crate::playbooks::language::{Play,Role,RoleInvocation};
-use std::path::PathBuf;
-use std::collections::HashMap;
-use crate::inventory::hosts::Host;
-use std::sync::{Arc,RwLock};
-use crate::connection::cache::ConnectionCache;
-use crate::registry::list::Task;
-use crate::util::yaml::blend_variables;
-use crate::playbooks::templar::{Templar,TemplateMode};
 use crate::cli::parser::CliParser;
+use crate::connection::cache::ConnectionCache;
 use crate::handle::template::BlendTarget;
-use std::ops::Deref;
-use std::env;
-use guid_create::GUID;
+use crate::inventory::hosts::Host;
+use crate::playbooks::language::{Play, Role, RoleInvocation};
+use crate::playbooks::templar::{Templar, TemplateMode};
+use crate::registry::list::Task;
+use crate::util::io::{directory_as_string, path_as_string};
+use crate::util::yaml::blend_variables;
 use expanduser::expanduser;
+use guid_create::GUID;
+use std::collections::HashMap;
+use std::env;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 // the playbook traversal state, and a little bit more than that.
 // the playbook context keeps track of where we are in a playbook
 // execution and various results/stats along the way.
 
 pub struct PlaybookContext {
-
     pub verbosity: u32,
 
     pub playbook_path: Option<String>,
     pub playbook_directory: Option<String>,
     pub play: Option<String>,
-    
+
     pub role: Option<Role>,
     pub role_path: Option<String>,
     pub play_count: usize,
@@ -51,42 +50,40 @@ pub struct PlaybookContext {
 
     pub task_count: usize,
     pub task: Option<String>,
-    
-    seen_hosts:               HashMap<String, Arc<RwLock<Host>>>,
-    targetted_hosts:          HashMap<String, Arc<RwLock<Host>>>,
-    failed_hosts:             HashMap<String, Arc<RwLock<Host>>>,
+
+    seen_hosts: HashMap<String, Arc<RwLock<Host>>>,
+    targetted_hosts: HashMap<String, Arc<RwLock<Host>>>,
+    failed_hosts: HashMap<String, Arc<RwLock<Host>>>,
 
     attempted_count_for_host: HashMap<String, usize>,
-    adjusted_count_for_host:  HashMap<String, usize>,
-    created_count_for_host:   HashMap<String, usize>,
-    removed_count_for_host:   HashMap<String, usize>,
-    modified_count_for_host:  HashMap<String, usize>,
-    executed_count_for_host:  HashMap<String, usize>,
-    passive_count_for_host:   HashMap<String, usize>,
-    matched_count_for_host:   HashMap<String, usize>,
-    skipped_count_for_host:   HashMap<String, usize>,
-    failed_count_for_host:    HashMap<String, usize>,
-    
+    adjusted_count_for_host: HashMap<String, usize>,
+    created_count_for_host: HashMap<String, usize>,
+    removed_count_for_host: HashMap<String, usize>,
+    modified_count_for_host: HashMap<String, usize>,
+    executed_count_for_host: HashMap<String, usize>,
+    passive_count_for_host: HashMap<String, usize>,
+    matched_count_for_host: HashMap<String, usize>,
+    skipped_count_for_host: HashMap<String, usize>,
+    failed_count_for_host: HashMap<String, usize>,
+
     // TODO: some of these don't need to be pub.
-    pub failed_tasks:           usize,
-    pub defaults_storage:       RwLock<serde_yaml::Mapping>,
-    pub vars_storage:           RwLock<serde_yaml::Mapping>,
-    pub role_defaults_storage:  RwLock<serde_yaml::Mapping>,
-    pub role_vars_storage:      RwLock<serde_yaml::Mapping>,
-    pub env_storage:            RwLock<serde_yaml::Mapping>,
-    
-    pub connection_cache:     RwLock<ConnectionCache>,
-    pub templar:              RwLock<Templar>,
+    pub failed_tasks: usize,
+    pub defaults_storage: RwLock<serde_yaml::Mapping>,
+    pub vars_storage: RwLock<serde_yaml::Mapping>,
+    pub role_defaults_storage: RwLock<serde_yaml::Mapping>,
+    pub role_vars_storage: RwLock<serde_yaml::Mapping>,
+    pub env_storage: RwLock<serde_yaml::Mapping>,
 
-    pub ssh_user:             String,
-    pub ssh_port:             i64,
-    pub sudo:                 Option<String>,
-    extra_vars:               serde_yaml::Value,
+    pub connection_cache: RwLock<ConnectionCache>,
+    pub templar: RwLock<Templar>,
 
+    pub ssh_user: String,
+    pub ssh_port: i64,
+    pub sudo: Option<String>,
+    extra_vars: serde_yaml::Value,
 }
 
 impl PlaybookContext {
-
     pub fn new(parser: &CliParser) -> Self {
         let mut s = Self {
             verbosity: parser.verbosity,
@@ -96,35 +93,35 @@ impl PlaybookContext {
             play: None,
             role: None,
             task: None,
-            play_count : 0,
-            play_index : 0,
-            role_count : 0,
-            task_count : 0,
+            play_count: 0,
+            play_index: 0,
+            role_count: 0,
+            task_count: 0,
             seen_hosts: HashMap::new(),
             targetted_hosts: HashMap::new(),
             failed_hosts: HashMap::new(),
             role_path: None,
-            adjusted_count_for_host:  HashMap::new(),
+            adjusted_count_for_host: HashMap::new(),
             attempted_count_for_host: HashMap::new(),
-            created_count_for_host:   HashMap::new(),
-            removed_count_for_host:   HashMap::new(),
-            modified_count_for_host:  HashMap::new(),
-            executed_count_for_host:  HashMap::new(),
-            passive_count_for_host:   HashMap::new(),
-            matched_count_for_host:   HashMap::new(),
-            failed_count_for_host:    HashMap::new(),
-            skipped_count_for_host:   HashMap::new(),
-            connection_cache:         RwLock::new(ConnectionCache::new()),
-            templar:                  RwLock::new(Templar::new()),
-            defaults_storage:         RwLock::new(serde_yaml::Mapping::new()),
-            vars_storage:             RwLock::new(serde_yaml::Mapping::new()),
-            role_vars_storage:        RwLock::new(serde_yaml::Mapping::new()),
-            role_defaults_storage:    RwLock::new(serde_yaml::Mapping::new()),
-            env_storage:              RwLock::new(serde_yaml::Mapping::new()),
-            ssh_user:                 parser.default_user.clone(),
-            ssh_port:                 parser.default_port,
-            sudo:                     parser.sudo.clone(),
-            extra_vars:               parser.extra_vars.clone(),
+            created_count_for_host: HashMap::new(),
+            removed_count_for_host: HashMap::new(),
+            modified_count_for_host: HashMap::new(),
+            executed_count_for_host: HashMap::new(),
+            passive_count_for_host: HashMap::new(),
+            matched_count_for_host: HashMap::new(),
+            failed_count_for_host: HashMap::new(),
+            skipped_count_for_host: HashMap::new(),
+            connection_cache: RwLock::new(ConnectionCache::new()),
+            templar: RwLock::new(Templar::new()),
+            defaults_storage: RwLock::new(serde_yaml::Mapping::new()),
+            vars_storage: RwLock::new(serde_yaml::Mapping::new()),
+            role_vars_storage: RwLock::new(serde_yaml::Mapping::new()),
+            role_defaults_storage: RwLock::new(serde_yaml::Mapping::new()),
+            env_storage: RwLock::new(serde_yaml::Mapping::new()),
+            ssh_user: parser.default_user.clone(),
+            ssh_port: parser.default_port,
+            sudo: parser.sudo.clone(),
+            extra_vars: parser.extra_vars.clone(),
         };
         s.load_environment();
         return s;
@@ -134,8 +131,8 @@ impl PlaybookContext {
     // other functions remove these hosts from the list.
 
     pub fn get_remaining_hosts(&self) -> HashMap<String, Arc<RwLock<Host>>> {
-        let mut results : HashMap<String, Arc<RwLock<Host>>> = HashMap::new();
-        for (k,v) in self.targetted_hosts.iter() {
+        let mut results: HashMap<String, Arc<RwLock<Host>>> = HashMap::new();
+        for (k, v) in self.targetted_hosts.iter() {
             results.insert(k.clone(), Arc::clone(&v));
         }
         return results;
@@ -161,10 +158,11 @@ impl PlaybookContext {
         for host in hosts.iter() {
             let hostname = host.read().unwrap().name.clone();
             match self.failed_hosts.contains_key(&hostname) {
-                true => {},
-                false => { 
+                true => {}
+                false => {
                     self.seen_hosts.insert(hostname.clone(), Arc::clone(&host));
-                    self.targetted_hosts.insert(hostname.clone(), Arc::clone(&host)); 
+                    self.targetted_hosts
+                        .insert(hostname.clone(), Arc::clone(&host));
                 }
             }
         }
@@ -179,9 +177,9 @@ impl PlaybookContext {
         let hostname = host2.name.clone();
         self.failed_tasks = self.failed_tasks + 1;
 
-        
         self.targetted_hosts.remove(&hostname);
-        self.failed_hosts.insert(hostname.clone(), Arc::clone(&host));
+        self.failed_hosts
+            .insert(hostname.clone(), Arc::clone(&host));
     }
 
     pub fn set_playbook_path(&mut self, path: &PathBuf) {
@@ -201,17 +199,17 @@ impl PlaybookContext {
     pub fn get_play_name(&self) -> String {
         return match &self.play {
             Some(x) => x.clone(),
-            None => panic!("attempting to read a play name before plays have been evaluated")
-        }
+            None => panic!("attempting to read a play name before plays have been evaluated"),
+        };
     }
 
     pub fn set_role(&mut self, role: &Role, invocation: &RoleInvocation, role_path: &String) {
         self.role = Some(role.clone());
         self.role_path = Some(role_path.clone());
-        if role.defaults.is_some() { 
-             *self.role_defaults_storage.write().unwrap() = role.defaults.as_ref().unwrap().clone();
+        if role.defaults.is_some() {
+            *self.role_defaults_storage.write().unwrap() = role.defaults.as_ref().unwrap().clone();
         }
-        if invocation.vars.is_some() { 
+        if invocation.vars.is_some() {
             *self.role_vars_storage.write().unwrap() = invocation.vars.as_ref().unwrap().clone();
         }
     }
@@ -226,21 +224,28 @@ impl PlaybookContext {
     // template functions need to access all the variables about a host taking variable precendence rules into effect
     // to get a dictionary of variables to use in template expressions
 
-    pub fn get_complete_blended_variables(&self, host: &Arc<RwLock<Host>>, blend_target: BlendTarget) -> serde_yaml::Mapping  {
+    pub fn get_complete_blended_variables(
+        &self,
+        host: &Arc<RwLock<Host>>,
+        blend_target: BlendTarget,
+    ) -> serde_yaml::Mapping {
         let blended = self.get_complete_blended_variables_as_value(host, blend_target);
         return match blended {
             serde_yaml::Value::Mapping(x) => x,
-            _ => panic!("unexpected, get_blended_variables produced a non-mapping (3)")
+            _ => panic!("unexpected, get_blended_variables produced a non-mapping (3)"),
         };
     }
 
-    pub fn get_complete_blended_variables_as_value(&self, host: &Arc<RwLock<Host>>, blend_target: BlendTarget) -> serde_yaml::Value  {
-        
+    pub fn get_complete_blended_variables_as_value(
+        &self,
+        host: &Arc<RwLock<Host>>,
+        blend_target: BlendTarget,
+    ) -> serde_yaml::Value {
         let mut blended = serde_yaml::Value::from(serde_yaml::Mapping::new());
         let src1 = self.defaults_storage.read().unwrap();
         let src1a = src1.deref();
         blend_variables(&mut blended, serde_yaml::Value::Mapping(src1a.clone()));
-        
+
         let src1r = self.role_defaults_storage.read().unwrap();
         let src1ar = src1r.deref();
         blend_variables(&mut blended, serde_yaml::Value::Mapping(src1ar.clone()));
@@ -259,7 +264,7 @@ impl PlaybookContext {
         blend_variables(&mut blended, self.extra_vars.clone());
 
         match blend_target {
-            BlendTarget::NotTemplateModule => { },
+            BlendTarget::NotTemplateModule => {}
             BlendTarget::TemplateModule => {
                 // for security reasons env vars from security tools like 'op run' are only exposed to the template module
                 // to prevent accidental leakage into logs and history
@@ -275,12 +280,13 @@ impl PlaybookContext {
         play_hosts.sort();
 
         if let serde_yaml::Value::Mapping(ref mut mapping) = blended {
-            let hosts_seq: Vec<serde_yaml::Value> = play_hosts.iter()
+            let hosts_seq: Vec<serde_yaml::Value> = play_hosts
+                .iter()
                 .map(|h| serde_yaml::Value::String(h.clone()))
                 .collect();
             mapping.insert(
                 serde_yaml::Value::String("jet_play_hosts".to_string()),
-                serde_yaml::Value::Sequence(hosts_seq)
+                serde_yaml::Value::Sequence(hosts_seq),
             );
         }
 
@@ -291,26 +297,52 @@ impl PlaybookContext {
     // only the context knows all the variables from the playbook traversal to fill in and how to blend
     // variables in the correct order.
 
-    pub fn render_template(&self, template: &String, host: &Arc<RwLock<Host>>, blend_target: BlendTarget, template_mode: TemplateMode) -> Result<String,String> {
+    pub fn render_template(
+        &self,
+        template: &String,
+        host: &Arc<RwLock<Host>>,
+        blend_target: BlendTarget,
+        template_mode: TemplateMode,
+    ) -> Result<String, String> {
         let vars = self.get_complete_blended_variables(host, blend_target);
-        return self.templar.read().unwrap().render(template, vars, template_mode);
+        return self
+            .templar
+            .read()
+            .unwrap()
+            .render(template, vars, template_mode);
     }
 
     // testing conditions for truthiness works much like templating strings
 
-    pub fn test_condition(&self, expr: &String, host: &Arc<RwLock<Host>>, tm: TemplateMode) -> Result<bool,String> {
+    pub fn test_condition(
+        &self,
+        expr: &String,
+        host: &Arc<RwLock<Host>>,
+        tm: TemplateMode,
+    ) -> Result<bool, String> {
         let vars = self.get_complete_blended_variables(host, BlendTarget::NotTemplateModule);
         return self.templar.read().unwrap().test_condition(expr, vars, tm);
     }
 
     // a version of template evaluation that allows some additional variables, for example from a module
 
-    pub fn test_condition_with_extra_data(&self, expr: &String, host: &Arc<RwLock<Host>>, vars_input: serde_yaml::Mapping, tm: TemplateMode) -> Result<bool,String> {
-        let mut vars = self.get_complete_blended_variables_as_value(host, BlendTarget::NotTemplateModule);
+    pub fn test_condition_with_extra_data(
+        &self,
+        expr: &String,
+        host: &Arc<RwLock<Host>>,
+        vars_input: serde_yaml::Mapping,
+        tm: TemplateMode,
+    ) -> Result<bool, String> {
+        let mut vars =
+            self.get_complete_blended_variables_as_value(host, BlendTarget::NotTemplateModule);
         blend_variables(&mut vars, serde_yaml::Value::Mapping(vars_input));
         return match vars {
-            serde_yaml::Value::Mapping(x) => self.templar.read().unwrap().test_condition(expr, x, tm),
-            _ => { panic!("impossible input to test_condition"); }
+            serde_yaml::Value::Mapping(x) => {
+                self.templar.read().unwrap().test_condition(expr, x, tm)
+            }
+            _ => {
+                panic!("impossible input to test_condition");
+            }
         };
     }
 
@@ -319,78 +351,106 @@ impl PlaybookContext {
 
     // FIXME: this should return a struct
 
-    pub fn get_ssh_connection_details(&self, host: &Arc<RwLock<Host>>) -> (String,String,i64,Option<String>,Option<String>,Option<String>) {
-
-        let vars = self.get_complete_blended_variables(host,BlendTarget::NotTemplateModule);
+    pub fn get_ssh_connection_details(
+        &self,
+        host: &Arc<RwLock<Host>>,
+    ) -> (
+        String,
+        String,
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
+        let vars = self.get_complete_blended_variables(host, BlendTarget::NotTemplateModule);
         let host2 = host.read().unwrap();
 
         let remote_hostname = match vars.contains_key(&String::from("jet_ssh_hostname")) {
-            true => match vars.get(&String::from("jet_ssh_hostname")).unwrap().as_str() {
+            true => match vars
+                .get(&String::from("jet_ssh_hostname"))
+                .unwrap()
+                .as_str()
+            {
                 Some(x) => String::from(x),
-                None => host2.name.clone()
+                None => host2.name.clone(),
             },
-            false => host2.name.clone()
+            false => host2.name.clone(),
         };
         let remote_user = match vars.contains_key(&String::from("jet_ssh_user")) {
             true => match vars.get(&String::from("jet_ssh_user")).unwrap().as_str() {
                 Some(x) => String::from(x),
-                None => self.ssh_user.clone()
+                None => self.ssh_user.clone(),
             },
-            false => self.ssh_user.clone()
+            false => self.ssh_user.clone(),
         };
         let remote_port = match vars.contains_key(&String::from("jet_ssh_port")) {
             true => match vars.get(&String::from("jet_ssh_port")).unwrap().as_str() {
-                Some(x) => {
-                    match x.parse::<i64>() {
-                        Ok(ix) => ix,
-                        Err(_) => self.ssh_port
-                    }
+                Some(x) => match x.parse::<i64>() {
+                    Ok(ix) => ix,
+                    Err(_) => self.ssh_port,
                 },
                 None => match vars.get(&String::from("jet_ssh_port")).unwrap().as_i64() {
                     Some(x) => x,
-                    None => self.ssh_port
-                }
+                    None => self.ssh_port,
+                },
             },
-            false => {
-                self.ssh_port
-            }
+            false => self.ssh_port,
         };
-        let keyfile : Option<String> = match vars.contains_key(&String::from("jet_ssh_private_key_file")) {
-            true => match vars.get(&String::from("jet_ssh_private_key_file")).unwrap().as_str() {
-                Some(x) => {
-                    match expanduser(String::from(x)) {
+        let keyfile: Option<String> =
+            match vars.contains_key(&String::from("jet_ssh_private_key_file")) {
+                true => match vars
+                    .get(&String::from("jet_ssh_private_key_file"))
+                    .unwrap()
+                    .as_str()
+                {
+                    Some(x) => match expanduser(String::from(x)) {
                         Ok(expanded) => Some(expanded.display().to_string()),
-                        Err(_) => None
-                    }
-                }
-                None => None
-            },
-            false => None
-        };
-        let passphrase : Option<String> = match vars.contains_key(&String::from("jet_ssh_private_key_passphrase")) {
-            true => match vars.get(&String::from("jet_ssh_private_key_passphrase")).unwrap().as_str() {
-                Some(x) => Some(String::from(x)),
-                None =>  None
-            },
-            false => match env::var("JET_SSH_PRIVATE_KEY_PASSPHRASE") {
-                Ok(x) => Some(x),
-                Err(_) => None
-            }
-        };
-        let key_comment: Option<String> = match vars.contains_key(&String::from("jet_ssh_key_comment")) {
-            true => match vars.get(&String::from("jet_ssh_key_comment")).unwrap().as_str() {
-                Some(x) => Some(String::from(x)),
-                None =>  None
-            },
-            false => match env::var("JET_SSH_KEY_COMMENT") {
-                Ok(x) => Some(x),
-                Err(_) => None
-             }
-        };
+                        Err(_) => None,
+                    },
+                    None => None,
+                },
+                false => None,
+            };
+        let passphrase: Option<String> =
+            match vars.contains_key(&String::from("jet_ssh_private_key_passphrase")) {
+                true => match vars
+                    .get(&String::from("jet_ssh_private_key_passphrase"))
+                    .unwrap()
+                    .as_str()
+                {
+                    Some(x) => Some(String::from(x)),
+                    None => None,
+                },
+                false => match env::var("JET_SSH_PRIVATE_KEY_PASSPHRASE") {
+                    Ok(x) => Some(x),
+                    Err(_) => None,
+                },
+            };
+        let key_comment: Option<String> =
+            match vars.contains_key(&String::from("jet_ssh_key_comment")) {
+                true => match vars
+                    .get(&String::from("jet_ssh_key_comment"))
+                    .unwrap()
+                    .as_str()
+                {
+                    Some(x) => Some(String::from(x)),
+                    None => None,
+                },
+                false => match env::var("JET_SSH_KEY_COMMENT") {
+                    Ok(x) => Some(x),
+                    Err(_) => None,
+                },
+            };
 
-
-        return (remote_hostname, remote_user, remote_port, keyfile, passphrase, key_comment)
-    } 
+        return (
+            remote_hostname,
+            remote_user,
+            remote_port,
+            keyfile,
+            passphrase,
+            key_comment,
+        );
+    }
 
     // loads environment variables into the context, adding an "ENV_foo" prefix
     // to each environment variable "foo". These variables will only be made available
@@ -409,12 +469,15 @@ impl PlaybookContext {
             "TERM_SESSION_ID",
             "XPC_FLAGS",
             "XPC_SERVICE_NAME",
-            "_"
+            "_",
         ];
-        
-        for (k,v) in env::vars() {
-            if ! do_not_load.contains(&k.as_str()) {
-                my_env.insert(serde_yaml::Value::String(format!("ENV_{k}")) , serde_yaml::Value::String(v));
+
+        for (k, v) in env::vars() {
+            if !do_not_load.contains(&k.as_str()) {
+                my_env.insert(
+                    serde_yaml::Value::String(format!("ENV_{k}")),
+                    serde_yaml::Value::String(v),
+                );
             }
         }
     }
@@ -445,27 +508,48 @@ impl PlaybookContext {
     }
 
     pub fn increment_attempted_for_host(&mut self, host: &String) {
-        *self.attempted_count_for_host.entry(host.clone()).or_insert(0) += 1;
+        *self
+            .attempted_count_for_host
+            .entry(host.clone())
+            .or_insert(0) += 1;
     }
 
     pub fn increment_created_for_host(&mut self, host: &String) {
         *self.created_count_for_host.entry(host.clone()).or_insert(0) += 1;
-        *self.adjusted_count_for_host.entry(host.clone()).or_insert(0) += 1;
+        *self
+            .adjusted_count_for_host
+            .entry(host.clone())
+            .or_insert(0) += 1;
     }
 
     pub fn increment_removed_for_host(&mut self, host: &String) {
         *self.removed_count_for_host.entry(host.clone()).or_insert(0) += 1;
-        *self.adjusted_count_for_host.entry(host.clone()).or_insert(0) += 1;
+        *self
+            .adjusted_count_for_host
+            .entry(host.clone())
+            .or_insert(0) += 1;
     }
 
     pub fn increment_modified_for_host(&mut self, host: &String) {
-        *self.modified_count_for_host.entry(host.clone()).or_insert(0) += 1;
-        *self.adjusted_count_for_host.entry(host.clone()).or_insert(0) += 1;
+        *self
+            .modified_count_for_host
+            .entry(host.clone())
+            .or_insert(0) += 1;
+        *self
+            .adjusted_count_for_host
+            .entry(host.clone())
+            .or_insert(0) += 1;
     }
 
     pub fn increment_executed_for_host(&mut self, host: &String) {
-        *self.executed_count_for_host.entry(host.clone()).or_insert(0) += 1;
-        *self.adjusted_count_for_host.entry(host.clone()).or_insert(0) += 1;
+        *self
+            .executed_count_for_host
+            .entry(host.clone())
+            .or_insert(0) += 1;
+        *self
+            .adjusted_count_for_host
+            .entry(host.clone())
+            .or_insert(0) += 1;
     }
 
     pub fn increment_failed_for_host(&mut self, host: &String) {
@@ -485,43 +569,73 @@ impl PlaybookContext {
     }
 
     pub fn get_total_attempted_count(&self) -> usize {
-        return self.attempted_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+        return self
+            .attempted_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
     pub fn get_total_creation_count(&self) -> usize {
-        return self.created_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+        return self
+            .created_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
-    pub fn get_total_modified_count(&self) -> usize{
-        return self.modified_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+    pub fn get_total_modified_count(&self) -> usize {
+        return self
+            .modified_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
-    pub fn get_total_removal_count(&self) -> usize{
-        return self.removed_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+    pub fn get_total_removal_count(&self) -> usize {
+        return self
+            .removed_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
     pub fn get_total_executions_count(&self) -> usize {
-        return self.executed_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+        return self
+            .executed_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
-    pub fn get_total_failed_count(&self) -> usize{
-        return self.failed_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+    pub fn get_total_failed_count(&self) -> usize {
+        return self
+            .failed_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
     pub fn get_total_adjusted_count(&self) -> usize {
-        return self.adjusted_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+        return self
+            .adjusted_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
     pub fn get_total_passive_count(&self) -> usize {
-        return self.passive_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+        return self
+            .passive_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
     pub fn get_total_matched_count(&self) -> usize {
-        return self.matched_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+        return self
+            .matched_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
     pub fn get_total_skipped_count(&self) -> usize {
-        return self.skipped_count_for_host.values().fold(0, |ttl, &x| ttl + x);
+        return self
+            .skipped_count_for_host
+            .values()
+            .fold(0, |ttl, &x| ttl + x);
     }
 
     pub fn get_hosts_creation_count(&self) -> usize {
@@ -563,7 +677,4 @@ impl PlaybookContext {
     pub fn get_hosts_seen_count(&self) -> usize {
         return self.seen_hosts.keys().len();
     }
-    
-
-
 }

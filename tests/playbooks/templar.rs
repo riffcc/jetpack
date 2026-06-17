@@ -3,7 +3,7 @@ use serde_yaml;
 
 #[test]
 fn test_templar_new() {
-    let templar = Templar::new();
+    let _templar = Templar::new();
     // Just ensure we can create a new instance
     assert!(true);
 }
@@ -19,11 +19,14 @@ fn test_template_mode_equality() {
 fn test_render_simple_template() {
     let templar = Templar::new();
     let mut data = serde_yaml::Mapping::new();
-    data.insert(serde_yaml::Value::String("name".to_string()), serde_yaml::Value::String("world".to_string()));
-    
+    data.insert(
+        serde_yaml::Value::String("name".to_string()),
+        serde_yaml::Value::String("world".to_string()),
+    );
+
     let template = "Hello, {{name}}!".to_string();
     let result = templar.render(&template, data, TemplateMode::Strict);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "Hello, world!");
 }
@@ -32,10 +35,10 @@ fn test_render_simple_template() {
 fn test_render_template_with_missing_variable() {
     let templar = Templar::new();
     let data = serde_yaml::Mapping::new();
-    
+
     let template = "Hello, {{name}}!".to_string();
     let result = templar.render(&template, data, TemplateMode::Strict);
-    
+
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Template error"));
 }
@@ -44,10 +47,10 @@ fn test_render_template_with_missing_variable() {
 fn test_render_off_mode() {
     let templar = Templar::new();
     let data = serde_yaml::Mapping::new();
-    
+
     let template = "Hello, {{name}}!".to_string();
     let result = templar.render(&template, data, TemplateMode::Off);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "empty");
 }
@@ -56,11 +59,14 @@ fn test_render_off_mode() {
 fn test_test_condition_true() {
     let templar = Templar::new();
     let mut data = serde_yaml::Mapping::new();
-    data.insert(serde_yaml::Value::String("value".to_string()), serde_yaml::Value::Number(serde_yaml::Number::from(10)));
-    
+    data.insert(
+        serde_yaml::Value::String("value".to_string()),
+        serde_yaml::Value::Number(serde_yaml::Number::from(10)),
+    );
+
     let expr = "value".to_string(); // Simple truthiness test
     let result = templar.test_condition(&expr, data, TemplateMode::Strict);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), true);
 }
@@ -69,11 +75,14 @@ fn test_test_condition_true() {
 fn test_test_condition_false() {
     let templar = Templar::new();
     let mut data = serde_yaml::Mapping::new();
-    data.insert(serde_yaml::Value::String("value".to_string()), serde_yaml::Value::Bool(false));
-    
+    data.insert(
+        serde_yaml::Value::String("value".to_string()),
+        serde_yaml::Value::Bool(false),
+    );
+
     let expr = "value".to_string();
     let result = templar.test_condition(&expr, data, TemplateMode::Strict);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), false);
 }
@@ -82,10 +91,10 @@ fn test_test_condition_false() {
 fn test_test_condition_off_mode() {
     let templar = Templar::new();
     let data = serde_yaml::Mapping::new();
-    
+
     let expr = "value > 5".to_string();
     let result = templar.test_condition(&expr, data, TemplateMode::Off);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), true); // Always returns true in Off mode
 }
@@ -94,10 +103,10 @@ fn test_test_condition_off_mode() {
 fn test_test_condition_with_undefined_parameter() {
     let templar = Templar::new();
     let data = serde_yaml::Mapping::new();
-    
+
     let expr = "undefined_var == true".to_string();
     let result = templar.test_condition(&expr, data, TemplateMode::Strict);
-    
+
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.contains("failed to parse conditional"));
@@ -107,12 +116,18 @@ fn test_test_condition_with_undefined_parameter() {
 fn test_test_condition_with_complex_expression() {
     let templar = Templar::new();
     let mut data = serde_yaml::Mapping::new();
-    data.insert(serde_yaml::Value::String("show".to_string()), serde_yaml::Value::Bool(true));
-    data.insert(serde_yaml::Value::String("hide".to_string()), serde_yaml::Value::Bool(false));
-    
+    data.insert(
+        serde_yaml::Value::String("show".to_string()),
+        serde_yaml::Value::Bool(true),
+    );
+    data.insert(
+        serde_yaml::Value::String("hide".to_string()),
+        serde_yaml::Value::Bool(false),
+    );
+
     let expr = "show".to_string(); // Simplified
     let result = templar.test_condition(&expr, data, TemplateMode::Strict);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), true);
 }
@@ -121,11 +136,14 @@ fn test_test_condition_with_complex_expression() {
 fn test_render_with_helpers() {
     let templar = Templar::new();
     let mut data = serde_yaml::Mapping::new();
-    data.insert(serde_yaml::Value::String("text".to_string()), serde_yaml::Value::String("HELLO".to_string()));
-    
+    data.insert(
+        serde_yaml::Value::String("text".to_string()),
+        serde_yaml::Value::String("HELLO".to_string()),
+    );
+
     let template = "{{ to_lower_case text }}".to_string();
     let result = templar.render(&template, data, TemplateMode::Strict);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "hello");
 }
@@ -134,11 +152,14 @@ fn test_render_with_helpers() {
 fn test_render_with_if_block() {
     let templar = Templar::new();
     let mut data = serde_yaml::Mapping::new();
-    data.insert(serde_yaml::Value::String("show".to_string()), serde_yaml::Value::Bool(true));
-    
+    data.insert(
+        serde_yaml::Value::String("show".to_string()),
+        serde_yaml::Value::Bool(true),
+    );
+
     let template = "{{#if show}}visible{{else}}hidden{{/if}}".to_string();
     let result = templar.render(&template, data, TemplateMode::Strict);
-    
+
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "visible");
 }
@@ -149,7 +170,7 @@ fn test_template_mode_debug() {
     let mode = TemplateMode::Strict;
     let debug_str = format!("{:?}", mode);
     assert_eq!(debug_str, "Strict");
-    
+
     let mode = TemplateMode::Off;
     let debug_str = format!("{:?}", mode);
     assert_eq!(debug_str, "Off");

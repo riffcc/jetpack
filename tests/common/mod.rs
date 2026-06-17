@@ -1,28 +1,33 @@
 // Common test utilities
 
-use jetpack::playbooks::traversal::RunState;
-use jetpack::inventory::inventory::Inventory;
-use jetpack::playbooks::context::PlaybookContext;
-use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
 use jetpack::cli::parser::CliParser;
 use jetpack::connection::factory::ConnectionFactory;
 use jetpack::connection::local::LocalFactory;
+use jetpack::inventory::inventory::Inventory;
+use jetpack::playbooks::context::PlaybookContext;
+use jetpack::playbooks::traversal::RunState;
+use jetpack::playbooks::visitor::{CheckMode, PlaybookVisitor};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
+// Shared helper used by subdirectory test files that are not compiled as
+// top-level Cargo targets (tests/modules/*, tests/connection/*, ...).
+// Allowed dead_code until those tests are wired into a test target.
+#[allow(dead_code)]
 pub fn create_test_run_state() -> Arc<RunState> {
     let parser = CliParser::new();
     let mut inventory = Inventory::new();
-    
+
     // Add localhost as required by LocalFactory
     let localhost_name = "localhost".to_string();
     inventory.create_host(&localhost_name);
-    
+
     let inventory = Arc::new(RwLock::new(inventory));
     let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
     let visitor = Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No)));
-    let connection_factory: Arc<RwLock<dyn ConnectionFactory>> = Arc::new(RwLock::new(LocalFactory::new(&inventory)));
-    
+    let connection_factory: Arc<RwLock<dyn ConnectionFactory>> =
+        Arc::new(RwLock::new(LocalFactory::new(&inventory)));
+
     Arc::new(RunState {
         inventory: Arc::clone(&inventory),
         playbook_paths: Arc::new(RwLock::new(Vec::new())),

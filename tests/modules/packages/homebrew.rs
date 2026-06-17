@@ -79,7 +79,7 @@ update: "yes"
 
     let task: Result<HomebrewTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Install development tools".to_string()));
     assert_eq!(task.package, "rust");
@@ -94,7 +94,7 @@ package: tmux
 
     let task: Result<HomebrewTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.package, "tmux");
     assert!(task.name.is_none());
@@ -113,7 +113,7 @@ and:
 
     let task: Result<HomebrewTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.package.contains("{{ tool_name }}"));
     assert!(task.with.is_some());

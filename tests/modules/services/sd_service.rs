@@ -81,7 +81,7 @@ started: "yes"
 
     let task: Result<SystemdServiceTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Manage database service".to_string()));
     assert_eq!(task.service, "mariadb");
@@ -97,7 +97,7 @@ service: sshd
 
     let task: Result<SystemdServiceTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.service, "sshd");
     assert!(task.name.is_none());
@@ -120,7 +120,7 @@ and:
 
     let task: Result<SystemdServiceTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.service.contains("{{ app_service_name }}"));
     assert!(task.with.is_some());
@@ -137,7 +137,7 @@ restart: "yes"
 
     let task: Result<SystemdServiceTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Restart application".to_string()));
     assert_eq!(task.service, "myapp");

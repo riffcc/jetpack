@@ -80,7 +80,7 @@ update: "yes"
 
     let task: Result<YumDnfTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Install database server".to_string()));
     assert_eq!(task.package, "postgresql-server");
@@ -96,7 +96,7 @@ package: vim-enhanced
 
     let task: Result<YumDnfTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.package, "vim-enhanced");
     assert!(task.name.is_none());
@@ -116,7 +116,7 @@ and:
 
     let task: Result<YumDnfTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.package.contains("{{ rpm_package }}"));
     assert!(task.with.is_some());

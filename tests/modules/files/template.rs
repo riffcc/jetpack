@@ -57,7 +57,7 @@ attributes:
 
     let task: Result<TemplateTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Deploy database config".to_string()));
     assert_eq!(task.src, "templates/database.yml.j2");
@@ -74,7 +74,7 @@ dest: /etc/motd
 
     let task: Result<TemplateTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.src, "motd.j2");
     assert_eq!(task.dest, "/etc/motd");
@@ -97,7 +97,7 @@ and:
 
     let task: Result<TemplateTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.with.is_some());
     assert!(task.and.is_some());
@@ -117,9 +117,12 @@ attributes:
 
     let task: Result<TemplateTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
-    assert_eq!(task.name, Some("Deploy environment-specific config".to_string()));
+    assert_eq!(
+        task.name,
+        Some("Deploy environment-specific config".to_string())
+    );
     assert!(task.src.contains("{{ app_name }}"));
     assert!(task.dest.contains("{{ app_name }}"));
 }

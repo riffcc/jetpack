@@ -60,7 +60,7 @@ save: app_dir_stat
 
     let task: Result<StatTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Check application directory".to_string()));
     assert_eq!(task.path, "/opt/myapp");
@@ -76,7 +76,7 @@ save: syslog_stat
 
     let task: Result<StatTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.path, "/var/log/syslog");
     assert_eq!(task.save, "syslog_stat");
@@ -94,7 +94,7 @@ with:
 
     let task: Result<StatTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.path.contains("{{ config_dir }}"));
     assert!(task.save.contains("{{ app_name }}"));
@@ -113,7 +113,7 @@ with:
 
     let task: Result<StatTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Check multiple files".to_string()));
     assert!(task.path.contains("{{ item }}"));

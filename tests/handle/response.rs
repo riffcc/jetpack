@@ -1,21 +1,21 @@
+use jetpack::cli::parser::CliParser;
+use jetpack::connection::no::NoFactory;
 use jetpack::handle::response::*;
-use jetpack::tasks::request::{TaskRequest, SudoDetails};
-use jetpack::tasks::response::TaskStatus;
-use jetpack::tasks::fields::Field;
-use jetpack::playbooks::traversal::RunState;
-use jetpack::playbooks::context::PlaybookContext;
 use jetpack::inventory::hosts::Host;
 use jetpack::inventory::inventory::Inventory;
-use jetpack::cli::parser::CliParser;
-use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
-use jetpack::connection::no::NoFactory;
+use jetpack::playbooks::context::PlaybookContext;
+use jetpack::playbooks::traversal::RunState;
+use jetpack::playbooks::visitor::{CheckMode, PlaybookVisitor};
+use jetpack::tasks::fields::Field;
+use jetpack::tasks::request::{SudoDetails, TaskRequest};
+use jetpack::tasks::response::TaskStatus;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 fn create_test_sudo_details() -> SudoDetails {
     SudoDetails {
         user: None,
-        template: "test".to_string()
+        template: "test".to_string(),
     }
 }
 
@@ -23,7 +23,7 @@ fn create_test_response() -> Response {
     let parser = CliParser::new();
     let inventory = Arc::new(RwLock::new(Inventory::new()));
     let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
-    
+
     let run_state = Arc::new(RunState {
         inventory: Arc::clone(&inventory),
         playbook_paths: Arc::new(RwLock::new(Vec::new())),
@@ -47,10 +47,10 @@ fn create_test_response() -> Response {
         playbook_contents: Vec::new(),
         fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
-    
+
     let hostname = "testhost".to_string();
     let host = Arc::new(RwLock::new(Host::new(&hostname)));
-    
+
     Response::new(run_state, host)
 }
 
@@ -64,7 +64,7 @@ fn test_response_new() {
 fn test_response_is_matched() {
     let response = create_test_response();
     let request = TaskRequest::validate();
-    
+
     let result = response.is_matched(&request);
     assert!(result.status == TaskStatus::IsMatched);
 }
@@ -74,7 +74,7 @@ fn test_response_needs_creation() {
     let response = create_test_response();
     let sudo_details = create_test_sudo_details();
     let request = TaskRequest::query(&sudo_details);
-    
+
     let result = response.needs_creation(&request);
     assert!(result.status == TaskStatus::NeedsCreation);
 }
@@ -85,7 +85,7 @@ fn test_response_needs_modification() {
     let sudo_details = create_test_sudo_details();
     let request = TaskRequest::query(&sudo_details);
     let changes = vec![Field::Content, Field::Mode];
-    
+
     let result = response.needs_modification(&request, &changes);
     assert!(result.status == TaskStatus::NeedsModification);
     assert_eq!(result.changes.len(), 2);
@@ -96,7 +96,7 @@ fn test_response_needs_removal() {
     let response = create_test_response();
     let sudo_details = create_test_sudo_details();
     let request = TaskRequest::query(&sudo_details);
-    
+
     let result = response.needs_removal(&request);
     assert!(result.status == TaskStatus::NeedsRemoval);
 }
@@ -106,7 +106,7 @@ fn test_response_is_created() {
     let response = create_test_response();
     let sudo_details = create_test_sudo_details();
     let request = TaskRequest::create(&sudo_details);
-    
+
     let result = response.is_created(&request);
     assert!(result.status == TaskStatus::IsCreated);
 }
@@ -117,7 +117,7 @@ fn test_response_is_modified() {
     let sudo_details = create_test_sudo_details();
     let changes = vec![Field::Owner];
     let request = TaskRequest::modify(&sudo_details, changes.clone());
-    
+
     let result = response.is_modified(&request, changes);
     assert!(result.status == TaskStatus::IsModified);
     assert_eq!(result.changes.len(), 1);
@@ -128,7 +128,7 @@ fn test_response_is_removed() {
     let response = create_test_response();
     let sudo_details = create_test_sudo_details();
     let request = TaskRequest::remove(&sudo_details);
-    
+
     let result = response.is_removed(&request);
     assert!(result.status == TaskStatus::IsRemoved);
 }
@@ -137,9 +137,8 @@ fn test_response_is_removed() {
 fn test_response_is_failed() {
     let response = create_test_response();
     let request = TaskRequest::validate();
-    
+
     let result = response.is_failed(&request, &"Test error message".to_string());
     assert!(result.status == TaskStatus::Failed);
     assert_eq!(result.msg, Some("Test error message".to_string()));
 }
-

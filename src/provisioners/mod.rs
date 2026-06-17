@@ -36,12 +36,12 @@
 pub mod proxmox_lxc;
 pub mod proxmox_vm;
 
+use crate::dns::DnsConfig;
+use crate::inventory::inventory::Inventory;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
-use crate::dns::DnsConfig;
-use crate::inventory::inventory::Inventory;
 
 /// Default state for provisioning (present)
 fn default_state() -> String {
@@ -190,15 +190,15 @@ impl WaitStrategy {
 pub fn wait_for_ssh(
     initial_ip: Option<String>,
     port: u16,
-    _user: &str,  // Reserved for future SSH authentication check
+    _user: &str, // Reserved for future SSH authentication check
     config: &ProvisionConfig,
     host_name: &str,
     output: Option<&crate::output::OutputHandlerRef>,
     ip_getter: Option<Box<dyn Fn() -> Option<String> + Send>>,
 ) -> Result<String, String> {
     use std::net::TcpStream;
-    use std::time::{Duration, Instant};
     use std::thread;
+    use std::time::{Duration, Instant};
 
     // Check if wait is disabled
     if config.wait_for_host == Some(false) {
@@ -208,7 +208,9 @@ pub fn wait_for_ssh(
     let timeout = config.wait_timeout.unwrap_or(300);
     let initial_delay = config.wait_delay.unwrap_or(2);
     let max_delay = config.wait_max_delay.unwrap_or(30);
-    let strategy = config.wait_strategy.as_ref()
+    let strategy = config
+        .wait_strategy
+        .as_ref()
         .map(|s| WaitStrategy::from_str(s))
         .unwrap_or(WaitStrategy::Backoff);
 
@@ -223,10 +225,16 @@ pub fn wait_for_ssh(
             if let Some(out) = output {
                 out.on_provision_ssh_wait(host_name, ip, timeout);
             }
-            eprintln!("  → waiting for SSH on {}:{} (timeout: {}s)", ip, port, timeout);
+            eprintln!(
+                "  → waiting for SSH on {}:{} (timeout: {}s)",
+                ip, port, timeout
+            );
         }
         None => {
-            eprintln!("  → waiting for container '{}' to get an IP and SSH (timeout: {}s)", host_name, timeout);
+            eprintln!(
+                "  → waiting for container '{}' to get an IP and SSH (timeout: {}s)",
+                host_name, timeout
+            );
         }
     }
 
@@ -256,7 +264,10 @@ pub fn wait_for_ssh(
                         if let Some(out) = output {
                             out.on_provision_ssh_ready(host_name, elapsed, attempt);
                         }
-                        eprintln!("  → SSH available on {} ({}) after {}s ({} attempts)", host_name, ip, elapsed, attempt);
+                        eprintln!(
+                            "  → SSH available on {} ({}) after {}s ({} attempts)",
+                            host_name, ip, elapsed, attempt
+                        );
                         return Ok(ip.clone());
                     }
                     Err(_) => {}
@@ -281,16 +292,36 @@ pub fn wait_for_ssh(
 /// Trait for provisioner implementations
 pub trait Provisioner: Send + Sync {
     /// Check if the host infrastructure exists
-    fn exists(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<bool, String>;
+    fn exists(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<bool, String>;
 
     /// Ensure the host infrastructure exists, creating if necessary
-    fn ensure_exists(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<ProvisionResult, String>;
+    fn ensure_exists(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<ProvisionResult, String>;
 
     /// Get the IP address of the provisioned host (for connection)
-    fn get_ip(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<Option<String>, String>;
+    fn get_ip(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<Option<String>, String>;
 
     /// Destroy the host infrastructure
-    fn destroy(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<(), String>;
+    fn destroy(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<(), String>;
 }
 
 /// Get the appropriate provisioner for a provision type
@@ -298,7 +329,7 @@ pub fn get_provisioner(provision_type: &str) -> Result<Box<dyn Provisioner>, Str
     match provision_type {
         "proxmox_lxc" => Ok(Box::new(proxmox_lxc::ProxmoxLxcProvisioner::new())),
         "proxmox_vm" => Ok(Box::new(proxmox_vm::ProxmoxVmProvisioner::new())),
-        _ => Err(format!("Unknown provisioner type: {}", provision_type))
+        _ => Err(format!("Unknown provisioner type: {}", provision_type)),
     }
 }
 
@@ -332,28 +363,30 @@ pub fn ensure_host_provisioned(
 
     // Wait for SSH connectivity (moved here from individual provisioners so output handler is available)
     if provision_config.wait_for_host != Some(false) {
-        let initial_ip = provisioner.get_ip(provision_config, inventory_name, inventory)
+        let initial_ip = provisioner
+            .get_ip(provision_config, inventory_name, inventory)
             .ok()
             .flatten();
 
         // Build an IP-getter closure for DHCP containers whose IP isn't assigned yet.
         // Creates a fresh provisioner instance (provisioners are stateless) so the
         // closure can own everything it needs without lifetime issues.
-        let ip_getter: Option<Box<dyn Fn() -> Option<String> + Send>> =
-            if initial_ip.is_none() {
-                let prov_type = provision_config.provision_type.clone();
-                let config_clone = provision_config.clone();
-                let inv_clone = Arc::clone(inventory);
-                let inv_name = inventory_name.to_string();
-                match get_provisioner(&prov_type) {
-                    Ok(prov) => Some(Box::new(move || {
-                        prov.get_ip(&config_clone, &inv_name, &inv_clone).ok().flatten()
-                    })),
-                    Err(_) => None,
-                }
-            } else {
-                None
-            };
+        let ip_getter: Option<Box<dyn Fn() -> Option<String> + Send>> = if initial_ip.is_none() {
+            let prov_type = provision_config.provision_type.clone();
+            let config_clone = provision_config.clone();
+            let inv_clone = Arc::clone(inventory);
+            let inv_name = inventory_name.to_string();
+            match get_provisioner(&prov_type) {
+                Ok(prov) => Some(Box::new(move || {
+                    prov.get_ip(&config_clone, &inv_name, &inv_clone)
+                        .ok()
+                        .flatten()
+                })),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
 
         let ssh_user = provision_config.ssh_user.as_deref().unwrap_or("root");
         let confirmed_ip = wait_for_ssh(
@@ -388,7 +421,9 @@ pub fn ensure_host_provisioned(
             match crate::dns::add_host_record(dns_config, inventory_name, &ip) {
                 Ok(true) => {
                     let hostname = crate::dns::extract_hostname(inventory_name);
-                    let zone = dns_config.zone.clone()
+                    let zone = dns_config
+                        .zone
+                        .clone()
                         .or_else(|| crate::dns::infer_zone(inventory_name))
                         .unwrap_or_else(|| "?".to_string());
                     eprintln!("  → DNS: added {} -> {} to {}", hostname, ip, zone);
@@ -419,7 +454,9 @@ pub fn destroy_host(
         match crate::dns::remove_host_record(dns_config, inventory_name) {
             Ok(true) => {
                 let hostname = crate::dns::extract_hostname(inventory_name);
-                let zone = dns_config.zone.clone()
+                let zone = dns_config
+                    .zone
+                    .clone()
                     .or_else(|| crate::dns::infer_zone(inventory_name))
                     .unwrap_or_else(|| "?".to_string());
                 eprintln!("  → DNS: removed {} from {}", hostname, zone);
@@ -473,8 +510,14 @@ mp1: "local-lvm:75,mp=/mnt/chunk1"
         assert_eq!(config.provision_type, "proxmox_lxc");
         assert_eq!(config.cluster, "hypervisor1");
         assert_eq!(config.extra.len(), 2);
-        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:75,mp=/mnt/chunk0".to_string()));
-        assert_eq!(config.extra.get("mp1"), Some(&"local-lvm:75,mp=/mnt/chunk1".to_string()));
+        assert_eq!(
+            config.extra.get("mp0"),
+            Some(&"local-lvm:75,mp=/mnt/chunk0".to_string())
+        );
+        assert_eq!(
+            config.extra.get("mp1"),
+            Some(&"local-lvm:75,mp=/mnt/chunk1".to_string())
+        );
     }
 
     #[test]
@@ -489,10 +532,22 @@ mp50: "local-lvm:100,mp=/mnt/data50"
 "#;
         let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.extra.len(), 4);
-        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:100,mp=/mnt/data0".to_string()));
-        assert_eq!(config.extra.get("mp5"), Some(&"local-lvm:100,mp=/mnt/data5".to_string()));
-        assert_eq!(config.extra.get("mp10"), Some(&"local-lvm:100,mp=/mnt/data10".to_string()));
-        assert_eq!(config.extra.get("mp50"), Some(&"local-lvm:100,mp=/mnt/data50".to_string()));
+        assert_eq!(
+            config.extra.get("mp0"),
+            Some(&"local-lvm:100,mp=/mnt/data0".to_string())
+        );
+        assert_eq!(
+            config.extra.get("mp5"),
+            Some(&"local-lvm:100,mp=/mnt/data5".to_string())
+        );
+        assert_eq!(
+            config.extra.get("mp10"),
+            Some(&"local-lvm:100,mp=/mnt/data10".to_string())
+        );
+        assert_eq!(
+            config.extra.get("mp50"),
+            Some(&"local-lvm:100,mp=/mnt/data50".to_string())
+        );
     }
 
     #[test]
@@ -507,9 +562,18 @@ tags: "production;database"
 "#;
         let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.extra.len(), 3);
-        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:75,mp=/mnt/data".to_string()));
-        assert_eq!(config.extra.get("hookscript"), Some(&"local:snippets/hookscript.pl".to_string()));
-        assert_eq!(config.extra.get("tags"), Some(&"production;database".to_string()));
+        assert_eq!(
+            config.extra.get("mp0"),
+            Some(&"local-lvm:75,mp=/mnt/data".to_string())
+        );
+        assert_eq!(
+            config.extra.get("hookscript"),
+            Some(&"local:snippets/hookscript.pl".to_string())
+        );
+        assert_eq!(
+            config.extra.get("tags"),
+            Some(&"production;database".to_string())
+        );
     }
 
     #[test]
@@ -539,17 +603,26 @@ mp0: "local-lvm:50,mp=/mnt/extra"
         assert_eq!(config.vmid, Some("100".to_string()));
         assert_eq!(config.memory, Some("2048".to_string()));
         assert_eq!(config.cores, Some("4".to_string()));
-        assert_eq!(config.ostemplate, Some("local:vztmpl/debian-13-standard.tar.zst".to_string()));
+        assert_eq!(
+            config.ostemplate,
+            Some("local:vztmpl/debian-13-standard.tar.zst".to_string())
+        );
         assert_eq!(config.storage, Some("local-lvm".to_string()));
         assert_eq!(config.rootfs_size, Some("16G".to_string()));
-        assert_eq!(config.net0, Some("name=eth0,bridge=vmbr0,ip=10.0.0.100/24,gw=10.0.0.1".to_string()));
+        assert_eq!(
+            config.net0,
+            Some("name=eth0,bridge=vmbr0,ip=10.0.0.100/24,gw=10.0.0.1".to_string())
+        );
         assert_eq!(config.password, Some("secret".to_string()));
         assert_eq!(config.unprivileged, Some("true".to_string()));
         assert_eq!(config.start_on_create, Some("true".to_string()));
         assert_eq!(config.features, Some("nesting=1".to_string()));
         assert_eq!(config.nameserver, Some("1.1.1.1 8.8.8.8".to_string()));
         assert_eq!(config.extra.len(), 1);
-        assert_eq!(config.extra.get("mp0"), Some(&"local-lvm:50,mp=/mnt/extra".to_string()));
+        assert_eq!(
+            config.extra.get("mp0"),
+            Some(&"local-lvm:50,mp=/mnt/extra".to_string())
+        );
     }
 
     #[test]
@@ -558,7 +631,9 @@ mp0: "local-lvm:50,mp=/mnt/extra"
         assert_eq!(WaitStrategy::from_str("Simple"), WaitStrategy::Simple);
         assert_eq!(WaitStrategy::from_str("SIMPLE"), WaitStrategy::Simple);
         assert_eq!(WaitStrategy::from_str("backoff"), WaitStrategy::Backoff);
-        assert_eq!(WaitStrategy::from_str("anything_else"), WaitStrategy::Backoff);
+        assert_eq!(
+            WaitStrategy::from_str("anything_else"),
+            WaitStrategy::Backoff
+        );
     }
 }
-

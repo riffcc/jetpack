@@ -1,9 +1,9 @@
-use jetpack::tasks::common::*;
-use jetpack::tasks::request::TaskRequest;
-use jetpack::tasks::response::TaskResponse;
-use jetpack::tasks::logic::{PreLogicInput, PreLogicEvaluated, PostLogicEvaluated};
 use jetpack::handle::handle::TaskHandle;
 use jetpack::playbooks::templar::TemplateMode;
+use jetpack::tasks::common::*;
+use jetpack::tasks::logic::PreLogicInput;
+use jetpack::tasks::request::TaskRequest;
+use jetpack::tasks::response::TaskResponse;
 use std::sync::Arc;
 
 // Mock implementation of IsTask for testing
@@ -25,7 +25,12 @@ impl IsTask for MockTask {
         None
     }
 
-    fn evaluate(&self, _handle: &Arc<TaskHandle>, _request: &Arc<TaskRequest>, _tm: TemplateMode) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+    fn evaluate(
+        &self,
+        _handle: &Arc<TaskHandle>,
+        _request: &Arc<TaskRequest>,
+        _tm: TemplateMode,
+    ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         unimplemented!("Mock evaluation not implemented")
     }
 }
@@ -64,19 +69,23 @@ fn test_get_display_name_empty_name() {
 fn test_evaluated_task_struct() {
     // Mock implementation of IsAction
     struct MockAction;
-    
+
     impl IsAction for MockAction {
-        fn dispatch(&self, _handle: &Arc<TaskHandle>, _request: &Arc<TaskRequest>) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        fn dispatch(
+            &self,
+            _handle: &Arc<TaskHandle>,
+            _request: &Arc<TaskRequest>,
+        ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
             unimplemented!("Mock dispatch not implemented")
         }
     }
-    
+
     let evaluated = EvaluatedTask {
         action: Arc::new(MockAction),
         with: Arc::new(None),
         and: Arc::new(None),
     };
-    
+
     assert!(evaluated.with.is_none());
     assert!(evaluated.and.is_none());
 }

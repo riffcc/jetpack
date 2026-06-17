@@ -19,9 +19,9 @@
 //!
 //! Creates and manages LXC containers on Proxmox VE via the REST API.
 
-use crate::provisioners::{ProvisionConfig, ProvisionResult, Provisioner};
 use crate::inventory::inventory::Inventory;
 use crate::playbooks::templar::{Templar, TemplateMode};
+use crate::provisioners::{ProvisionConfig, ProvisionResult, Provisioner};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error as StdError;
@@ -29,14 +29,24 @@ use std::sync::{Arc, RwLock};
 
 /// Format a reqwest error with diagnostic context (error kind, cause chain, URL).
 fn format_reqwest_error(prefix: &str, e: &reqwest::Error, url: &str) -> String {
-    let kind = if e.is_builder() { " [builder]" }
-        else if e.is_connect() { " [connect]" }
-        else if e.is_timeout() { " [timeout]" }
-        else if e.is_request() { " [request]" }
-        else { "" };
-    let cause = e.source()
+    let kind = if e.is_builder() {
+        " [builder]"
+    } else if e.is_connect() {
+        " [connect]"
+    } else if e.is_timeout() {
+        " [timeout]"
+    } else if e.is_request() {
+        " [request]"
+    } else {
+        ""
+    };
+    let cause = e
+        .source()
         .map(|src| {
-            let inner = src.source().map(|s2| format!(" -> {}", s2)).unwrap_or_default();
+            let inner = src
+                .source()
+                .map(|s2| format!(" -> {}", s2))
+                .unwrap_or_default();
             format!(" caused by: {}{}", src, inner)
         })
         .unwrap_or_default();
@@ -75,10 +85,7 @@ enum ProxmoxAuth {
         token_secret: String,
     },
     /// Password-based auth: requires ticket + CSRF token
-    Password {
-        ticket: String,
-        csrf_token: String,
-    },
+    Password { ticket: String, csrf_token: String },
 }
 
 struct ClusterConnection {
@@ -93,7 +100,12 @@ impl ProxmoxLxcProvisioner {
     }
 
     /// Template a string value using host variables
-    fn template_string(&self, templar: &Templar, value: &str, vars: &serde_yaml::Mapping) -> Result<String, String> {
+    fn template_string(
+        &self,
+        templar: &Templar,
+        value: &str,
+        vars: &serde_yaml::Mapping,
+    ) -> Result<String, String> {
         // Only template if the value contains {{ - optimization and prevents errors on plain strings
         if value.contains("{{") {
             templar.render(&value.to_string(), vars.clone(), TemplateMode::Strict)
@@ -103,7 +115,12 @@ impl ProxmoxLxcProvisioner {
     }
 
     /// Template an optional string value
-    fn template_option(&self, templar: &Templar, value: &Option<String>, vars: &serde_yaml::Mapping) -> Result<Option<String>, String> {
+    fn template_option(
+        &self,
+        templar: &Templar,
+        value: &Option<String>,
+        vars: &serde_yaml::Mapping,
+    ) -> Result<Option<String>, String> {
         match value {
             Some(v) => Ok(Some(self.template_string(templar, v, vars)?)),
             None => Ok(None),
@@ -111,7 +128,11 @@ impl ProxmoxLxcProvisioner {
     }
 
     /// Template all fields in a ProvisionConfig using host variables
-    fn template_config(&self, config: &ProvisionConfig, vars: &serde_yaml::Mapping) -> Result<ProvisionConfig, String> {
+    fn template_config(
+        &self,
+        config: &ProvisionConfig,
+        vars: &serde_yaml::Mapping,
+    ) -> Result<ProvisionConfig, String> {
         let templar = Templar::new();
 
         Ok(ProvisionConfig {
@@ -149,10 +170,8 @@ impl ProxmoxLxcProvisioner {
             extra: {
                 let mut templated_extra = std::collections::HashMap::new();
                 for (key, value) in &config.extra {
-                    templated_extra.insert(
-                        key.clone(),
-                        self.template_string(&templar, value, vars)?
-                    );
+                    templated_extra
+                        .insert(key.clone(), self.template_string(&templar, value, vars)?);
                 }
                 templated_extra
             },
@@ -160,53 +179,80 @@ impl ProxmoxLxcProvisioner {
     }
 
     /// Get connection details from the cluster host in inventory
-    fn get_cluster_connection(&self, config: &ProvisionConfig, inventory: &Arc<RwLock<Inventory>>) -> Result<ClusterConnection, String> {
-        let inv = inventory.read().map_err(|e| format!("Failed to read inventory: {}", e))?;
+    fn get_cluster_connection(
+        &self,
+        config: &ProvisionConfig,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<ClusterConnection, String> {
+        let inv = inventory
+            .read()
+            .map_err(|e| format!("Failed to read inventory: {}", e))?;
 
         if !inv.has_host(&config.cluster) {
-            return Err(format!("Cluster host '{}' not found in inventory", config.cluster));
+            return Err(format!(
+                "Cluster host '{}' not found in inventory",
+                config.cluster
+            ));
         }
 
         let cluster_host = inv.get_host(&config.cluster);
-        let host = cluster_host.read().map_err(|e| format!("Failed to read host: {}", e))?;
+        let host = cluster_host
+            .read()
+            .map_err(|e| format!("Failed to read host: {}", e))?;
         let vars = host.get_blended_variables();
 
         // Get API connection details from cluster host variables
-        let api_host = vars.get("proxmox_api_host")
+        let api_host = vars
+            .get("proxmox_api_host")
             .or_else(|| vars.get("ansible_host"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| config.cluster.clone());
 
-        let node = config.node.clone()
-            .or_else(|| vars.get("proxmox_node").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        let node = config
+            .node
+            .clone()
+            .or_else(|| {
+                vars.get("proxmox_node")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
             .unwrap_or_else(|| config.cluster.clone());
 
         // Try token auth first (preferred), fall back to password auth
-        let api_token_id = vars.get("proxmox_api_token_id")
+        let api_token_id = vars
+            .get("proxmox_api_token_id")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let api_token_secret = vars.get("proxmox_api_token_secret")
+        let api_token_secret = vars
+            .get("proxmox_api_token_secret")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let auth = if let (Some(token_id), Some(token_secret)) = (api_token_id, api_token_secret) {
-            // Use token auth
-            ProxmoxAuth::Token { token_id, token_secret }
-        } else {
-            // Fall back to password auth
-            let username = vars.get("proxmox_api_user")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .ok_or_else(|| format!(
-                    "Cluster host '{}' missing auth credentials. Need either:\n  \
+        let auth =
+            if let (Some(token_id), Some(token_secret)) = (api_token_id, api_token_secret) {
+                // Use token auth
+                ProxmoxAuth::Token {
+                    token_id,
+                    token_secret,
+                }
+            } else {
+                // Fall back to password auth
+                let username = vars
+                    .get("proxmox_api_user")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| {
+                        format!(
+                            "Cluster host '{}' missing auth credentials. Need either:\n  \
                      - proxmox_api_token_id + proxmox_api_token_secret (recommended), or\n  \
                      - proxmox_api_user + proxmox_api_password",
-                    config.cluster
-                ))?;
+                            config.cluster
+                        )
+                    })?;
 
-            let password = vars.get("proxmox_api_password")
+                let password = vars.get("proxmox_api_password")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .ok_or_else(|| format!(
@@ -214,16 +260,26 @@ impl ProxmoxLxcProvisioner {
                     config.cluster
                 ))?;
 
-            // Get ticket for password auth
-            let (ticket, csrf_token) = self.get_password_ticket(&api_host, &username, &password)?;
-            ProxmoxAuth::Password { ticket, csrf_token }
-        };
+                // Get ticket for password auth
+                let (ticket, csrf_token) =
+                    self.get_password_ticket(&api_host, &username, &password)?;
+                ProxmoxAuth::Password { ticket, csrf_token }
+            };
 
-        Ok(ClusterConnection { api_host, auth, node })
+        Ok(ClusterConnection {
+            api_host,
+            auth,
+            node,
+        })
     }
 
     /// Get authentication ticket for password-based auth
-    fn get_password_ticket(&self, api_host: &str, username: &str, password: &str) -> Result<(String, String), String> {
+    fn get_password_ticket(
+        &self,
+        api_host: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<(String, String), String> {
         let url = if api_host.contains(':') {
             format!("https://{}/api2/json/access/ticket", api_host)
         } else {
@@ -245,7 +301,8 @@ impl ProxmoxLxcProvisioner {
             params.insert("username", username);
             params.insert("password", password);
 
-            let response = client.post(&url)
+            let response = client
+                .post(&url)
                 .form(&params)
                 .send()
                 .await
@@ -269,28 +326,37 @@ impl ProxmoxLxcProvisioner {
                 data: TicketData,
             }
 
-            let ticket_response: TicketResponse = response.json()
+            let ticket_response: TicketResponse = response
+                .json()
                 .await
                 .map_err(|e| format!("Failed to parse ticket response: {}", e))?;
 
-            Ok((ticket_response.data.ticket, ticket_response.data.csrf_prevention_token))
+            Ok((
+                ticket_response.data.ticket,
+                ticket_response.data.csrf_prevention_token,
+            ))
         })
     }
 
     /// Apply authentication headers to a request
-    fn apply_auth(&self, conn: &ClusterConnection, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn apply_auth(
+        &self,
+        conn: &ClusterConnection,
+        builder: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
         match &conn.auth {
-            ProxmoxAuth::Token { token_id, token_secret } => {
-                builder.header("Authorization", format!("PVEAPIToken={}={}", token_id, token_secret))
-            }
-            ProxmoxAuth::Password { ticket, csrf_token } => {
-                builder
-                    .header("Cookie", format!("PVEAuthCookie={}", ticket))
-                    .header("CSRFPreventionToken", csrf_token)
-            }
+            ProxmoxAuth::Token {
+                token_id,
+                token_secret,
+            } => builder.header(
+                "Authorization",
+                format!("PVEAPIToken={}={}", token_id, token_secret),
+            ),
+            ProxmoxAuth::Password { ticket, csrf_token } => builder
+                .header("Cookie", format!("PVEAuthCookie={}", ticket))
+                .header("CSRFPreventionToken", csrf_token),
         }
     }
-
 
     fn get_api_url(&self, conn: &ClusterConnection, path: &str) -> String {
         // api_host may already include a port (e.g. "host:8006"); only append default if missing
@@ -302,7 +368,11 @@ impl ProxmoxLxcProvisioner {
     }
 
     /// Find container by hostname
-    fn find_container_by_hostname(&self, conn: &ClusterConnection, hostname: &str) -> Result<Option<u64>, String> {
+    fn find_container_by_hostname(
+        &self,
+        conn: &ClusterConnection,
+        hostname: &str,
+    ) -> Result<Option<u64>, String> {
         let url = self.get_api_url(conn, &format!("/nodes/{}/lxc", conn.node));
 
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -316,7 +386,8 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = self.apply_auth(conn, client.get(&url))
+            let response = self
+                .apply_auth(conn, client.get(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to query Proxmox API: {}", e))?;
@@ -327,7 +398,8 @@ impl ProxmoxLxcProvisioner {
                 return Err(format!("Proxmox API returned status {}: {}", status, text));
             }
 
-            let api_response: ProxmoxApiResponse<Vec<LxcListItem>> = response.json()
+            let api_response: ProxmoxApiResponse<Vec<LxcListItem>> = response
+                .json()
                 .await
                 .map_err(|e| format!("Failed to parse Proxmox response: {}", e))?;
 
@@ -360,7 +432,8 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = self.apply_auth(conn, client.get(&url))
+            let response = self
+                .apply_auth(conn, client.get(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to query Proxmox API for next VMID: {}", e))?;
@@ -371,11 +444,13 @@ impl ProxmoxLxcProvisioner {
                 return Err(format!("Proxmox API returned status {}: {}", status, text));
             }
 
-            let api_response: ProxmoxApiResponse<String> = response.json()
+            let api_response: ProxmoxApiResponse<String> = response
+                .json()
                 .await
                 .map_err(|e| format!("Failed to parse Proxmox response: {}", e))?;
 
-            api_response.data
+            api_response
+                .data
                 .ok_or_else(|| "No VMID returned from Proxmox".to_string())?
                 .parse::<u64>()
                 .map_err(|e| format!("Invalid VMID returned: {}", e))
@@ -384,12 +459,25 @@ impl ProxmoxLxcProvisioner {
 
     /// Find the latest version of a template based on a prefix.
     /// e.g., "debian-13-standard" -> finds "debian-13-standard_amd64.tar.zst"
-    fn find_latest_template(&self, conn: &ClusterConnection, template_prefix: &str) -> Result<String, String> {
+    fn find_latest_template(
+        &self,
+        conn: &ClusterConnection,
+        template_prefix: &str,
+    ) -> Result<String, String> {
         // Extract storage and template name from "storage:vztmpl/filename"
         let (storage, prefix) = if let Some((s, t)) = template_prefix.split_once(':') {
-            (Some(s.to_string()), t.trim_start_matches("vztmpl/").trim_start_matches("vztmpl/"))
+            (
+                Some(s.to_string()),
+                t.trim_start_matches("vztmpl/")
+                    .trim_start_matches("vztmpl/"),
+            )
         } else {
-            (None, template_prefix.trim_start_matches("vztmpl/").trim_start_matches("vztmpl/"))
+            (
+                None,
+                template_prefix
+                    .trim_start_matches("vztmpl/")
+                    .trim_start_matches("vztmpl/"),
+            )
         };
 
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -410,13 +498,17 @@ impl ProxmoxLxcProvisioner {
             } else {
                 // Query node for available storages
                 let storage_url = self.get_api_url(conn, &format!("/nodes/{}/storage", conn.node));
-                let storage_response = self.apply_auth(conn, client.get(&storage_url))
+                let storage_response = self
+                    .apply_auth(conn, client.get(&storage_url))
                     .send()
                     .await
                     .map_err(|e| format!("Failed to query storages: {}", e))?;
 
                 if !storage_response.status().is_success() {
-                    return Err(format!("Failed to get storage list: {}", storage_response.status()));
+                    return Err(format!(
+                        "Failed to get storage list: {}",
+                        storage_response.status()
+                    ));
                 }
 
                 #[derive(Deserialize)]
@@ -434,13 +526,21 @@ impl ProxmoxLxcProvisioner {
                     data: Vec<StorageInfo>,
                 }
 
-                let storage_resp: StorageApiResponse = storage_response.json()
+                let storage_resp: StorageApiResponse = storage_response
+                    .json()
                     .await
                     .map_err(|e| format!("Failed to parse storage list: {}", e))?;
 
-                storage_resp.data.into_iter()
+                storage_resp
+                    .data
+                    .into_iter()
                     .filter(|s| s.enabled.unwrap_or(1) == 1)
-                    .filter(|s| s.content.as_deref().map(|c| c.contains("vztmpl")).unwrap_or(false))
+                    .filter(|s| {
+                        s.content
+                            .as_deref()
+                            .map(|c| c.contains("vztmpl"))
+                            .unwrap_or(false)
+                    })
                     .map(|s| s.storage)
                     .collect()
             };
@@ -453,7 +553,10 @@ impl ProxmoxLxcProvisioner {
             let mut all_matching: Vec<(String, String)> = Vec::new();
 
             for storage_name in storages_to_search {
-                let url = self.get_api_url(conn, &format!("/nodes/{}/storage/{}/content", conn.node, storage_name));
+                let url = self.get_api_url(
+                    conn,
+                    &format!("/nodes/{}/storage/{}/content", conn.node, storage_name),
+                );
                 let response = match self.apply_auth(conn, client.get(&url)).send().await {
                     Ok(r) if r.status().is_success() => r,
                     _ => continue, // Skip storages that fail
@@ -478,7 +581,10 @@ impl ProxmoxLxcProvisioner {
                 };
 
                 for item in api_resp.data {
-                    if item.format.as_deref() == Some("tgz") || item.format.as_deref() == Some("tar") || item.format.as_deref() == Some("tar.zst") {
+                    if item.format.as_deref() == Some("tgz")
+                        || item.format.as_deref() == Some("tar")
+                        || item.format.as_deref() == Some("tar.zst")
+                    {
                         if let Some(volid) = item.volid {
                             let volid_clone = volid.clone();
                             if let Some(name) = volid_clone.split('/').last() {
@@ -492,7 +598,10 @@ impl ProxmoxLxcProvisioner {
             }
 
             if all_matching.is_empty() {
-                return Err(format!("No templates found matching '{}' in any storage", prefix));
+                return Err(format!(
+                    "No templates found matching '{}' in any storage",
+                    prefix
+                ));
             }
 
             // Sort by name descending to get latest
@@ -518,12 +627,10 @@ impl ProxmoxLxcProvisioner {
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
             // Use GET on /nodes/{node}/aplinfo to list available templates
-            let url = self.get_api_url(conn, &format!(
-                "/nodes/{}/aplinfo",
-                conn.node
-            ));
+            let url = self.get_api_url(conn, &format!("/nodes/{}/aplinfo", conn.node));
 
-            let response = self.apply_auth(conn, client.get(&url))
+            let response = self
+                .apply_auth(conn, client.get(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to query available templates: {}", e))?;
@@ -551,11 +658,13 @@ impl ProxmoxLxcProvisioner {
                 data: Option<Vec<TemplateInfo>>,
             }
 
-            let api_resp: ApiResponse = response.json()
+            let api_resp: ApiResponse = response
+                .json()
                 .await
                 .map_err(|e| format!("Failed to parse template list: {}", e))?;
 
-            let templates = api_resp.data
+            let templates = api_resp
+                .data
                 .unwrap_or_default()
                 .into_iter()
                 .filter_map(|t| t.template)
@@ -569,7 +678,12 @@ impl ProxmoxLxcProvisioner {
     /// 1. Queries Proxmox for available templates
     /// 2. Matches against the provided regex pattern
     /// 3. Downloads the first matching template
-    fn find_and_download_template(&self, conn: &ClusterConnection, pattern: &str, storage: &str) -> Result<String, String> {
+    fn find_and_download_template(
+        &self,
+        conn: &ClusterConnection,
+        pattern: &str,
+        storage: &str,
+    ) -> Result<String, String> {
         // First, get list of available templates from Proxmox
         let available = self.list_available_templates(conn)?;
 
@@ -582,9 +696,7 @@ impl ProxmoxLxcProvisioner {
             .map_err(|e| format!("Invalid regex pattern '{}': {}", pattern, e))?;
 
         // Find matching templates
-        let matches: Vec<&String> = available.iter()
-            .filter(|t| regex.is_match(t))
-            .collect();
+        let matches: Vec<&String> = available.iter().filter(|t| regex.is_match(t)).collect();
 
         if matches.is_empty() {
             let sample: Vec<&String> = available.iter().take(5).collect();
@@ -614,9 +726,20 @@ impl ProxmoxLxcProvisioner {
     fn download_template(&self, conn: &ClusterConnection, template: &str) -> Result<(), String> {
         // Extract storage and template name from "storage:vztmpl/filename"
         let (storage, template_name) = if let Some((s, t)) = template.split_once(':') {
-            (s.to_string(), t.trim_start_matches("vztmpl/").trim_start_matches("vztmpl/").to_string())
+            (
+                s.to_string(),
+                t.trim_start_matches("vztmpl/")
+                    .trim_start_matches("vztmpl/")
+                    .to_string(),
+            )
         } else {
-            ("local".to_string(), template.trim_start_matches("vztmpl/").trim_start_matches("vztmpl/").to_string())
+            (
+                "local".to_string(),
+                template
+                    .trim_start_matches("vztmpl/")
+                    .trim_start_matches("vztmpl/")
+                    .to_string(),
+            )
         };
 
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -632,19 +755,20 @@ impl ProxmoxLxcProvisioner {
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
             // Use POST to /nodes/{node}/aplinfo - same as pveam download
-            let url = self.get_api_url(conn, &format!(
-                "/nodes/{}/aplinfo",
-                conn.node
-            ));
+            let url = self.get_api_url(conn, &format!("/nodes/{}/aplinfo", conn.node));
 
             let mut params = HashMap::new();
             params.insert("storage", &storage);
             params.insert("template", &template_name);
 
-            eprintln!("  → Downloading template {} to storage {}...", template_name, storage);
+            eprintln!(
+                "  → Downloading template {} to storage {}...",
+                template_name, storage
+            );
 
             // POST to initiate the download
-            let response = self.apply_auth(conn, client.post(&url))
+            let response = self
+                .apply_auth(conn, client.post(&url))
                 .form(&params)
                 .send()
                 .await
@@ -660,7 +784,8 @@ impl ProxmoxLxcProvisioner {
             // Check the response for any immediate errors
             // Validate the response body parses as JSON; Proxmox acknowledges the
             // download task with a JSON object whose payload we do not need.
-            let _api_resp: serde_json::Value = response.json()
+            let _api_resp: serde_json::Value = response
+                .json()
                 .await
                 .map_err(|e| format!("Failed to parse download response: {}", e))?;
 
@@ -676,12 +801,16 @@ impl ProxmoxLxcProvisioner {
                 attempt += 1;
 
                 // Check that template now exists
-                let check_url = self.get_api_url(conn, &format!(
-                    "/nodes/{}/storage/{}/content?content=vztmpl",
-                    conn.node, storage
-                ));
+                let check_url = self.get_api_url(
+                    conn,
+                    &format!(
+                        "/nodes/{}/storage/{}/content?content=vztmpl",
+                        conn.node, storage
+                    ),
+                );
 
-                let check_response = self.apply_auth(conn, client.get(&check_url))
+                let check_response = self
+                    .apply_auth(conn, client.get(&check_url))
                     .send()
                     .await
                     .map_err(|e| format!("Failed to verify template: {}", e))?;
@@ -700,23 +829,35 @@ impl ProxmoxLxcProvisioner {
 
                     if let Ok(content_resp) = check_response.json::<ContentApiResponse>().await {
                         let found = content_resp.data.iter().any(|item| {
-                            item.volid.as_ref().map(|v| {
-                                v.contains(&template_name)
-                            }).unwrap_or(false)
+                            item.volid
+                                .as_ref()
+                                .map(|v| v.contains(&template_name))
+                                .unwrap_or(false)
                         });
 
                         if found {
-                            eprintln!("  → Template {} is available ({}s)", template_name, attempt * 5);
+                            eprintln!(
+                                "  → Template {} is available ({}s)",
+                                template_name,
+                                attempt * 5
+                            );
                             return Ok(());
                         }
                     }
                 }
 
                 if attempt >= max_attempts {
-                    return Err(format!("Template download timed out after {} seconds", attempt * 5));
+                    return Err(format!(
+                        "Template download timed out after {} seconds",
+                        attempt * 5
+                    ));
                 }
 
-                eprintln!("  → Waiting for template... ({}/{})", attempt * 5, max_attempts * 5);
+                eprintln!(
+                    "  → Waiting for template... ({}/{})",
+                    attempt * 5,
+                    max_attempts * 5
+                );
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
             }
         })
@@ -731,19 +872,32 @@ impl ProxmoxLxcProvisioner {
     /// races the still-running create and reports "container not found" until it
     /// times out. Template extraction on network storage (e.g. moosefs) can take
     /// a couple of minutes, so we allow a generous ceiling.
-    async fn wait_for_task(&self, conn: &ClusterConnection, client: &reqwest::Client, upid: &str) -> Result<(), String> {
-        let status_url = self.get_api_url(conn, &format!(
-            "/nodes/{}/tasks/{}/status", conn.node, urlencoding::encode(upid)));
+    async fn wait_for_task(
+        &self,
+        conn: &ClusterConnection,
+        client: &reqwest::Client,
+        upid: &str,
+    ) -> Result<(), String> {
+        let status_url = self.get_api_url(
+            conn,
+            &format!(
+                "/nodes/{}/tasks/{}/status",
+                conn.node,
+                urlencoding::encode(upid)
+            ),
+        );
 
         // ~5 minutes at 3s intervals — covers slow template extraction.
         for _ in 0..100u32 {
-            let response = self.apply_auth(conn, client.get(&status_url))
+            let response = self
+                .apply_auth(conn, client.get(&status_url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to query task status: {}", e))?;
 
             if response.status().is_success() {
-                let parsed: ProxmoxApiResponse<ProxmoxTaskStatus> = response.json()
+                let parsed: ProxmoxApiResponse<ProxmoxTaskStatus> = response
+                    .json()
                     .await
                     .map_err(|e| format!("Failed to parse task status: {}", e))?;
                 if let Some(task) = parsed.data {
@@ -759,10 +913,20 @@ impl ProxmoxLxcProvisioner {
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
 
-        Err(format!("Timed out waiting for Proxmox task {} to complete", upid))
+        Err(format!(
+            "Timed out waiting for Proxmox task {} to complete",
+            upid
+        ))
     }
 
-    fn create_container(&self, conn: &ClusterConnection, config: &ProvisionConfig, hostname: &str, vmid: u64, host_vars: &serde_yaml::Mapping) -> Result<(), String> {
+    fn create_container(
+        &self,
+        conn: &ClusterConnection,
+        config: &ProvisionConfig,
+        hostname: &str,
+        vmid: u64,
+        host_vars: &serde_yaml::Mapping,
+    ) -> Result<(), String> {
         let url = self.get_api_url(conn, &format!("/nodes/{}/lxc", conn.node));
 
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -788,39 +952,58 @@ impl ProxmoxLxcProvisioner {
             }
 
             // Memory (default 512MB)
-            let memory = config.memory.as_ref()
+            let memory = config
+                .memory
+                .as_ref()
                 .and_then(|m| m.parse::<u64>().ok())
                 .unwrap_or(512);
             params.insert("memory".to_string(), memory.to_string());
 
             // Cores (default 1)
-            let cores = config.cores.as_ref()
+            let cores = config
+                .cores
+                .as_ref()
                 .and_then(|c| c.parse::<u64>().ok())
                 .unwrap_or(1);
             params.insert("cores".to_string(), cores.to_string());
 
             // Storage and rootfs
-            let storage = config.storage.as_ref()
+            let storage = config
+                .storage
+                .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("local-lvm");
-            let rootfs_size_raw = config.rootfs_size.as_ref()
+            let rootfs_size_raw = config
+                .rootfs_size
+                .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("8");
             // Strip G/M suffix if present - Proxmox API expects just the number
-            let rootfs_size = rootfs_size_raw.trim_end_matches(|c| c == 'G' || c == 'M' || c == 'g' || c == 'm');
+            let rootfs_size =
+                rootfs_size_raw.trim_end_matches(|c| c == 'G' || c == 'M' || c == 'g' || c == 'm');
             params.insert("rootfs".to_string(), format!("{}:{}", storage, rootfs_size));
 
             // Unprivileged (default true)
-            let unprivileged = config.unprivileged.as_ref()
+            let unprivileged = config
+                .unprivileged
+                .as_ref()
                 .map(|u| u == "true" || u == "1" || u == "yes")
                 .unwrap_or(true);
-            params.insert("unprivileged".to_string(), if unprivileged { "1" } else { "0" }.to_string());
+            params.insert(
+                "unprivileged".to_string(),
+                if unprivileged { "1" } else { "0" }.to_string(),
+            );
 
             // Start on create (default true for provisioning)
-            let start = config.start_on_create.as_ref()
+            let start = config
+                .start_on_create
+                .as_ref()
                 .map(|s| s == "true" || s == "1" || s == "yes")
                 .unwrap_or(true);
-            params.insert("start".to_string(), if start { "1" } else { "0" }.to_string());
+            params.insert(
+                "start".to_string(),
+                if start { "1" } else { "0" }.to_string(),
+            );
 
             // Network configurations
             if let Some(ref net0) = config.net0 {
@@ -842,13 +1025,15 @@ impl ProxmoxLxcProvisioner {
             }
 
             // SSH authorized keys - check provision config first, then host_vars
-            let ssh_keys = config.authorized_keys.clone()
-                .or_else(|| {
-                    // Fall back to host variable 'provision_ssh_public_keys' for backwards compat
-                    host_vars.get(serde_yaml::Value::String("provision_ssh_public_keys".to_string()))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                });
+            let ssh_keys = config.authorized_keys.clone().or_else(|| {
+                // Fall back to host variable 'provision_ssh_public_keys' for backwards compat
+                host_vars
+                    .get(serde_yaml::Value::String(
+                        "provision_ssh_public_keys".to_string(),
+                    ))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            });
             if let Some(keys) = ssh_keys {
                 params.insert("ssh-public-keys".to_string(), keys);
             }
@@ -871,7 +1056,8 @@ impl ProxmoxLxcProvisioner {
                 params.insert(key.clone(), value.clone());
             }
 
-            let response = self.apply_auth(conn, client.post(&url))
+            let response = self
+                .apply_auth(conn, client.post(&url))
                 .form(&params)
                 .send()
                 .await
@@ -887,7 +1073,8 @@ impl ProxmoxLxcProvisioner {
             // Wait for it to finish so the container actually exists (and, with
             // start=1, is running) before the caller tries to discover its IP
             // and SSH in — otherwise that discovery races the create and fails.
-            let api_response: ProxmoxApiResponse<String> = response.json()
+            let api_response: ProxmoxApiResponse<String> = response
+                .json()
                 .await
                 .map_err(|e| format!("Failed to parse create response: {}", e))?;
             match api_response.data {
@@ -910,7 +1097,10 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             // Check if TUN config already exists
-            let check_cmd = format!("grep -q 'lxc.cgroup2.devices.allow: c 10:200' {}", config_path);
+            let check_cmd = format!(
+                "grep -q 'lxc.cgroup2.devices.allow: c 10:200' {}",
+                config_path
+            );
             if self.ssh_command(&conn.api_host, &check_cmd).await.is_ok() {
                 // TUN already configured
                 return Ok(false);
@@ -924,7 +1114,8 @@ impl ProxmoxLxcProvisioner {
 
             for line in tun_lines {
                 let append_cmd = format!("echo '{}' >> {}", line, config_path);
-                self.ssh_command(&conn.api_host, &append_cmd).await
+                self.ssh_command(&conn.api_host, &append_cmd)
+                    .await
                     .map_err(|e| format!("Failed to append TUN config: {}", e))?;
             }
 
@@ -937,7 +1128,14 @@ impl ProxmoxLxcProvisioner {
         use tokio::process::Command;
 
         let mut command = Command::new("ssh");
-        command.args(["-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes", &format!("root@{}", host), cmd]);
+        command.args([
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "BatchMode=yes",
+            &format!("root@{}", host),
+            cmd,
+        ]);
 
         // Inherit SSH_AUTH_SOCK from environment for SSH agent forwarding
         if let Ok(auth_sock) = std::env::var("SSH_AUTH_SOCK") {
@@ -958,7 +1156,10 @@ impl ProxmoxLxcProvisioner {
 
     /// Start a container
     fn start_container(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
-        let url = self.get_api_url(conn, &format!("/nodes/{}/lxc/{}/status/start", conn.node, vmid));
+        let url = self.get_api_url(
+            conn,
+            &format!("/nodes/{}/lxc/{}/status/start", conn.node, vmid),
+        );
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -971,7 +1172,8 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = self.apply_auth(conn, client.post(&url))
+            let response = self
+                .apply_auth(conn, client.post(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to start container: {}", e))?;
@@ -987,7 +1189,12 @@ impl ProxmoxLxcProvisioner {
     }
 
     /// Delete a container. If `force` is true, stops the container first.
-    fn delete_container(&self, conn: &ClusterConnection, vmid: u64, force: bool) -> Result<(), String> {
+    fn delete_container(
+        &self,
+        conn: &ClusterConnection,
+        vmid: u64,
+        force: bool,
+    ) -> Result<(), String> {
         let base = self.get_api_url(conn, &format!("/nodes/{}/lxc/{}", conn.node, vmid));
         let url = if force {
             format!("{}?force=1&purge=1", base)
@@ -1006,7 +1213,8 @@ impl ProxmoxLxcProvisioner {
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-            let response = self.apply_auth(conn, client.delete(&url))
+            let response = self
+                .apply_auth(conn, client.delete(&url))
                 .send()
                 .await
                 .map_err(|e| format!("Failed to delete container: {}", e))?;
@@ -1023,16 +1231,26 @@ impl ProxmoxLxcProvisioner {
 }
 
 impl Provisioner for ProxmoxLxcProvisioner {
-    fn exists(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<bool, String> {
+    fn exists(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<bool, String> {
         let conn = self.get_cluster_connection(config, inventory)?;
-        let hostname = config.hostname.as_ref()
+        let hostname = config
+            .hostname
+            .as_ref()
             .map(|s| s.as_str())
             .unwrap_or(inventory_name);
 
         // First check by VMID if specified
         if let Some(ref vmid_str) = config.vmid {
             if let Ok(vmid) = vmid_str.parse::<u64>() {
-                let url = self.get_api_url(&conn, &format!("/nodes/{}/lxc/{}/status/current", conn.node, vmid));
+                let url = self.get_api_url(
+                    &conn,
+                    &format!("/nodes/{}/lxc/{}/status/current", conn.node, vmid),
+                );
 
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -1045,7 +1263,8 @@ impl Provisioner for ProxmoxLxcProvisioner {
                         .build()
                         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-                    let response = self.apply_auth(&conn, client.get(&url))
+                    let response = self
+                        .apply_auth(&conn, client.get(&url))
                         .send()
                         .await
                         .map_err(|e| format!("Failed to query Proxmox API: {}", e))?;
@@ -1059,14 +1278,23 @@ impl Provisioner for ProxmoxLxcProvisioner {
         Ok(self.find_container_by_hostname(&conn, hostname)?.is_some())
     }
 
-    fn ensure_exists(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<ProvisionResult, String> {
+    fn ensure_exists(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<ProvisionResult, String> {
         // Get host variables first for templating
         let inv_name = inventory_name.to_string();
         let host_vars = {
-            let inv = inventory.read().map_err(|e| format!("Failed to read inventory: {}", e))?;
+            let inv = inventory
+                .read()
+                .map_err(|e| format!("Failed to read inventory: {}", e))?;
             if inv.has_host(&inv_name) {
                 let host = inv.get_host(&inv_name);
-                let h = host.read().map_err(|e| format!("Failed to read host: {}", e))?;
+                let h = host
+                    .read()
+                    .map_err(|e| format!("Failed to read host: {}", e))?;
                 h.get_blended_variables()
             } else {
                 serde_yaml::Mapping::new()
@@ -1078,20 +1306,27 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
         // Get cluster connection FIRST (needed for container check)
         let conn = self.get_cluster_connection(&config, inventory)?;
-        let hostname = config.hostname.as_ref()
+        let hostname = config
+            .hostname
+            .as_ref()
             .map(|s| s.as_str())
             .unwrap_or(inventory_name);
 
         // Check if container already exists FIRST - before any template operations
         if let Some(existing_vmid) = self.find_container_by_hostname(&conn, hostname)? {
-            eprintln!("  → Container '{}' already exists (vmid: {}), skipping creation", hostname, existing_vmid);
+            eprintln!(
+                "  → Container '{}' already exists (vmid: {}), skipping creation",
+                hostname, existing_vmid
+            );
             return Ok(ProvisionResult::AlreadyExists);
         }
 
         // Check if we need to fetch the template (only if creating new container)
         if let Some(ref fetch) = config.fetch {
             if fetch == "true" || fetch == "1" || fetch == "latest" {
-                let ostemplate = config.ostemplate.as_ref()
+                let ostemplate = config
+                    .ostemplate
+                    .as_ref()
                     .ok_or("ostemplate required when fetch is enabled")?;
 
                 if fetch == "latest" {
@@ -1106,8 +1341,11 @@ impl Provisioner for ProxmoxLxcProvisioner {
                             // Not found locally - download from Proxmox
                             // Query Proxmox for available templates, match pattern, download
                             let storage = config.storage.as_deref().unwrap_or("local");
-                            eprintln!("  → Template not found locally, searching Proxmox repository...");
-                            let downloaded = self.find_and_download_template(&conn, ostemplate, storage)?;
+                            eprintln!(
+                                "  → Template not found locally, searching Proxmox repository..."
+                            );
+                            let downloaded =
+                                self.find_and_download_template(&conn, ostemplate, storage)?;
                             // Update ostemplate to use the actual downloaded template file
                             config.ostemplate = Some(format!("{}:vztmpl/{}", storage, downloaded));
                         }
@@ -1121,15 +1359,21 @@ impl Provisioner for ProxmoxLxcProvisioner {
         }
 
         // Check if TUN device is requested
-        let needs_tun = config.tun.as_ref()
+        let needs_tun = config
+            .tun
+            .as_ref()
             .map(|t| t == "true" || t == "1" || t == "yes")
             .unwrap_or(false);
 
-        eprintln!("  → Creating new container '{}' on node '{}'", hostname, conn.node);
+        eprintln!(
+            "  → Creating new container '{}' on node '{}'",
+            hostname, conn.node
+        );
 
         // Get VMID (specified or auto-assigned)
         let vmid = if let Some(ref vmid_str) = config.vmid {
-            vmid_str.parse::<u64>()
+            vmid_str
+                .parse::<u64>()
                 .map_err(|e| format!("Invalid vmid '{}': {}", vmid_str, e))?
         } else {
             self.get_next_vmid(&conn)?
@@ -1156,7 +1400,12 @@ impl Provisioner for ProxmoxLxcProvisioner {
         Ok(ProvisionResult::Created)
     }
 
-    fn get_ip(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<Option<String>, String> {
+    fn get_ip(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<Option<String>, String> {
         // First try to parse from net0 config if available (static IP)
         if let Some(ref net0) = config.net0 {
             // Format: "name=eth0,bridge=vmbr0,ip=10.10.10.2/24,gw=10.10.10.1"
@@ -1184,7 +1433,10 @@ impl Provisioner for ProxmoxLxcProvisioner {
             match self.find_container_by_hostname(&conn, hostname)? {
                 Some(vmid) => Some(vmid.to_string()),
                 None => {
-                    eprintln!("  → Warning: container '{}' not found for IP lookup", hostname);
+                    eprintln!(
+                        "  → Warning: container '{}' not found for IP lookup",
+                        hostname
+                    );
                     return Ok(None);
                 }
             }
@@ -1210,7 +1462,8 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
                     // First, get list of all cluster nodes
                     let nodes_url = self.get_api_url(&conn, "/nodes");
-                    let nodes_response = self.apply_auth(&conn, client.get(&nodes_url))
+                    let nodes_response = self
+                        .apply_auth(&conn, client.get(&nodes_url))
                         .send()
                         .await
                         .map_err(|e| format!("Failed to get nodes: {}", e))?;
@@ -1225,7 +1478,8 @@ impl Provisioner for ProxmoxLxcProvisioner {
                         data: Vec<NodeInfo>,
                     }
 
-                    let nodes_resp: NodesResponse = nodes_response.json()
+                    let nodes_resp: NodesResponse = nodes_response
+                        .json()
                         .await
                         .map_err(|e| format!("Failed to parse nodes: {}", e))?;
 
@@ -1247,12 +1501,18 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
                     for node_info in nodes_resp.data {
                         let node_name = &node_info.node;
-                        let ifaces_url = self.get_api_url(&conn, &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num));
+                        let ifaces_url = self.get_api_url(
+                            &conn,
+                            &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num),
+                        );
 
-                        let ifaces_response = self.apply_auth(&conn, client.get(&ifaces_url))
+                        let ifaces_response = self
+                            .apply_auth(&conn, client.get(&ifaces_url))
                             .send()
                             .await
-                            .map_err(|e| format!("Failed to query interfaces on node {}: {}", node_name, e))?;
+                            .map_err(|e| {
+                                format!("Failed to query interfaces on node {}: {}", node_name, e)
+                            })?;
 
                         // Skip nodes where the container doesn't live (404 / non-success).
                         if !ifaces_response.status().is_success() {
@@ -1279,7 +1539,8 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
                     // Fallback: try cluster-wide resources to find the container
                     let resources_url = self.get_api_url(&conn, "/cluster/resources");
-                    let resources_response = self.apply_auth(&conn, client.get(&resources_url))
+                    let resources_response = self
+                        .apply_auth(&conn, client.get(&resources_url))
                         .send()
                         .await
                         .map_err(|e| format!("Failed to get cluster resources: {}", e))?;
@@ -1298,7 +1559,8 @@ impl Provisioner for ProxmoxLxcProvisioner {
                             data: Vec<Resource>,
                         }
 
-                        let resources_resp: ResourcesResponse = resources_response.json()
+                        let resources_resp: ResourcesResponse = resources_response
+                            .json()
                             .await
                             .map_err(|e| format!("Failed to parse resources: {}", e))?;
 
@@ -1306,11 +1568,23 @@ impl Provisioner for ProxmoxLxcProvisioner {
                             if resource.vmid == Some(vmid_num) {
                                 if let Some(node_name) = resource.node {
                                     // Use /interfaces to read the container's live network state.
-                                    let ifaces_url = self.get_api_url(&conn, &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num));
-                                    let ifaces_response = self.apply_auth(&conn, client.get(&ifaces_url))
+                                    let ifaces_url = self.get_api_url(
+                                        &conn,
+                                        &format!(
+                                            "/nodes/{}/lxc/{}/interfaces",
+                                            node_name, vmid_num
+                                        ),
+                                    );
+                                    let ifaces_response = self
+                                        .apply_auth(&conn, client.get(&ifaces_url))
                                         .send()
                                         .await
-                                        .map_err(|e| format!("Failed to query interfaces on node {}: {}", node_name, e))?;
+                                        .map_err(|e| {
+                                            format!(
+                                                "Failed to query interfaces on node {}: {}",
+                                                node_name, e
+                                            )
+                                        })?;
 
                                     if ifaces_response.status().is_success() {
                                         // Proxmox LXC /interfaces returns {name, hwaddr, inet, inet6}
@@ -1326,14 +1600,17 @@ impl Provisioner for ProxmoxLxcProvisioner {
                                             data: Option<Vec<Iface>>,
                                         }
 
-                                        if let Ok(api_resp) = ifaces_response.json::<ApiResponse>().await {
+                                        if let Ok(api_resp) =
+                                            ifaces_response.json::<ApiResponse>().await
+                                        {
                                             if let Some(ifaces) = api_resp.data {
                                                 for iface in ifaces {
                                                     if iface.name.as_deref() == Some("lo") {
                                                         continue;
                                                     }
                                                     if let Some(ref inet) = iface.inet {
-                                                        let ip = inet.split('/').next().unwrap_or(inet);
+                                                        let ip =
+                                                            inet.split('/').next().unwrap_or(inet);
                                                         if !ip.is_empty() && ip != "127.0.0.1" {
                                                             return Ok(Some(ip.to_string()));
                                                         }
@@ -1363,15 +1640,23 @@ impl Provisioner for ProxmoxLxcProvisioner {
         Ok(None)
     }
 
-    fn destroy(&self, config: &ProvisionConfig, inventory_name: &str, inventory: &Arc<RwLock<Inventory>>) -> Result<(), String> {
+    fn destroy(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<(), String> {
         let conn = self.get_cluster_connection(config, inventory)?;
-        let hostname = config.hostname.as_ref()
+        let hostname = config
+            .hostname
+            .as_ref()
             .map(|s| s.as_str())
             .unwrap_or(inventory_name);
 
         // Find by VMID first, then hostname
         let vmid = if let Some(ref vmid_str) = config.vmid {
-            vmid_str.parse::<u64>()
+            vmid_str
+                .parse::<u64>()
                 .map_err(|e| format!("Invalid vmid '{}': {}", vmid_str, e))?
         } else {
             self.find_container_by_hostname(&conn, hostname)?
@@ -1531,7 +1816,10 @@ mod tests {
     fn test_hostname_templating() {
         let provisioner = test_provisioner();
         let mut vars = serde_yaml::Mapping::new();
-        vars.insert(serde_yaml::Value::String("hostname".to_string()), serde_yaml::Value::String("test-host".to_string()));
+        vars.insert(
+            serde_yaml::Value::String("hostname".to_string()),
+            serde_yaml::Value::String("test-host".to_string()),
+        );
 
         let config = ProvisionConfig {
             hostname: Some("{{hostname}}".to_string()),
@@ -1549,7 +1837,10 @@ mod tests {
     fn test_memory_templating() {
         let provisioner = test_provisioner();
         let mut vars = serde_yaml::Mapping::new();
-        vars.insert(serde_yaml::Value::String("memory".to_string()), serde_yaml::Value::String("4096".to_string()));
+        vars.insert(
+            serde_yaml::Value::String("memory".to_string()),
+            serde_yaml::Value::String("4096".to_string()),
+        );
 
         let config = ProvisionConfig {
             memory: Some("{{memory}}".to_string()),
@@ -1567,7 +1858,10 @@ mod tests {
     fn test_cores_templating() {
         let provisioner = test_provisioner();
         let mut vars = serde_yaml::Mapping::new();
-        vars.insert(serde_yaml::Value::String("cores".to_string()), serde_yaml::Value::String("4".to_string()));
+        vars.insert(
+            serde_yaml::Value::String("cores".to_string()),
+            serde_yaml::Value::String("4".to_string()),
+        );
 
         let config = ProvisionConfig {
             cores: Some("{{cores}}".to_string()),
@@ -1621,8 +1915,14 @@ mod tests {
     fn test_net0_templating_with_template_vars() {
         let provisioner = test_provisioner();
         let mut vars = serde_yaml::Mapping::new();
-        vars.insert(serde_yaml::Value::String("lxc_ip".to_string()), serde_yaml::Value::String("192.168.100.10".to_string()));
-        vars.insert(serde_yaml::Value::String("lxc_gateway".to_string()), serde_yaml::Value::String("192.168.100.1".to_string()));
+        vars.insert(
+            serde_yaml::Value::String("lxc_ip".to_string()),
+            serde_yaml::Value::String("192.168.100.10".to_string()),
+        );
+        vars.insert(
+            serde_yaml::Value::String("lxc_gateway".to_string()),
+            serde_yaml::Value::String("192.168.100.1".to_string()),
+        );
 
         let config = ProvisionConfig {
             net0: Some("name=eth0,bridge=vmbr0,ip={{lxc_ip}}/24,gw={{lxc_gateway}}".to_string()),
@@ -1818,8 +2118,14 @@ mod tests {
         assert!(result.is_ok());
 
         let templated = result.unwrap();
-        assert_eq!(templated.extra.get("mp0").unwrap(), "volume:10,mp=/mnt/data");
-        assert_eq!(templated.extra.get("mp1").unwrap(), "volume:20,mp=/mnt/logs");
+        assert_eq!(
+            templated.extra.get("mp0").unwrap(),
+            "volume:10,mp=/mnt/data"
+        );
+        assert_eq!(
+            templated.extra.get("mp1").unwrap(),
+            "volume:20,mp=/mnt/logs"
+        );
     }
 
     #[test]
@@ -2022,8 +2328,14 @@ mod tests {
         // Test that a complete config can be created, templated, and cloned
         let provisioner = test_provisioner();
         let mut vars = serde_yaml::Mapping::new();
-        vars.insert(serde_yaml::Value::String("hostname".to_string()), serde_yaml::Value::String("app-server".to_string()));
-        vars.insert(serde_yaml::Value::String("memory".to_string()), serde_yaml::Value::String("2048".to_string()));
+        vars.insert(
+            serde_yaml::Value::String("hostname".to_string()),
+            serde_yaml::Value::String("app-server".to_string()),
+        );
+        vars.insert(
+            serde_yaml::Value::String("memory".to_string()),
+            serde_yaml::Value::String("2048".to_string()),
+        );
 
         let config = ProvisionConfig {
             provision_type: "proxmox_lxc".to_string(),
@@ -2068,7 +2380,7 @@ mod tests {
     fn test_container_idempotency_existing_container_returns_already_exists() {
         // When find_container_by_hostname returns Some(vmid), ensure_exists should return AlreadyExists
         // This tests the logic path, not the actual API call
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         // Create a mock config
         let config = ProvisionConfig {
@@ -2128,7 +2440,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_prefix_matching() {
         // Test that template prefix matching works correctly
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         // Simulate template list from local storage
         let templates = vec![
@@ -2139,7 +2451,8 @@ mod tests {
 
         // Prefix "debian-12" should match first two
         let prefix = "debian-12";
-        let matches: Vec<_> = templates.iter()
+        let matches: Vec<_> = templates
+            .iter()
             .filter(|t| t.to_lowercase().contains(&prefix.to_lowercase()))
             .collect();
 
@@ -2149,7 +2462,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_exact_matching() {
         // Test that exact template name matching works
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         let templates = vec![
             "local:vztmpl/debian-12-standard_amd64_12.2.0_pve8.tar.zst".to_string(),
@@ -2159,10 +2472,13 @@ mod tests {
 
         // Exact match for debian-12 amd64 - need to match after "local:vztmpl/"
         let exact = "debian-12-standard_amd64";
-        let matches: Vec<_> = templates.iter()
+        let matches: Vec<_> = templates
+            .iter()
             .filter(|t| {
                 let path_part = t.split(':').nth(1).unwrap_or("");
-                path_part.to_lowercase().starts_with(&format!("vztmpl/{}", exact))
+                path_part
+                    .to_lowercase()
+                    .starts_with(&format!("vztmpl/{}", exact))
             })
             .collect();
 
@@ -2175,7 +2491,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_arch_specific() {
         // Test that amd64 and arm64 templates are distinguished
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         let templates = vec![
             "local:vztmpl/debian-12-standard_amd64.tar.zst".to_string(),
@@ -2183,13 +2499,9 @@ mod tests {
         ];
 
         // Filter for amd64 only
-        let amd64_matches: Vec<_> = templates.iter()
-            .filter(|t| t.contains("_amd64"))
-            .collect();
+        let amd64_matches: Vec<_> = templates.iter().filter(|t| t.contains("_amd64")).collect();
 
-        let arm64_matches: Vec<_> = templates.iter()
-            .filter(|t| t.contains("_arm64"))
-            .collect();
+        let arm64_matches: Vec<_> = templates.iter().filter(|t| t.contains("_arm64")).collect();
 
         assert_eq!(amd64_matches.len(), 1);
         assert_eq!(arm64_matches.len(), 1);
@@ -2198,7 +2510,7 @@ mod tests {
     #[test]
     fn test_template_existence_check_latest_version() {
         // Test that sorting finds the latest version
-        let provisioner = test_provisioner();
+        let _provisioner = test_provisioner();
 
         let mut templates = vec![
             "local:vztmpl/debian-12-standard_amd64_12.0.0_pve8.tar.zst".to_string(),
@@ -2282,8 +2594,15 @@ mod tests {
             if name != "eth0" {
                 continue;
             }
-            for addr in iface.get("ip-addresses").and_then(|a| a.as_array()).unwrap_or(&vec![]) {
-                let addr_type = addr.get("ip-address-type").and_then(|t| t.as_str()).unwrap_or("");
+            for addr in iface
+                .get("ip-addresses")
+                .and_then(|a| a.as_array())
+                .unwrap_or(&vec![])
+            {
+                let addr_type = addr
+                    .get("ip-address-type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
                 if addr_type == "inet" {
                     if let Some(ip) = addr.get("ip-address").and_then(|i| i.as_str()) {
                         if ip != "127.0.0.1" {
@@ -2301,14 +2620,12 @@ mod tests {
     #[test]
     fn test_ip_detection_skips_loopback() {
         // Ensure loopback addresses are never returned
-        let interfaces = vec![
-            serde_json::json!({
-                "name": "lo",
-                "ip-addresses": [
-                    {"ip-address": "127.0.0.1", "ip-address-type": "inet"}
-                ]
-            }),
-        ];
+        let interfaces = vec![serde_json::json!({
+            "name": "lo",
+            "ip-addresses": [
+                {"ip-address": "127.0.0.1", "ip-address-type": "inet"}
+            ]
+        })];
 
         let mut found_ip: Option<String> = None;
         for iface in interfaces {
@@ -2316,8 +2633,15 @@ mod tests {
             if name != "eth0" {
                 continue;
             }
-            for addr in iface.get("ip-addresses").and_then(|a| a.as_array()).unwrap_or(&vec![]) {
-                let addr_type = addr.get("ip-address-type").and_then(|t| t.as_str()).unwrap_or("");
+            for addr in iface
+                .get("ip-addresses")
+                .and_then(|a| a.as_array())
+                .unwrap_or(&vec![])
+            {
+                let addr_type = addr
+                    .get("ip-address-type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
                 if addr_type == "inet" {
                     if let Some(ip) = addr.get("ip-address").and_then(|i| i.as_str()) {
                         if ip != "127.0.0.1" {
@@ -2513,7 +2837,7 @@ mod tests {
         // The IP lookup should search all nodes
 
         let cluster_nodes = vec!["pve1", "pve2", "pve3"];
-        let target_hostname = "dragonfly";
+        let _target_hostname = "dragonfly";
 
         // Simulate finding container on pve2
         let container_location = Some(("pve2", 106u64));

@@ -1,5 +1,5 @@
-use jetpack::tasks::cmd_library::*;
 use jetpack::inventory::hosts::HostOSType;
+use jetpack::tasks::cmd_library::*;
 use jetpack::tasks::files::Recurse;
 
 #[test]
@@ -35,8 +35,10 @@ fn test_screen_general_input_strict_valid() {
 
 #[test]
 fn test_screen_general_input_strict_invalid_chars() {
-    let invalid_chars = vec![";", "{", "}", "(", ")", "<", ">", "&", "*", "|", "=", "?", "[", "]", "$", "%", "`"];
-    
+    let invalid_chars = vec![
+        ";", "{", "}", "(", ")", "<", ">", "&", "*", "|", "=", "?", "[", "]", "$", "%", "`",
+    ];
+
     for ch in invalid_chars {
         let input = format!("test{}input", ch);
         let result = screen_general_input_strict(&input);
@@ -63,7 +65,7 @@ fn test_screen_general_input_loose_allows_equals() {
 #[test]
 fn test_screen_general_input_loose_invalid_chars() {
     let invalid_chars = vec![";", "<", ">", "&", "*", "?", "{", "}", "[", "]", "$", "`"];
-    
+
     for ch in invalid_chars {
         let input = format!("test{}input", ch);
         let result = screen_general_input_loose(&input);
@@ -75,7 +77,7 @@ fn test_screen_general_input_loose_invalid_chars() {
 #[test]
 fn test_screen_mode_valid_octal() {
     let valid_modes = vec!["755", "644", "777", "000", "400", "0o755", "0o644", "12345"];
-    
+
     for mode in valid_modes {
         let result = screen_mode(&mode.to_string());
         assert!(result.is_ok());
@@ -85,15 +87,16 @@ fn test_screen_mode_valid_octal() {
 
 #[test]
 fn test_screen_mode_invalid() {
-    let invalid_modes = vec!["abc", "999", "888", "7.5", "0o999", "0o888", "755x", "75.5", "x755"];
-    
+    let invalid_modes = vec![
+        "abc", "999", "888", "7.5", "0o999", "0o888", "755x", "75.5", "x755",
+    ];
+
     for mode in invalid_modes {
         let result = screen_mode(&mode.to_string());
         assert!(result.is_err(), "Mode '{}' should be invalid", mode);
         assert!(result.unwrap_err().contains("not an octal string"));
     }
 }
-
 
 #[test]
 fn test_get_mode_command_linux() {
@@ -242,7 +245,7 @@ fn test_get_arch_command() {
     let result = get_arch_command(HostOSType::Linux);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "uname -m");
-    
+
     let result = get_arch_command(HostOSType::MacOS);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "uname -m");
@@ -259,7 +262,7 @@ fn test_command_injection_prevention() {
         "/test$(whoami)",
         "/test > /dev/null; echo hacked",
     ];
-    
+
     for evil_path in evil_paths {
         let result = screen_path(&evil_path.to_string());
         assert!(result.is_err(), "Should reject path: {}", evil_path);
@@ -272,7 +275,7 @@ fn test_trimmed_inputs() {
     let result = screen_path(&path);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), "/test/file");
-    
+
     let input = "  simple-text  ".to_string();
     let result = screen_general_input_strict(&input);
     assert!(result.is_ok());

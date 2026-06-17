@@ -1,4 +1,3 @@
-
 // Jetporch
 // Copyright (C) 2023 - Michael DeHaan <michael@michaeldehaan.net> + contributors
 //
@@ -15,22 +14,24 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::playbooks::context::PlaybookContext;
-use crate::output::OutputHandlerRef;
-use std::sync::Arc;
-use crate::tasks::*;
-use std::sync::RwLock;
-use crate::inventory::hosts::Host;
-use inline_colorization::{color_red,color_blue,color_green,color_cyan,color_reset,color_yellow};
 use crate::connection::command::CommandResult;
+use crate::inventory::hosts::Host;
+use crate::output::OutputHandlerRef;
+use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::traversal::HandlerMode;
+use crate::tasks::*;
+use chrono::prelude::*;
+use guid_create::GUID;
+use inline_colorization::{
+    color_blue, color_cyan, color_green, color_red, color_reset, color_yellow,
+};
+use serde_json::json;
+use std::env;
+use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
-use std::fs::File;
-use serde_json::json;
-use guid_create::GUID;
-use chrono::prelude::*;
-use std::env;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 // visitor contains various functions that are called from all over the program
 // to send feedback to the user and logs
@@ -38,7 +39,7 @@ use std::env;
 #[derive(PartialEq)]
 pub enum CheckMode {
     Yes,
-    No
+    No,
 }
 
 pub struct PlaybookVisitor {
@@ -64,24 +65,25 @@ pub struct LogData {
     pub cmd_out: Option<String>,
     pub task_status: Option<String>,
     pub host: Option<String>,
-    pub summary: Option<serde_json::map::Map<String,serde_json::Value>>
+    pub summary: Option<serde_json::map::Map<String, serde_json::Value>>,
 }
 
 impl PlaybookVisitor {
-
     pub fn new(check_mode: CheckMode) -> Self {
-
-        let logpath : String = match env::var("JET_LOG") {
-            Ok(x) => {
-                x
-            },
-            Err(_) => String::from("/var/log/jetp/jetp.log")
+        let logpath: String = match env::var("JET_LOG") {
+            Ok(x) => x,
+            Err(_) => String::from("/var/log/jetp/jetp.log"),
         };
 
         // TODO: make logfile location configurable by environment variable
-        let logfile : Option<Arc<RwLock<File>>> = match OpenOptions::new().write(true).create(true).append(true).open(logpath) {
+        let logfile: Option<Arc<RwLock<File>>> = match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(logpath)
+        {
             Ok(x) => Some(Arc::new(RwLock::new(x))),
-            Err(_) => None
+            Err(_) => None,
         };
 
         let s = Self {
@@ -116,82 +118,114 @@ impl PlaybookVisitor {
             playbook_path: ctx.playbook_path.clone(),
             role: match &ctx.role {
                 Some(x) => Some(x.name.clone()),
-                None => None
+                None => None,
             },
             task: match &ctx.task {
                 Some(x) => Some(x.clone()),
-                None => None
+                None => None,
             },
             task_ct: match &ctx.task {
                 Some(_) => Some(ctx.task_count),
-                None => None
+                None => None,
             },
             cmd: None,
             cmd_rc: None,
             cmd_out: None,
             task_status: None,
             host: None,
-            summary: None
+            summary: None,
         }
     }
 
     pub fn log(&self, log: &LogData) {
-
         if self.logfile.is_none() {
             return;
         }
 
         let now = Utc::now();
 
-        let mut obj =  serde_json::map::Map::new();
+        let mut obj = serde_json::map::Map::new();
         obj.insert(String::from("event"), json!(log.event.clone()));
         obj.insert(String::from("run"), json!(self.run_id));
         obj.insert(String::from("now"), json!(now.to_rfc2822()));
         obj.insert(String::from("start"), json!(self.utc_start.to_rfc2822()));
         let elapsed = now - self.utc_start;
-        obj.insert(String::from("elapsed"),     json!(elapsed.num_seconds()));
+        obj.insert(String::from("elapsed"), json!(elapsed.num_seconds()));
 
-        if log.play.is_some()        { obj.insert(String::from("playbook"),    json!(log.playbook_path.clone().unwrap())); }
-        if log.play.is_some()        { obj.insert(String::from("play"),        json!(log.play.clone().unwrap()));          }
-        if log.role.is_some()        { obj.insert(String::from("role"),        json!(log.role.clone().unwrap()));          }
-        if log.task.is_some()        { obj.insert(String::from("task"),        json!(log.task.clone().unwrap()));          }
-        if log.task.is_some()        { obj.insert(String::from("task_ct"),     json!(log.task_ct.clone().unwrap()));       }
-        if log.cmd.is_some()         { obj.insert(String::from("cmd"),         json!(log.cmd.clone().unwrap()));           }
-        if log.cmd_rc.is_some()      { obj.insert(String::from("cmd_rc"),      json!(log.cmd_rc.clone().unwrap()));        }
-        if log.cmd_out.is_some()     { obj.insert(String::from("cmd_out"),     json!(log.cmd_out.clone().unwrap()));       }
-        if log.task_status.is_some() { obj.insert(String::from("task_status"), json!(log.task_status.clone().unwrap()));   }
-        if log.host.is_some()        { obj.insert(String::from("host"),        json!(log.host.clone().unwrap()));          }
-        
-        if log.summary.is_some()     { obj.insert(String::from("summary"),     json!(log.summary.clone().unwrap()));       }
+        if log.play.is_some() {
+            obj.insert(
+                String::from("playbook"),
+                json!(log.playbook_path.clone().unwrap()),
+            );
+        }
+        if log.play.is_some() {
+            obj.insert(String::from("play"), json!(log.play.clone().unwrap()));
+        }
+        if log.role.is_some() {
+            obj.insert(String::from("role"), json!(log.role.clone().unwrap()));
+        }
+        if log.task.is_some() {
+            obj.insert(String::from("task"), json!(log.task.clone().unwrap()));
+        }
+        if log.task.is_some() {
+            obj.insert(String::from("task_ct"), json!(log.task_ct.clone().unwrap()));
+        }
+        if log.cmd.is_some() {
+            obj.insert(String::from("cmd"), json!(log.cmd.clone().unwrap()));
+        }
+        if log.cmd_rc.is_some() {
+            obj.insert(String::from("cmd_rc"), json!(log.cmd_rc.clone().unwrap()));
+        }
+        if log.cmd_out.is_some() {
+            obj.insert(String::from("cmd_out"), json!(log.cmd_out.clone().unwrap()));
+        }
+        if log.task_status.is_some() {
+            obj.insert(
+                String::from("task_status"),
+                json!(log.task_status.clone().unwrap()),
+            );
+        }
+        if log.host.is_some() {
+            obj.insert(String::from("host"), json!(log.host.clone().unwrap()));
+        }
 
+        if log.summary.is_some() {
+            obj.insert(String::from("summary"), json!(log.summary.clone().unwrap()));
+        }
 
-   
         match serde_json::to_string(&obj) {
             Ok(json_str) => {
                 let mut f = self.logfile.as_ref().unwrap().write().unwrap();
-                match writeln!(f, "{}",  json_str) {
-                    Ok(_) => {},
-                    Err(_e) => { }
+                match writeln!(f, "{}", json_str) {
+                    Ok(_) => {}
+                    Err(_e) => {}
                 }
-            },
+            }
             Err(_y) => {}
         }
-
     }
 
-    pub fn is_check_mode(&self) -> bool { 
-        return self.check_mode == CheckMode::Yes; 
+    pub fn is_check_mode(&self) -> bool {
+        return self.check_mode == CheckMode::Yes;
     }
 
     pub fn banner(&self) {
-        if self.is_quiet() { return; }
+        if self.is_quiet() {
+            return;
+        }
         println!("----------------------------------------------------------");
     }
 
     // used by the echo module
     pub fn debug_host(&self, host: &Arc<RwLock<Host>>, message: &String) {
-        if self.is_quiet() { return; }
-        println!("{color_cyan}  ..... {} : {}{color_reset}", host.read().unwrap().name, message);
+        if self.is_quiet() {
+            return;
+        }
+        println!(
+            "{color_cyan}  ..... {} : {}{color_reset}",
+            host.read().unwrap().name,
+            message
+        );
     }
 
     pub fn on_playbook_start(&self, context: &Arc<RwLock<PlaybookContext>>) {
@@ -227,7 +261,6 @@ impl PlaybookVisitor {
 
         let log_entry = self.log_entry(&String::from("PLAY_START"), context.clone());
         self.log(&log_entry);
-
     }
 
     pub fn on_role_start(&self, context: &Arc<RwLock<PlaybookContext>>) {
@@ -235,8 +268,7 @@ impl PlaybookVisitor {
         self.log(&log_entry);
     }
 
-    pub fn on_role_stop(&self, _context: &Arc<RwLock<PlaybookContext>>) {
-    }
+    pub fn on_role_stop(&self, _context: &Arc<RwLock<PlaybookContext>>) {}
 
     pub fn on_play_stop(&self, context: &Arc<RwLock<PlaybookContext>>, failed: bool) {
         // failed occurs if *ALL* hosts in a play have failed
@@ -248,7 +280,7 @@ impl PlaybookVisitor {
             return;
         }
 
-        if ! failed {
+        if !failed {
             self.banner();
             println!("> play complete: {}", play_name);
         } else {
@@ -262,8 +294,12 @@ impl PlaybookVisitor {
             // Still log to file, but suppress the terminal table.
             let mut log_entry = self.log_entry(&String::from("SUMMARY"), Arc::clone(context));
             let ctx = context.read().unwrap();
-            let mut map: serde_json::map::Map<String, serde_json::Value> = serde_json::map::Map::new();
-            map.insert(String::from("failed_hosts"), json!(ctx.get_hosts_failed_count()));
+            let mut map: serde_json::map::Map<String, serde_json::Value> =
+                serde_json::map::Map::new();
+            map.insert(
+                String::from("failed_hosts"),
+                json!(ctx.get_hosts_failed_count()),
+            );
             log_entry.summary = Some(map);
             self.log(&log_entry);
             return;
@@ -282,7 +318,7 @@ impl PlaybookVisitor {
         if let Some(ref h) = self.output_handler {
             match is_handler {
                 HandlerMode::NormalTasks => h.on_task_start(&task, 1),
-                HandlerMode::Handlers    => h.on_handler_start(&task),
+                HandlerMode::Handlers => h.on_handler_start(&task),
             }
             let log_entry = self.log_entry(&String::from("TASK_START"), Arc::clone(context));
             self.log(&log_entry);
@@ -291,15 +327,19 @@ impl PlaybookVisitor {
 
         let what = match is_handler {
             HandlerMode::NormalTasks => String::from("task"),
-            HandlerMode::Handlers    => String::from("handler")
+            HandlerMode::Handlers => String::from("handler"),
         };
 
         self.banner();
         if role.is_none() {
             println!("> begin {}: {}", what, task);
-        }
-        else {
-            println!("> ({}) begin {}: {}", role.as_ref().unwrap().name, what, task);
+        } else {
+            println!(
+                "> ({}) begin {}: {}",
+                role.as_ref().unwrap().name,
+                what,
+                task
+            );
         }
 
         let log_entry = self.log_entry(&String::from("TASK_START"), Arc::clone(context));
@@ -307,12 +347,24 @@ impl PlaybookVisitor {
     }
 
     pub fn on_batch(&self, batch_num: usize, batch_count: usize, batch_size: usize) {
-        if self.is_quiet() { return; }
+        if self.is_quiet() {
+            return;
+        }
         self.banner();
-        println!("> batch {}/{}, {} hosts", batch_num+1, batch_count, batch_size);
+        println!(
+            "> batch {}/{}, {} hosts",
+            batch_num + 1,
+            batch_count,
+            batch_size
+        );
     }
 
-    pub fn on_host_provisioned(&self, context: &Arc<RwLock<PlaybookContext>>, host_name: &str, result: &crate::provisioners::ProvisionResult) {
+    pub fn on_host_provisioned(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host_name: &str,
+        result: &crate::provisioners::ProvisionResult,
+    ) {
         let mut ctx = context.write().unwrap();
         match result {
             crate::provisioners::ProvisionResult::Created => {
@@ -321,7 +373,10 @@ impl PlaybookVisitor {
                 ctx.increment_created_for_host(&host_name.to_string());
             }
             crate::provisioners::ProvisionResult::Updated => {
-                println!("{color_blue}✓ {} => provision updated{color_reset}", host_name);
+                println!(
+                    "{color_blue}✓ {} => provision updated{color_reset}",
+                    host_name
+                );
                 ctx.increment_attempted_for_host(&host_name.to_string());
                 ctx.increment_modified_for_host(&host_name.to_string());
             }
@@ -338,67 +393,111 @@ impl PlaybookVisitor {
         }
     }
 
-    pub fn on_host_task_start(&self, _context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) {
-        if self.is_quiet() { return; }
+    pub fn on_host_task_start(
+        &self,
+        _context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+    ) {
+        if self.is_quiet() {
+            return;
+        }
         let host2 = host.read().unwrap();
         println!("… {} => running", host2.name);
     }
 
     pub fn on_notify_handler(&self, host: &Arc<RwLock<Host>>, which_handler: &String) {
-        if self.is_quiet() { return; }
+        if self.is_quiet() {
+            return;
+        }
         let host2 = host.read().unwrap();
         println!("… {} => notified: {}", host2.name, which_handler);
     }
 
     pub fn on_host_delegate(&self, host: &Arc<RwLock<Host>>, delegated: &String) {
-        if self.is_quiet() { return; }
+        if self.is_quiet() {
+            return;
+        }
         let host2 = host.read().unwrap();
-        println!("{color_blue}✓ {} => delegating to: {}{color_reset}",  &host2.name, delegated.clone());
+        println!(
+            "{color_blue}✓ {} => delegating to: {}{color_reset}",
+            &host2.name,
+            delegated.clone()
+        );
     }
 
-    pub fn on_host_task_ok(&self, context: &Arc<RwLock<PlaybookContext>>, task_response: &Arc<TaskResponse>, host: &Arc<RwLock<Host>>) {
+    pub fn on_host_task_ok(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        task_response: &Arc<TaskResponse>,
+        host: &Arc<RwLock<Host>>,
+    ) {
         let host2 = host.read().unwrap();
         let quiet = self.is_quiet();
         {
             let mut context2 = context.write().unwrap();
             context2.increment_attempted_for_host(&host2.name);
             match &task_response.status {
-                TaskStatus::IsCreated  =>  {
-                    if !quiet { println!("{color_blue}✓ {} => created{color_reset}",  &host2.name); }
-                    context2.increment_created_for_host(&host2.name);
-                },
-                TaskStatus::IsRemoved  =>  {
-                    if !quiet { println!("{color_blue}✓ {} => removed{color_reset}",  &host2.name); }
-                    context2.increment_removed_for_host(&host2.name);
-                },
-                TaskStatus::IsModified =>  {
+                TaskStatus::IsCreated => {
                     if !quiet {
-                        let changes2 : Vec<String> = task_response.changes.iter().map(|x| { format!("{:?}", x) }).collect();
+                        println!("{color_blue}✓ {} => created{color_reset}", &host2.name);
+                    }
+                    context2.increment_created_for_host(&host2.name);
+                }
+                TaskStatus::IsRemoved => {
+                    if !quiet {
+                        println!("{color_blue}✓ {} => removed{color_reset}", &host2.name);
+                    }
+                    context2.increment_removed_for_host(&host2.name);
+                }
+                TaskStatus::IsModified => {
+                    if !quiet {
+                        let changes2: Vec<String> = task_response
+                            .changes
+                            .iter()
+                            .map(|x| format!("{:?}", x))
+                            .collect();
                         let change_str = changes2.join(",");
-                        println!("{color_blue}✓ {} => modified ({}){color_reset}", &host2.name, change_str);
+                        println!(
+                            "{color_blue}✓ {} => modified ({}){color_reset}",
+                            &host2.name, change_str
+                        );
                     }
                     context2.increment_modified_for_host(&host2.name);
-                },
-                TaskStatus::IsExecuted =>  {
-                    if !quiet { println!("{color_blue}✓ {} => complete{color_reset}", &host2.name); }
+                }
+                TaskStatus::IsExecuted => {
+                    if !quiet {
+                        println!("{color_blue}✓ {} => complete{color_reset}", &host2.name);
+                    }
                     context2.increment_executed_for_host(&host2.name);
-                },
-                TaskStatus::IsPassive  =>  {
+                }
+                TaskStatus::IsPassive => {
                     context2.increment_passive_for_host(&host2.name);
                 }
-                TaskStatus::IsMatched  =>  {
-                    if !quiet { println!("{color_green}✓ {} => matched {color_reset}", &host2.name); }
+                TaskStatus::IsMatched => {
+                    if !quiet {
+                        println!("{color_green}✓ {} => matched {color_reset}", &host2.name);
+                    }
                     context2.increment_matched_for_host(&host2.name);
                 }
-                TaskStatus::IsSkipped  =>  {
-                    if !quiet { println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name); }
+                TaskStatus::IsSkipped => {
+                    if !quiet {
+                        println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name);
+                    }
                     context2.increment_skipped_for_host(&host2.name);
                 }
                 TaskStatus::Failed => {
-                    if !quiet { println!("{color_yellow}✓ {} => failed (ignored){color_reset}", &host2.name); }
+                    if !quiet {
+                        println!(
+                            "{color_yellow}✓ {} => failed (ignored){color_reset}",
+                            &host2.name
+                        );
+                    }
                 }
                 _ => {
-                    panic!("on host {}, invalid final task return status, FSM should have rejected: {:?}", host2.name, task_response);
+                    panic!(
+                        "on host {}, invalid final task return status, FSM should have rejected: {:?}",
+                        host2.name, task_response
+                    );
                 }
             }
         }
@@ -407,54 +506,83 @@ impl PlaybookVisitor {
         log_entry.host = Some(host2.name.clone());
         log_entry.task_status = Some(format!("{:?}", &task_response.status));
         self.log(&log_entry);
-
     }
 
     // the check mode version of on_host_task_ok - different possible states, slightly different output
 
-    pub fn on_host_task_check_ok(&self, context: &Arc<RwLock<PlaybookContext>>, task_response: &Arc<TaskResponse>, host: &Arc<RwLock<Host>>) {
+    pub fn on_host_task_check_ok(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        task_response: &Arc<TaskResponse>,
+        host: &Arc<RwLock<Host>>,
+    ) {
         let host2 = host.read().unwrap();
         let quiet = self.is_quiet();
         {
             let mut context2 = context.write().unwrap();
             context2.increment_attempted_for_host(&host2.name);
             match &task_response.status {
-                TaskStatus::NeedsCreation  =>  {
-                    if !quiet { println!("{color_blue}✓ {} => would create{color_reset}",  &host2.name); }
-                    context2.increment_created_for_host(&host2.name);
-                },
-                TaskStatus::NeedsRemoval  =>  {
-                    if !quiet { println!("{color_blue}✓ {} => would remove{color_reset}",  &host2.name); }
-                    context2.increment_removed_for_host(&host2.name);
-                },
-                TaskStatus::NeedsModification =>  {
+                TaskStatus::NeedsCreation => {
                     if !quiet {
-                        let changes2 : Vec<String> = task_response.changes.iter().map(|x| { format!("{:?}", x) }).collect();
+                        println!("{color_blue}✓ {} => would create{color_reset}", &host2.name);
+                    }
+                    context2.increment_created_for_host(&host2.name);
+                }
+                TaskStatus::NeedsRemoval => {
+                    if !quiet {
+                        println!("{color_blue}✓ {} => would remove{color_reset}", &host2.name);
+                    }
+                    context2.increment_removed_for_host(&host2.name);
+                }
+                TaskStatus::NeedsModification => {
+                    if !quiet {
+                        let changes2: Vec<String> = task_response
+                            .changes
+                            .iter()
+                            .map(|x| format!("{:?}", x))
+                            .collect();
                         let change_str = changes2.join(",");
-                        println!("{color_blue}✓ {} => would modify ({}) {color_reset}", &host2.name, change_str);
+                        println!(
+                            "{color_blue}✓ {} => would modify ({}) {color_reset}",
+                            &host2.name, change_str
+                        );
                     }
                     context2.increment_modified_for_host(&host2.name);
-                },
-                TaskStatus::NeedsExecution =>  {
-                    if !quiet { println!("{color_blue}✓ {} => would run{color_reset}", &host2.name); }
+                }
+                TaskStatus::NeedsExecution => {
+                    if !quiet {
+                        println!("{color_blue}✓ {} => would run{color_reset}", &host2.name);
+                    }
                     context2.increment_executed_for_host(&host2.name);
-                },
-                TaskStatus::IsPassive  =>  {
+                }
+                TaskStatus::IsPassive => {
                     context2.increment_passive_for_host(&host2.name);
                 }
-                TaskStatus::IsMatched  =>  {
-                    if !quiet { println!("{color_green}✓ {} => matched {color_reset}", &host2.name); }
+                TaskStatus::IsMatched => {
+                    if !quiet {
+                        println!("{color_green}✓ {} => matched {color_reset}", &host2.name);
+                    }
                     context2.increment_matched_for_host(&host2.name);
                 }
-                TaskStatus::IsSkipped  =>  {
-                    if !quiet { println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name); }
+                TaskStatus::IsSkipped => {
+                    if !quiet {
+                        println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name);
+                    }
                     context2.increment_skipped_for_host(&host2.name);
                 }
                 TaskStatus::Failed => {
-                    if !quiet { println!("{color_yellow}✓ {} => failed (ignored){color_reset}", &host2.name); }
+                    if !quiet {
+                        println!(
+                            "{color_yellow}✓ {} => failed (ignored){color_reset}",
+                            &host2.name
+                        );
+                    }
                 }
                 _ => {
-                    panic!("on host {}, invalid check-mode final task return status, FSM should have rejected: {:?}", host2.name, task_response);
+                    panic!(
+                        "on host {}, invalid check-mode final task return status, FSM should have rejected: {:?}",
+                        host2.name, task_response
+                    );
                 }
             }
         }
@@ -465,13 +593,29 @@ impl PlaybookVisitor {
         self.log(&log_entry);
     }
 
-    pub fn on_host_task_retry(&self, _context: &Arc<RwLock<PlaybookContext>>,host: &Arc<RwLock<Host>>, retries: u64, delay: u64) {
-        if self.is_quiet() { return; }
+    pub fn on_host_task_retry(
+        &self,
+        _context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+        retries: u64,
+        delay: u64,
+    ) {
+        if self.is_quiet() {
+            return;
+        }
         let host2 = host.read().unwrap();
-        println!("{color_blue}! {} => retrying ({} retries left) in {} seconds{color_reset}",host2.name,retries,delay);
+        println!(
+            "{color_blue}! {} => retrying ({} retries left) in {} seconds{color_reset}",
+            host2.name, retries, delay
+        );
     }
 
-    pub fn on_host_task_failed(&self, context: &Arc<RwLock<PlaybookContext>>, task_response: &Arc<TaskResponse>, host: &Arc<RwLock<Host>>) {
+    pub fn on_host_task_failed(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        task_response: &Arc<TaskResponse>,
+        host: &Arc<RwLock<Host>>,
+    ) {
         let mut log_entry = self.log_entry(&String::from("TASK_FAILED"), Arc::clone(context));
         let host2 = host.read().unwrap();
         let quiet = self.is_quiet();
@@ -487,30 +631,52 @@ impl PlaybookVisitor {
                         println!("    out: {}", cmd_result.out);
                         println!("    rc: {}{color_reset}", cmd_result.rc);
                     }
-                    log_entry.cmd     = Some(cmd_result.cmd.clone());
+                    log_entry.cmd = Some(cmd_result.cmd.clone());
                     log_entry.cmd_out = Some(cmd_result.out.clone());
-                    log_entry.cmd_rc  = Some(cmd_result.rc.clone());
+                    log_entry.cmd_rc = Some(cmd_result.rc.clone());
                 }
             } else {
-                if !quiet { println!("{color_red}! error: {}: {}{color_reset}", host2.name, msg.as_ref().unwrap()); }
+                if !quiet {
+                    println!(
+                        "{color_red}! error: {}: {}{color_reset}",
+                        host2.name,
+                        msg.as_ref().unwrap()
+                    );
+                }
             }
         } else {
-            if !quiet { println!("{color_red}! host failed: {}, {color_reset}", host2.name); }
+            if !quiet {
+                println!("{color_red}! host failed: {}, {color_reset}", host2.name);
+            }
         }
 
-        context.write().unwrap().increment_failed_for_host(&host2.name);
+        context
+            .write()
+            .unwrap()
+            .increment_failed_for_host(&host2.name);
         log_entry.host = Some(host2.name.clone());
         log_entry.task_status = Some(format!("{:?}", &task_response.status));
         self.log(&log_entry);
     }
 
-    pub fn on_host_connect_failed(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) {
+    pub fn on_host_connect_failed(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+    ) {
         let host2 = host.read().unwrap();
-        context.write().unwrap().increment_failed_for_host(&host2.name);
+        context
+            .write()
+            .unwrap()
+            .increment_failed_for_host(&host2.name);
         if !self.is_quiet() {
-            println!("{color_red}! connection failed to host: {}{color_reset}", host2.name);
+            println!(
+                "{color_red}! connection failed to host: {}{color_reset}",
+                host2.name
+            );
         }
-        let mut log_entry = self.log_entry(&String::from("HOST_CONNECT_FAILED"), Arc::clone(context));
+        let mut log_entry =
+            self.log_entry(&String::from("HOST_CONNECT_FAILED"), Arc::clone(context));
         log_entry.host = Some(host2.name.clone());
         self.log(&log_entry);
     }
@@ -519,39 +685,67 @@ impl PlaybookVisitor {
         let failed_hosts = context.read().unwrap().get_hosts_failed_count();
         return match failed_hosts {
             0 => 0,
-            _ => 1
+            _ => 1,
         };
     }
-    
-    pub fn on_before_transfer(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>, path: &String) {
-        if self.is_quiet() { return; }
+
+    pub fn on_before_transfer(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+        path: &String,
+    ) {
+        if self.is_quiet() {
+            return;
+        }
         let host2 = host.read().unwrap();
         if context.read().unwrap().verbosity > 0 {
-            println!("{color_blue}! {} => transferring to: {}", host2.name, &path.clone());
+            println!(
+                "{color_blue}! {} => transferring to: {}",
+                host2.name,
+                &path.clone()
+            );
         }
     }
 
-    pub fn on_command_run(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>, cmd: &String) {
-        if self.is_quiet() { return; }
+    pub fn on_command_run(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+        cmd: &String,
+    ) {
+        if self.is_quiet() {
+            return;
+        }
         let host2 = host.read().unwrap();
         if context.read().unwrap().verbosity > 0 {
             println!("{color_blue}! {} => exec: {}", host2.name, &cmd.clone());
         }
     }
 
-    pub fn on_command_ok(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>, result: &Arc<Option<CommandResult>>,) {
+    pub fn on_command_ok(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+        result: &Arc<Option<CommandResult>>,
+    ) {
         let host2 = host.read().unwrap();
         let cmd_result = result.as_ref().as_ref().expect("missing command result");
         if context.read().unwrap().verbosity > 2 {
             let _ctx2 = context.write().unwrap(); // lock for multi-line output
             println!("{color_blue}! {} ... command ok", host2.name);
-            println!("    cmd: {}", cmd_result.cmd);           
+            println!("    cmd: {}", cmd_result.cmd);
             println!("    out: {}", cmd_result.out.clone());
             println!("    rc: {}{color_reset}", cmd_result.rc);
         }
     }
 
-    pub fn on_command_failed(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>, result: &Arc<Option<CommandResult>>,) {
+    pub fn on_command_failed(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+        result: &Arc<Option<CommandResult>>,
+    ) {
         let host2 = host.read().expect("context read");
         let cmd_result = result.as_ref().as_ref().expect("missing command result");
         if context.read().unwrap().verbosity > 2 {
@@ -564,7 +758,6 @@ impl PlaybookVisitor {
     }
 
     pub fn show_playbook_summary(&self, context: &Arc<RwLock<PlaybookContext>>) {
-
         let ctx = context.read().unwrap();
 
         let seen_hosts = ctx.get_hosts_seen_count();
@@ -589,18 +782,25 @@ impl PlaybookVisitor {
         let adjusted_hosts = ctx.get_hosts_adjusted_count();
         let unchanged_hosts = seen_hosts - adjusted_hosts;
         let unchanged_ct = action_ct - adjusted_ct;
-        let failed_ct    = ctx.get_total_failed_count();
+        let failed_ct = ctx.get_total_failed_count();
         let failed_hosts = ctx.get_hosts_failed_count();
 
         let summary = match failed_hosts {
             0 => match adjusted_hosts {
-                0 => String::from(format!("{color_green}(✓) Perfect. All hosts matched policy.{color_reset}")),
-                _ => String::from(format!("{color_blue}(✓) Actions were applied.{color_reset}")),
+                0 => String::from(format!(
+                    "{color_green}(✓) Perfect. All hosts matched policy.{color_reset}"
+                )),
+                _ => String::from(format!(
+                    "{color_blue}(✓) Actions were applied.{color_reset}"
+                )),
             },
-            _ => String::from(format!("{color_red}(X) Failures have occured.{color_reset}")),
+            _ => String::from(format!(
+                "{color_red}(X) Failures have occured.{color_reset}"
+            )),
         };
 
-        let mode_table = format!("|:-|:-|:-|\n\
+        let mode_table = format!(
+            "|:-|:-|:-|\n\
                           | Results | Items | Hosts \n\
                           | --- | --- | --- |\n\
                           | Roles | {role_ct} | |\n\
@@ -617,35 +817,34 @@ impl PlaybookVisitor {
                           | Unchanged | {unchanged_ct} | {unchanged_hosts}\n\
                           | Changed | {adjusted_ct} | {adjusted_hosts}\n\
                           | Failed | {failed_ct} | {failed_hosts}\n\
-                          |-|-|-");
+                          |-|-|-"
+        );
 
         crate::util::terminal::markdown_print(&mode_table);
         println!("{}", format!("\n{summary}"));
         println!("");
 
         let mut log_entry = self.log_entry(&String::from("SUMMARY"), Arc::clone(context));
-        let mut map : serde_json::map::Map<String,serde_json::Value> = serde_json::map::Map::new();
-        map.insert(String::from("matched_ct"),      json!(matched_ct));
-        map.insert(String::from("matched_hosts"),   json!(matched_hosts));
-        map.insert(String::from("created_ct"),      json!(created_ct));
-        map.insert(String::from("created_hosts"),   json!(created_hosts));
-        map.insert(String::from("modified_ct"),     json!(modified_ct));
-        map.insert(String::from("modified_hosts"),  json!(modified_hosts));
-        map.insert(String::from("executed_ct"),     json!(executed_ct));
-        map.insert(String::from("executed_hosts"),  json!(executed_hosts));
-        map.insert(String::from("passive_ct"),      json!(passive_ct));
-        map.insert(String::from("passive_hosts"),   json!(passive_hosts));
-        map.insert(String::from("skipped_ct"),      json!(skipped_ct));
-        map.insert(String::from("skipped_hosts"),   json!(skipped_hosts));
-        map.insert(String::from("unchanged_ct"),    json!(unchanged_ct));
+        let mut map: serde_json::map::Map<String, serde_json::Value> = serde_json::map::Map::new();
+        map.insert(String::from("matched_ct"), json!(matched_ct));
+        map.insert(String::from("matched_hosts"), json!(matched_hosts));
+        map.insert(String::from("created_ct"), json!(created_ct));
+        map.insert(String::from("created_hosts"), json!(created_hosts));
+        map.insert(String::from("modified_ct"), json!(modified_ct));
+        map.insert(String::from("modified_hosts"), json!(modified_hosts));
+        map.insert(String::from("executed_ct"), json!(executed_ct));
+        map.insert(String::from("executed_hosts"), json!(executed_hosts));
+        map.insert(String::from("passive_ct"), json!(passive_ct));
+        map.insert(String::from("passive_hosts"), json!(passive_hosts));
+        map.insert(String::from("skipped_ct"), json!(skipped_ct));
+        map.insert(String::from("skipped_hosts"), json!(skipped_hosts));
+        map.insert(String::from("unchanged_ct"), json!(unchanged_ct));
         map.insert(String::from("unchanged_hosts"), json!(unchanged_hosts));
-        map.insert(String::from("adjusted_ct"),     json!(adjusted_ct));
-        map.insert(String::from("adjusted_hosts"),  json!(adjusted_hosts));
-        map.insert(String::from("failed_ct"),       json!(failed_ct));
-        map.insert(String::from("failed_hosts"),    json!(failed_hosts));
+        map.insert(String::from("adjusted_ct"), json!(adjusted_ct));
+        map.insert(String::from("adjusted_hosts"), json!(adjusted_hosts));
+        map.insert(String::from("failed_ct"), json!(failed_ct));
+        map.insert(String::from("failed_hosts"), json!(failed_hosts));
         log_entry.summary = Some(map.clone());
         self.log(&log_entry);
-
     }
-
 }

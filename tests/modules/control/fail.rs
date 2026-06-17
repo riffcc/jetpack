@@ -38,7 +38,7 @@ msg: "Something went wrong"
 
     let task: Result<FailTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert_eq!(task.name, Some("Test Fail".to_string()));
     assert_eq!(task.msg, Some("Something went wrong".to_string()));
@@ -52,7 +52,7 @@ msg:
 
     let task: Result<FailTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.name.is_none());
     assert!(task.msg.is_none());
@@ -70,7 +70,7 @@ and:
 
     let task: Result<FailTask, _> = serde_yaml::from_str(yaml);
     assert!(task.is_ok());
-    
+
     let task = task.unwrap();
     assert!(task.with.is_some());
     assert!(task.and.is_some());

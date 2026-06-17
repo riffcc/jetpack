@@ -15,26 +15,26 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use crate::Inventory;
 use crate::connection::command::CommandResult;
 use crate::connection::command::Forward;
 use crate::connection::connection::Connection;
 use crate::connection::factory::ConnectionFactory;
-use crate::connection::local::convert_out;
 use crate::connection::local::LocalFactory;
+use crate::connection::local::convert_out;
 use crate::handle::response::Response;
 use crate::inventory::hosts::Host;
 use crate::playbooks::context::PlaybookContext;
 use crate::tasks::*;
-use crate::Inventory;
 use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use russh::client::{self, AuthResult};
 use russh::ChannelMsg;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use russh::client::{self, AuthResult};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::runtime::Runtime;
 
 // Minimal handler for russh client — accepts all host keys (same as ssh2 default)
@@ -99,8 +99,9 @@ impl ConnectionFactory for SshFactory {
         let ctx = context.read().expect("context read");
         let hostname1 = host.read().expect("host read").name.clone();
         if hostname1.eq("localhost") {
-            let conn: Arc<Mutex<dyn Connection>> =
-                self.local_factory.get_connection(context, &self.localhost)?;
+            let conn: Arc<Mutex<dyn Connection>> = self
+                .local_factory
+                .get_connection(context, &self.localhost)?;
             return Ok(conn);
         }
 
@@ -117,8 +118,9 @@ impl ConnectionFactory for SshFactory {
         // Per-host inventory key takes priority; config-level private_key_file is fallback
         let key = inv_key.or_else(|| self.private_key_file.clone());
         if hostname2.eq("localhost") {
-            let conn: Arc<Mutex<dyn Connection>> =
-                self.local_factory.get_connection(context, &self.localhost)?;
+            let conn: Arc<Mutex<dyn Connection>> = self
+                .local_factory
+                .get_connection(context, &self.localhost)?;
             return Ok(conn);
         }
 
@@ -378,17 +380,12 @@ impl Connection for SshConnection {
         // OS detection — run uname on first connect
         let uname_result = self.run_command_low_level(&String::from("uname -a"));
         match uname_result {
-            Ok((_rc, out)) => {
-                match self.host.write().unwrap().set_os_info(&out.clone()) {
-                    Ok(_x) => {}
-                    Err(_y) => return Err(format!("failed to set OS info")),
-                }
-            }
+            Ok((_rc, out)) => match self.host.write().unwrap().set_os_info(&out.clone()) {
+                Ok(_x) => {}
+                Err(_y) => return Err(format!("failed to set OS info")),
+            },
             Err((rc, out)) => {
-                return Err(format!(
-                    "uname -a command failed: rc={}, out={}",
-                    rc, out
-                ))
+                return Err(format!("uname -a command failed: rc={}, out={}", rc, out));
             }
         }
 
@@ -446,21 +443,15 @@ impl Connection for SshConnection {
         let data_bytes = data.as_bytes().to_vec();
 
         self.runtime.lock().unwrap().block_on(async {
-            let channel = handle
-                .channel_open_session()
-                .await
-                .map_err(|e| response.is_failed(request, &format!("sftp connection failed: {}", e)))?;
-            channel
-                .request_subsystem(true, "sftp")
-                .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp subsystem request failed: {}", e))
-                })?;
+            let channel = handle.channel_open_session().await.map_err(|e| {
+                response.is_failed(request, &format!("sftp connection failed: {}", e))
+            })?;
+            channel.request_subsystem(true, "sftp").await.map_err(|e| {
+                response.is_failed(request, &format!("sftp subsystem request failed: {}", e))
+            })?;
             let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
                 .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp session failed: {}", e))
-                })?;
+                .map_err(|e| response.is_failed(request, &format!("sftp session failed: {}", e)))?;
 
             let mut file = sftp
                 .create(&remote_path)
@@ -487,21 +478,15 @@ impl Connection for SshConnection {
         let remote_path = remote_path.clone();
 
         self.runtime.lock().unwrap().block_on(async {
-            let channel = handle
-                .channel_open_session()
-                .await
-                .map_err(|e| response.is_failed(request, &format!("sftp connection failed: {}", e)))?;
-            channel
-                .request_subsystem(true, "sftp")
-                .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp subsystem request failed: {}", e))
-                })?;
+            let channel = handle.channel_open_session().await.map_err(|e| {
+                response.is_failed(request, &format!("sftp connection failed: {}", e))
+            })?;
+            channel.request_subsystem(true, "sftp").await.map_err(|e| {
+                response.is_failed(request, &format!("sftp subsystem request failed: {}", e))
+            })?;
             let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
                 .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp session failed: {}", e))
-                })?;
+                .map_err(|e| response.is_failed(request, &format!("sftp session failed: {}", e)))?;
 
             let mut file = sftp
                 .open(&remote_path)
@@ -533,38 +518,25 @@ impl Connection for SshConnection {
         let remote_path = remote_path.clone();
 
         self.runtime.lock().unwrap().block_on(async {
-            let channel = handle
-                .channel_open_session()
-                .await
-                .map_err(|e| response.is_failed(request, &format!("sftp connection failed: {}", e)))?;
-            channel
-                .request_subsystem(true, "sftp")
-                .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp subsystem request failed: {}", e))
-                })?;
+            let channel = handle.channel_open_session().await.map_err(|e| {
+                response.is_failed(request, &format!("sftp connection failed: {}", e))
+            })?;
+            channel.request_subsystem(true, "sftp").await.map_err(|e| {
+                response.is_failed(request, &format!("sftp subsystem request failed: {}", e))
+            })?;
             let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
                 .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp session failed: {}", e))
-                })?;
+                .map_err(|e| response.is_failed(request, &format!("sftp session failed: {}", e)))?;
 
-            let mut file = sftp
-                .create(&remote_path)
-                .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp write failed (1): {}", e))
-                })?;
-            file.write_all(&src_data)
-                .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp copy failed (1): {}", e))
-                })?;
+            let mut file = sftp.create(&remote_path).await.map_err(|e| {
+                response.is_failed(request, &format!("sftp write failed (1): {}", e))
+            })?;
+            file.write_all(&src_data).await.map_err(|e| {
+                response.is_failed(request, &format!("sftp copy failed (1): {}", e))
+            })?;
             file.shutdown()
                 .await
-                .map_err(|e| {
-                    response.is_failed(request, &format!("sftp close failed: {}", e))
-                })?;
+                .map_err(|e| response.is_failed(request, &format!("sftp close failed: {}", e)))?;
 
             Ok(())
         })

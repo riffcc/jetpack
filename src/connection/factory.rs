@@ -15,19 +15,24 @@
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::connection::connection::Connection;
-use crate::playbooks::context::PlaybookContext;
 use crate::inventory::hosts::Host;
+use crate::playbooks::context::PlaybookContext;
+use std::marker::{Send, Sync};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
-use std::marker::{Send,Sync};
 
 // the factory trait that serves as the base for SshFactory, LocalFactory, and NoFactory
 
-pub trait ConnectionFactory : Send + Sync {
+pub trait ConnectionFactory: Send + Sync {
+    fn get_connection(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host: &Arc<RwLock<Host>>,
+    ) -> Result<Arc<Mutex<dyn Connection>>, String>;
 
-    fn get_connection(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Arc<RwLock<Host>>) -> Result<Arc<Mutex<dyn Connection>>, String>;
-
-    fn get_local_connection(&self, context: &Arc<RwLock<PlaybookContext>>) -> Result<Arc<Mutex<dyn Connection>>, String>;
-
+    fn get_local_connection(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+    ) -> Result<Arc<Mutex<dyn Connection>>, String>;
 }

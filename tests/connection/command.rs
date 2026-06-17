@@ -1,6 +1,5 @@
 use jetpack::connection::command::*;
 use jetpack::tasks::response::{TaskResponse, TaskStatus};
-use jetpack::tasks::fields::Field;
 use std::sync::Arc;
 
 #[test]
@@ -10,7 +9,7 @@ fn test_command_result_creation() {
         out: "file1\nfile2\n".to_string(),
         rc: 0,
     };
-    
+
     assert_eq!(cmd_result.cmd, "ls -la");
     assert_eq!(cmd_result.out, "file1\nfile2\n");
     assert_eq!(cmd_result.rc, 0);
@@ -23,7 +22,7 @@ fn test_command_result_clone() {
         out: "test\n".to_string(),
         rc: 0,
     };
-    
+
     let cloned = cmd_result.clone();
     assert_eq!(cloned.cmd, cmd_result.cmd);
     assert_eq!(cloned.out, cmd_result.out);
@@ -51,10 +50,10 @@ fn test_cmd_info() {
         with: Arc::new(None),
         and: Arc::new(None),
     };
-    
+
     let arc_response = Arc::new(response);
     let (rc, out) = cmd_info(&arc_response);
-    
+
     assert_eq!(rc, 0);
     assert_eq!(out, "output text");
 }
@@ -73,10 +72,10 @@ fn test_cmd_info_with_error() {
         with: Arc::new(None),
         and: Arc::new(None),
     };
-    
+
     let arc_response = Arc::new(response);
     let (rc, out) = cmd_info(&arc_response);
-    
+
     assert_eq!(rc, 1);
     assert_eq!(out, "error message");
 }
@@ -92,7 +91,7 @@ fn test_cmd_info_without_command_result() {
         with: Arc::new(None),
         and: Arc::new(None),
     };
-    
+
     let arc_response = Arc::new(response);
     cmd_info(&arc_response);
 }

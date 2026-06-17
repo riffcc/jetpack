@@ -84,7 +84,11 @@ pub fn infer_zone(inventory_name: &str) -> Option<String> {
 /// Extract short hostname from inventory FQDN
 /// e.g., "gravity01.island.lagun.co" → "gravity01"
 pub fn extract_hostname(inventory_name: &str) -> String {
-    inventory_name.split('.').next().unwrap_or(inventory_name).to_string()
+    inventory_name
+        .split('.')
+        .next()
+        .unwrap_or(inventory_name)
+        .to_string()
 }
 
 impl DnsConfig {
@@ -101,7 +105,9 @@ impl DnsConfig {
     /// Look up IP address for a host from the zone file
     /// inventory_name is the FQDN from inventory (e.g., "gravity01.island.lagun.co")
     pub fn lookup_ip(&self, inventory_name: &str) -> Result<Option<String>, String> {
-        let zone = self.zone.clone()
+        let zone = self
+            .zone
+            .clone()
             .or_else(|| infer_zone(inventory_name))
             .ok_or_else(|| format!("Cannot infer zone from '{}'", inventory_name))?;
 
@@ -117,14 +123,17 @@ impl DnsConfig {
 
 /// Add a DNS A record for a host, plus PTR if configured, and optionally sync
 /// inventory_name is the FQDN from inventory (e.g., "gravity01.island.lagun.co")
-pub fn add_host_record(
-    config: &DnsConfig,
-    inventory_name: &str,
-    ip: &str,
-) -> Result<bool, String> {
-    let zone = config.zone.clone()
+pub fn add_host_record(config: &DnsConfig, inventory_name: &str, ip: &str) -> Result<bool, String> {
+    let zone = config
+        .zone
+        .clone()
         .or_else(|| infer_zone(inventory_name))
-        .ok_or_else(|| format!("Cannot infer zone from '{}' - use FQDN or set zone explicitly", inventory_name))?;
+        .ok_or_else(|| {
+            format!(
+                "Cannot infer zone from '{}' - use FQDN or set zone explicitly",
+                inventory_name
+            )
+        })?;
 
     let hostname = extract_hostname(inventory_name);
     let fqdn = format!("{}.{}.", hostname, zone);
@@ -156,13 +165,17 @@ pub fn add_host_record(
 
 /// Remove a DNS A record for a host and optionally sync
 /// inventory_name is the FQDN from inventory (e.g., "gravity01.island.lagun.co")
-pub fn remove_host_record(
-    config: &DnsConfig,
-    inventory_name: &str,
-) -> Result<bool, String> {
-    let zone = config.zone.clone()
+pub fn remove_host_record(config: &DnsConfig, inventory_name: &str) -> Result<bool, String> {
+    let zone = config
+        .zone
+        .clone()
         .or_else(|| infer_zone(inventory_name))
-        .ok_or_else(|| format!("Cannot infer zone from '{}' - use FQDN or set zone explicitly", inventory_name))?;
+        .ok_or_else(|| {
+            format!(
+                "Cannot infer zone from '{}' - use FQDN or set zone explicitly",
+                inventory_name
+            )
+        })?;
 
     let hostname = extract_hostname(inventory_name);
 
@@ -198,27 +211,23 @@ pub fn add_cname_alias(
 
 /// Add a PTR record for reverse DNS
 /// Extracts the host part from the IP and creates record in reverse zone
-pub fn add_ptr_record(
-    config: &DnsConfig,
-    ip: &str,
-    fqdn: &str,
-) -> Result<bool, String> {
-    let reverse_zone = config.reverse_zone.as_ref()
+pub fn add_ptr_record(config: &DnsConfig, ip: &str, fqdn: &str) -> Result<bool, String> {
+    let reverse_zone = config
+        .reverse_zone
+        .as_ref()
         .ok_or_else(|| "No reverse_zone configured".to_string())?;
 
     // Extract host part from IP (last octet for /24)
-    let host_part = ip.rsplit('.').next()
+    let host_part = ip
+        .rsplit('.')
+        .next()
         .ok_or_else(|| format!("Invalid IP: {}", ip))?;
 
     zone::add_ptr_record(&config.zones_path(), reverse_zone, host_part, fqdn)
 }
 
 /// Remove a record (A, CNAME, or PTR)
-pub fn remove_record(
-    config: &DnsConfig,
-    zone: &str,
-    name: &str,
-) -> Result<bool, String> {
+pub fn remove_record(config: &DnsConfig, zone: &str, name: &str) -> Result<bool, String> {
     zone::remove_a_record(&config.zones_path(), zone, name)
 }
 

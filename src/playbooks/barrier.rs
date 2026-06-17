@@ -290,7 +290,11 @@ mod tests {
 
     #[test]
     fn test_strict_mode_withdraw_poisons() {
-        let barrier = Arc::new(CountdownBarrier::new(3, BarrierMode::Strict, "strict".into()));
+        let barrier = Arc::new(CountdownBarrier::new(
+            3,
+            BarrierMode::Strict,
+            "strict".into(),
+        ));
 
         // One thread waits.
         let b = Arc::clone(&barrier);
@@ -310,7 +314,11 @@ mod tests {
 
     #[test]
     fn test_strict_mode_normal_completion() {
-        let barrier = Arc::new(CountdownBarrier::new(2, BarrierMode::Strict, "strict".into()));
+        let barrier = Arc::new(CountdownBarrier::new(
+            2,
+            BarrierMode::Strict,
+            "strict".into(),
+        ));
         let mut handles = Vec::new();
 
         for _ in 0..2 {

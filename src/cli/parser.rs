@@ -17,21 +17,21 @@
 // we don't use any parsing libraries here because they are a bit too automagical
 // this may change later.
 
+use crate::cli::version::{BUILD_TIME, GIT_BRANCH, GIT_VERSION};
+use crate::inventory::loading::convert_json_vars;
+use crate::util::io::directory_as_string;
+use crate::util::io::jet_file_open;
+use crate::util::yaml::blend_variables;
+use crate::util::yaml::show_yaml_error_in_context;
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::vec::Vec;
-use std::path::PathBuf;
-use std::sync::{Arc,RwLock};
-use crate::util::io::directory_as_string;
-use crate::util::yaml::blend_variables;
-use crate::inventory::loading::convert_json_vars;
-use crate::util::io::jet_file_open;
-use crate::util::yaml::show_yaml_error_in_context;
-use crate::cli::version::{GIT_VERSION,GIT_BRANCH,BUILD_TIME};
-use std::path::Path;
 use std::io;
-use std::collections::HashMap;
-use serde::Deserialize;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+use std::vec::Vec;
 
 // the CLI parser struct values hold various values calculated when calling parse() on
 // the struct
@@ -106,20 +106,20 @@ fn is_cli_mode_valid(value: &String) -> bool {
 
 fn cli_mode_from_string(s: &String) -> Result<u32, String> {
     return match s.as_str() {
-        "local"           => Ok(CLI_MODE_LOCAL),
-        "check-local"     => Ok(CLI_MODE_CHECK_LOCAL),
-        "ssh"             => Ok(CLI_MODE_SSH),
-        "check-ssh"       => Ok(CLI_MODE_CHECK_SSH),
-        "__simulate"      => Ok(CLI_MODE_SIMULATE),
-        "show-inventory"  => Ok(CLI_MODE_SHOW),
-        "pull"            => Ok(CLI_MODE_PULL),
-        _ => Err(format!("invalid mode: {}", s))
-    }
+        "local" => Ok(CLI_MODE_LOCAL),
+        "check-local" => Ok(CLI_MODE_CHECK_LOCAL),
+        "ssh" => Ok(CLI_MODE_SSH),
+        "check-ssh" => Ok(CLI_MODE_CHECK_SSH),
+        "__simulate" => Ok(CLI_MODE_SIMULATE),
+        "show-inventory" => Ok(CLI_MODE_SHOW),
+        "pull" => Ok(CLI_MODE_PULL),
+        _ => Err(format!("invalid mode: {}", s)),
+    };
 }
 
 // all the supported flags
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 #[allow(non_camel_case_types)]
 pub enum Arguments {
     ARGUMENT_VERSION,
@@ -221,7 +221,10 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_USER_SHORT, "-u"),
         (Arguments::ARGUMENT_SUDO, "--sudo"),
         (Arguments::ARGUMENT_TAGS, "--tags"),
-        (Arguments::ARGUMENT_ALLOW_LOCALHOST, "--allow-localhost-delegation"),
+        (
+            Arguments::ARGUMENT_ALLOW_LOCALHOST,
+            "--allow-localhost-delegation",
+        ),
         (Arguments::ARGUMENT_FORWARD_AGENT, "--forward-agent"),
         (Arguments::ARGUMENT_THREADS, "--threads"),
         (Arguments::ARGUMENT_THREADS_SHORT, "-t"),
@@ -231,22 +234,26 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_VERBOSEST, "-vvv"),
         (Arguments::ARGUMENT_EXTRA_VARS, "--extra-vars"),
         (Arguments::ARGUMENT_EXTRA_VARS_SHORT, "-e"),
-        (Arguments::ARGUMENT_ASK_LOGIN_PASSWORD, "--ask-login-password"),
+        (
+            Arguments::ARGUMENT_ASK_LOGIN_PASSWORD,
+            "--ask-login-password",
+        ),
         (Arguments::ARGUMENT_GROUPS, "--groups"),
         (Arguments::ARGUMENT_ASYNC, "--async"),
         (Arguments::ARGUMENT_URL, "--url"),
         (Arguments::ARGUMENT_CHROOT, "--chroot"),
     ];
-    let mut map : HashMap<String, Arguments> = HashMap::new();
-    for (e,i) in inputs.iter() {
+    let mut map: HashMap<String, Arguments> = HashMap::new();
+    for (e, i) in inputs.iter() {
         map.insert(i.to_string(), e.clone());
     }
-    return map
+    return map;
 }
 
 // output from --version
 fn show_version() {
-    let header_table = format!("|-|:-\n\
+    let header_table = format!(
+        "|-|:-\n\
                                 |jetp | http://www.jetporch.com/\n\
                                 | | (C) Michael DeHaan + contributors, 2023\n\
                                 | |\n\
@@ -254,7 +261,9 @@ fn show_version() {
                                 | | {}\n\
                                 | --- | ---\n\
                                 | | usage: jetp <MODE> [flags]\n\
-                                |-|-", GIT_VERSION, GIT_BRANCH, BUILD_TIME);
+                                |-|-",
+        GIT_VERSION, GIT_BRANCH, BUILD_TIME
+    );
     println!("");
     crate::util::terminal::markdown_print(&String::from(header_table));
     println!("");
@@ -263,7 +272,6 @@ fn show_version() {
 // output from --help
 
 fn show_help() {
-
     show_version();
 
     let mode_table = "|:-|:-|:-\n\
@@ -336,19 +344,12 @@ fn show_help() {
 
     crate::util::terminal::markdown_print(&String::from(flags_table));
     println!("");
-
 }
 
-
-
-
-impl CliParser  {
-
-
+impl CliParser {
     // construct a parser with empty result values that will be filled in once parsed.
 
     pub fn new() -> Self {
-
         let p = CliParser {
             playbook_paths: Arc::new(RwLock::new(Vec::new())),
             inventory_paths: Arc::new(RwLock::new(Vec::new())),
@@ -364,29 +365,41 @@ impl CliParser  {
                 Ok(x) => {
                     println!("$JET_SSH_USER: {}", x);
                     x
-                },
+                }
                 Err(_) => match env::var("USER") {
                     Ok(y) => y,
-                    Err(_) => String::from("root")
-                }
+                    Err(_) => String::from("root"),
+                },
             },
             sudo: None,
             default_port: match env::var("JET_SSH_PORT") {
                 Ok(x) => match x.parse::<i64>() {
-                    Ok(i)  => {
+                    Ok(i) => {
                         println!("$JET_SSH_PORT: {}", i);
                         i
-                    },
-                    Err(_) => { println!("environment variable JET_SSH_PORT has an invalid value, ignoring: {}", x); 22 }
+                    }
+                    Err(_) => {
+                        println!(
+                            "environment variable JET_SSH_PORT has an invalid value, ignoring: {}",
+                            x
+                        );
+                        22
+                    }
                 },
-                Err(_) => 22
+                Err(_) => 22,
             },
             threads: match env::var("JET_THREADS") {
                 Ok(x) => match x.parse::<usize>() {
-                        Ok(i)  => i,
-                        Err(_) => { println!("environment variable JET_THREADS has an invalid value, ignoring: {}", x); 20 }
+                    Ok(i) => i,
+                    Err(_) => {
+                        println!(
+                            "environment variable JET_THREADS has an invalid value, ignoring: {}",
+                            x
+                        );
+                        20
+                    }
                 },
-                Err(_) => 20
+                Err(_) => 20,
             },
             inventory_set: false,
             playbook_set: false,
@@ -423,7 +436,6 @@ impl CliParser  {
     }
 
     fn parse_from_strings(&mut self, args: Vec<String>) -> Result<(), String> {
-
         let mut arg_count: usize = 0;
         let mut next_is_value = false;
 
@@ -431,7 +443,6 @@ impl CliParser  {
         // parameters and others do not.
 
         'each_argument: for argument in &args {
-
             let argument_str = argument.as_str();
             arg_count = arg_count + 1;
 
@@ -441,12 +452,11 @@ impl CliParser  {
 
                 // the second argument is the subcommand name
                 2 => {
-
                     // we should accept --help anywhere, but this is special
                     // handling as with --help we don't need a subcommand
                     if argument == Arguments::ARGUMENT_HELP.as_str() {
                         self.needs_help = true;
-                        return Ok(())
+                        return Ok(());
                     }
                     if argument == Arguments::ARGUMENT_VERSION.as_str() {
                         self.needs_version = true;
@@ -457,78 +467,122 @@ impl CliParser  {
                     // required 'mode' parameter
                     let _result = self.store_mode(argument)?;
                     continue 'each_argument;
-                },
+                }
 
                 // for the rest of the arguments we need to pay attention to whether
                 // we are reading a flag or a value, which alternate
                 _ => {
-
                     if next_is_value == false {
-
                         // if we expect a flag...
                         // the --help argument requires special handling as it has no
                         // following value
                         if argument_str == Arguments::ARGUMENT_HELP.as_str() {
                             self.needs_help = true;
-                            return Ok(())
+                            return Ok(());
                         }
                         if argument_str == Arguments::ARGUMENT_VERSION.as_str() {
                             self.needs_version = true;
-                            return Ok(())
+                            return Ok(());
                         }
 
-                        let mut standalone_arg_found : bool = true;
+                        let mut standalone_arg_found: bool = true;
 
-                        if ! self.argument_map.contains_key(argument_str) {
+                        if !self.argument_map.contains_key(argument_str) {
                             return Err(format!("unrecognized argument: {}", argument_str));
-                        } 
+                        }
                         let arg_enum = self.argument_map.get(argument_str).unwrap().clone();
 
                         let mut result = match arg_enum {
                             // all parameters that do not take arguments here
-                            Arguments::ARGUMENT_ALLOW_LOCALHOST    => self.store_allow_localhost_delegation(),
-                            Arguments::ARGUMENT_FORWARD_AGENT      => self.store_forward_agent(),
-                            Arguments::ARGUMENT_VERBOSE            => self.increase_verbosity(1),
-                            Arguments::ARGUMENT_VERBOSER           => self.increase_verbosity(2),
-                            Arguments::ARGUMENT_VERBOSEST          => self.increase_verbosity(3),
+                            Arguments::ARGUMENT_ALLOW_LOCALHOST => {
+                                self.store_allow_localhost_delegation()
+                            }
+                            Arguments::ARGUMENT_FORWARD_AGENT => self.store_forward_agent(),
+                            Arguments::ARGUMENT_VERBOSE => self.increase_verbosity(1),
+                            Arguments::ARGUMENT_VERBOSER => self.increase_verbosity(2),
+                            Arguments::ARGUMENT_VERBOSEST => self.increase_verbosity(3),
                             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => self.store_login_password(),
-                            Arguments::ARGUMENT_ASYNC              => self.store_async_mode(),
-                            _ => Ok({ standalone_arg_found = false; next_is_value = true; })
+                            Arguments::ARGUMENT_ASYNC => self.store_async_mode(),
+                            _ => Ok({
+                                standalone_arg_found = false;
+                                next_is_value = true;
+                            }),
                         };
 
-                        if ! standalone_arg_found {
+                        if !standalone_arg_found {
                             if arg_count == args.len() {
-                                return Err(format!("missing argument value for {}", argument_str));    
-                            } 
-                            else {
+                                return Err(format!("missing argument value for {}", argument_str));
+                            } else {
                                 result = match arg_enum {
                                     // all parameters that do take arguments
-                                    Arguments::ARGUMENT_PLAYBOOK          => self.append_playbook(&args[arg_count]),
-                                    Arguments::ARGUMENT_PLAYBOOK_SHORT    => self.append_playbook(&args[arg_count]),
-                                    Arguments::ARGUMENT_ROLES             => self.append_roles(&args[arg_count]),
-                                    Arguments::ARGUMENT_ROLES_SHORT       => self.append_roles(&args[arg_count]),
-                                    Arguments::ARGUMENT_MODULES           => self.append_modules(&args[arg_count]),
-                                    Arguments::ARGUMENT_MODULES_SHORT     => self.append_modules(&args[arg_count]),
-                                    Arguments::ARGUMENT_INVENTORY         => self.append_inventory(&args[arg_count]),
-                                    Arguments::ARGUMENT_INVENTORY_SHORT   => self.append_inventory(&args[arg_count]),
-                                    Arguments::ARGUMENT_SUDO              => self.store_sudo(&args[arg_count]),
-                                    Arguments::ARGUMENT_TAGS              => self.store_tags(&args[arg_count]),
-                                    Arguments::ARGUMENT_USER              => self.store_default_user(&args[arg_count]),
-                                    Arguments::ARGUMENT_USER_SHORT        => self.store_default_user(&args[arg_count]),
-                                    Arguments::ARGUMENT_SHOW_GROUPS       => self.store_show_groups(&args[arg_count]),
-                                    Arguments::ARGUMENT_SHOW_HOSTS        => self.store_show_hosts(&args[arg_count]),
-                                    Arguments::ARGUMENT_LIMIT_GROUPS      => self.store_limit_groups(&args[arg_count]),
-                                    Arguments::ARGUMENT_LIMIT_HOSTS       => self.store_limit_hosts(&args[arg_count]),
-                                    Arguments::ARGUMENT_BATCH_SIZE        => self.store_batch_size(&args[arg_count]),
-                                    Arguments::ARGUMENT_THREADS           => self.store_threads(&args[arg_count]),
-                                    Arguments::ARGUMENT_THREADS_SHORT     => self.store_threads(&args[arg_count]),
-                                    Arguments::ARGUMENT_PORT              => self.store_port(&args[arg_count]),
-                                    Arguments::ARGUMENT_EXTRA_VARS        => self.store_extra_vars(&args[arg_count]),
-                                    Arguments::ARGUMENT_EXTRA_VARS_SHORT  => self.store_extra_vars(&args[arg_count]),
-                                    Arguments::ARGUMENT_GROUPS            => self.store_groups(&args[arg_count]),
-                                    Arguments::ARGUMENT_URL               => self.store_url(&args[arg_count]),
-                                    Arguments::ARGUMENT_CHROOT            => self.store_chroot(&args[arg_count]),
-                                    _  => Err(format!("invalid flag: {}", argument_str)),
+                                    Arguments::ARGUMENT_PLAYBOOK => {
+                                        self.append_playbook(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_PLAYBOOK_SHORT => {
+                                        self.append_playbook(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_ROLES => {
+                                        self.append_roles(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_ROLES_SHORT => {
+                                        self.append_roles(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_MODULES => {
+                                        self.append_modules(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_MODULES_SHORT => {
+                                        self.append_modules(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_INVENTORY => {
+                                        self.append_inventory(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_INVENTORY_SHORT => {
+                                        self.append_inventory(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_SUDO => self.store_sudo(&args[arg_count]),
+                                    Arguments::ARGUMENT_TAGS => self.store_tags(&args[arg_count]),
+                                    Arguments::ARGUMENT_USER => {
+                                        self.store_default_user(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_USER_SHORT => {
+                                        self.store_default_user(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_SHOW_GROUPS => {
+                                        self.store_show_groups(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_SHOW_HOSTS => {
+                                        self.store_show_hosts(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_LIMIT_GROUPS => {
+                                        self.store_limit_groups(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_LIMIT_HOSTS => {
+                                        self.store_limit_hosts(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_BATCH_SIZE => {
+                                        self.store_batch_size(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_THREADS => {
+                                        self.store_threads(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_THREADS_SHORT => {
+                                        self.store_threads(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_PORT => self.store_port(&args[arg_count]),
+                                    Arguments::ARGUMENT_EXTRA_VARS => {
+                                        self.store_extra_vars(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_EXTRA_VARS_SHORT => {
+                                        self.store_extra_vars(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_GROUPS => {
+                                        self.store_groups(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_URL => self.store_url(&args[arg_count]),
+                                    Arguments::ARGUMENT_CHROOT => {
+                                        self.store_chroot(&args[arg_count])
+                                    }
+                                    _ => Err(format!("invalid flag: {}", argument_str)),
                                 };
                             }
                         }
@@ -536,25 +590,24 @@ impl CliParser  {
                         if result.is_err() {
                             return result;
                         }
-                        
                     } else {
                         next_is_value = false;
                         continue 'each_argument;
                     }
                 } // end argument numbers 3-N
             }
-
-
         }
 
         // make adjustments based on modes
         match self.mode {
-            CLI_MODE_LOCAL       => { self.threads = 1 },
-            CLI_MODE_CHECK_LOCAL => { self.threads = 1 },
-            CLI_MODE_SYNTAX      => { self.threads = 1 },
-            CLI_MODE_SHOW        => { self.threads = 1 },
-            CLI_MODE_PULL        => { self.threads = 1 },
-            CLI_MODE_UNSET       => { self.needs_help = true; },
+            CLI_MODE_LOCAL => self.threads = 1,
+            CLI_MODE_CHECK_LOCAL => self.threads = 1,
+            CLI_MODE_SYNTAX => self.threads = 1,
+            CLI_MODE_SHOW => self.threads = 1,
+            CLI_MODE_PULL => self.threads = 1,
+            CLI_MODE_UNSET => {
+                self.needs_help = true;
+            }
             _ => {}
         }
 
@@ -567,7 +620,6 @@ impl CliParser  {
             self.add_implicit_module_paths()?;
         }
         Ok(())
-
     }
 
     fn store_mode(&mut self, value: &String) -> Result<(), String> {
@@ -575,115 +627,179 @@ impl CliParser  {
             self.mode = cli_mode_from_string(value).unwrap();
             return Ok(());
         }
-        return Err(format!("jetp mode ({}) is not valid, see --help", value))
-     }
+        return Err(format!("jetp mode ({}) is not valid, see --help", value));
+    }
 
     fn append_playbook(&mut self, value: &String) -> Result<(), String> {
         self.playbook_set = true;
         match parse_paths(&String::from("-p/--playbook"), value) {
-            Ok(paths)  =>  { 
+            Ok(paths) => {
                 for p in paths.iter() {
                     if p.is_file() {
                         let full = std::fs::canonicalize(p.as_path()).unwrap();
-                        self.playbook_paths.write().unwrap().push(full.to_path_buf()); 
+                        self.playbook_paths
+                            .write()
+                            .unwrap()
+                            .push(full.to_path_buf());
                     } else {
                         return Err(format!("playbook file missing: {:?}", p));
                     }
                 }
-            },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_PLAYBOOK.as_str(), err_msg)),
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_PLAYBOOK.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn append_roles(&mut self, value: &String) -> Result<(), String> {
-
         match parse_paths(&String::from("-r/--roles"), value) {
-            Ok(paths)  =>  { 
+            Ok(paths) => {
                 for p in paths.iter() {
                     if p.is_dir() {
                         let full = std::fs::canonicalize(p.as_path()).unwrap();
-                        self.role_paths.write().unwrap().push(full.to_path_buf()); 
+                        self.role_paths.write().unwrap().push(full.to_path_buf());
                     } else {
                         return Err(format!("roles directory not found: {:?}", p));
                     }
                 }
-            },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_ROLES.as_str(), err_msg)),
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_ROLES.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn append_modules(&mut self, value: &String) -> Result<(), String> {
-
         match parse_paths(&String::from("-m/--modules"), value) {
-            Ok(paths)  =>  { 
+            Ok(paths) => {
                 for p in paths.iter() {
                     if p.is_dir() {
                         let full = std::fs::canonicalize(p.as_path()).unwrap();
-                        self.module_paths.write().unwrap().push(full.to_path_buf()); 
+                        self.module_paths.write().unwrap().push(full.to_path_buf());
                     } else {
                         return Err(format!("modules directory not found: {:?}", p));
                     }
                 }
-            },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_MODULES.as_str(), err_msg)),
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_MODULES.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn append_inventory(&mut self, value: &String) -> Result<(), String> {
-
         self.inventory_set = true;
         // Allow inventory for local modes - useful for getting group_vars/host_vars
 
-        match parse_paths(&String::from("-i/--inventory"),value) {
-            Ok(paths)  =>  { 
+        match parse_paths(&String::from("-i/--inventory"), value) {
+            Ok(paths) => {
                 for p in paths.iter() {
                     self.inventory_paths.write().unwrap().push(p.clone());
                 }
             }
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_INVENTORY.as_str(), err_msg)),
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_INVENTORY.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn store_show_groups(&mut self, value: &String) -> Result<(), String> {
         match split_string(value) {
-            Ok(values)  =>  { self.show_groups = values; },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_SHOW_GROUPS.as_str(), err_msg)),
+            Ok(values) => {
+                self.show_groups = values;
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_SHOW_GROUPS.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn store_show_hosts(&mut self, value: &String) -> Result<(), String> {
         match split_string(value) {
-            Ok(values)  =>  { self.show_hosts = values; },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_SHOW_HOSTS.as_str(), err_msg)),
+            Ok(values) => {
+                self.show_hosts = values;
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_SHOW_HOSTS.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn store_limit_groups(&mut self, value: &String) -> Result<(), String> {
         match split_string(value) {
-            Ok(values)  =>  { self.limit_groups = values; },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_LIMIT_GROUPS.as_str(), err_msg)),
+            Ok(values) => {
+                self.limit_groups = values;
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_LIMIT_GROUPS.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn store_limit_hosts(&mut self, value: &String) -> Result<(), String> {
         match split_string(value) {
-            Ok(values)  =>  { self.limit_hosts = values; },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_LIMIT_HOSTS.as_str(), err_msg)),
+            Ok(values) => {
+                self.limit_hosts = values;
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_LIMIT_HOSTS.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
 
     fn store_tags(&mut self, value: &String) -> Result<(), String> {
         match split_string(value) {
-            Ok(values)  =>  { self.tags = Some(values); },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_TAGS.as_str(), err_msg)),
+            Ok(values) => {
+                self.tags = Some(values);
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_TAGS.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
     }
@@ -700,25 +816,52 @@ impl CliParser  {
 
     fn store_batch_size(&mut self, value: &String) -> Result<(), String> {
         if self.batch_size.is_some() {
-            return Err(format!("{} has been specified already", Arguments::ARGUMENT_BATCH_SIZE.as_str()));
+            return Err(format!(
+                "{} has been specified already",
+                Arguments::ARGUMENT_BATCH_SIZE.as_str()
+            ));
         }
         match value.parse::<usize>() {
-            Ok(n) => { self.batch_size = Some(n); return Ok(()); },
-            Err(_e) => { return Err(format!("{}: invalid value", Arguments::ARGUMENT_BATCH_SIZE.as_str())); }
+            Ok(n) => {
+                self.batch_size = Some(n);
+                return Ok(());
+            }
+            Err(_e) => {
+                return Err(format!(
+                    "{}: invalid value",
+                    Arguments::ARGUMENT_BATCH_SIZE.as_str()
+                ));
+            }
         }
     }
 
     fn store_threads(&mut self, value: &String) -> Result<(), String> {
         match value.parse::<usize>() {
-            Ok(n) =>  { self.threads = n; return Ok(()); }
-            Err(_e) => { return Err(format!("{}: invalid value", Arguments::ARGUMENT_THREADS.as_str())); }
+            Ok(n) => {
+                self.threads = n;
+                return Ok(());
+            }
+            Err(_e) => {
+                return Err(format!(
+                    "{}: invalid value",
+                    Arguments::ARGUMENT_THREADS.as_str()
+                ));
+            }
         }
     }
 
     fn store_port(&mut self, value: &String) -> Result<(), String> {
         match value.parse::<i64>() {
-            Ok(n) =>  { self.default_port = n; return Ok(()); }
-            Err(_e) => { return Err(format!("{}: invalid value", Arguments::ARGUMENT_PORT.as_str())); }
+            Ok(n) => {
+                self.default_port = n;
+                return Ok(());
+            }
+            Err(_e) => {
+                return Err(format!(
+                    "{}: invalid value",
+                    Arguments::ARGUMENT_PORT.as_str()
+                ));
+            }
         }
     }
 
@@ -729,7 +872,7 @@ impl CliParser  {
 
     fn increase_verbosity(&mut self, amount: u32) -> Result<(), String> {
         self.verbosity = self.verbosity + amount;
-        return Ok(())
+        return Ok(());
     }
 
     fn add_implicit_role_paths(&mut self) -> Result<(), String> {
@@ -780,7 +923,11 @@ impl CliParser  {
 
         if !self.playbook_set {
             if let Some(playbook) = local_config.playbook.as_ref() {
-                self.append_playbook(&resolve_repo_relative_path(&cwd, playbook)?.display().to_string())?;
+                self.append_playbook(
+                    &resolve_repo_relative_path(&cwd, playbook)?
+                        .display()
+                        .to_string(),
+                )?;
             } else {
                 let default_playbook = cwd.join(DEFAULT_LOCAL_PLAYBOOK);
                 if default_playbook.is_file() {
@@ -791,7 +938,11 @@ impl CliParser  {
 
         if self.playbook_set && self.role_paths.read().unwrap().is_empty() {
             if let Some(roles) = local_config.roles.as_ref() {
-                self.append_roles(&resolve_repo_relative_path(&cwd, roles)?.display().to_string())?;
+                self.append_roles(
+                    &resolve_repo_relative_path(&cwd, roles)?
+                        .display()
+                        .to_string(),
+                )?;
             } else {
                 let default_roles = cwd.join(DEFAULT_LOCAL_ROLES);
                 if default_roles.is_dir() {
@@ -802,7 +953,11 @@ impl CliParser  {
 
         if !self.inventory_set {
             if let Some(inventory) = local_config.inventory.as_ref() {
-                self.append_inventory(&resolve_repo_relative_path(&cwd, inventory)?.display().to_string())?;
+                self.append_inventory(
+                    &resolve_repo_relative_path(&cwd, inventory)?
+                        .display()
+                        .to_string(),
+                )?;
             } else {
                 let default_inventory = cwd.join(DEFAULT_LOCAL_INVENTORY);
                 if default_inventory.exists() {
@@ -822,7 +977,8 @@ impl CliParser  {
         }
 
         let config_file = jet_file_open(&config_path)?;
-        let parsed: Result<JetpackFileConfig, serde_yaml::Error> = serde_yaml::from_reader(config_file);
+        let parsed: Result<JetpackFileConfig, serde_yaml::Error> =
+            serde_yaml::from_reader(config_file);
         if let Err(err) = parsed.as_ref() {
             show_yaml_error_in_context(err, &config_path);
         }
@@ -831,26 +987,59 @@ impl CliParser  {
 
     fn inject_local_builtins(&mut self, cwd: &Path) -> Result<(), String> {
         let repo_root = cwd;
-        let playbook_dir = self.playbook_paths.read().unwrap().first()
+        let playbook_dir = self
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
             .map(|path| directory_as_string(path.as_path()))
             .unwrap_or_else(|| cwd.join("deploy/playbooks").display().to_string());
-        let roles_dir = self.role_paths.read().unwrap().first()
+        let roles_dir = self
+            .role_paths
+            .read()
+            .unwrap()
+            .first()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| cwd.join(DEFAULT_LOCAL_ROLES).display().to_string());
-        let inventory_dir = self.inventory_paths.read().unwrap().first()
+        let inventory_dir = self
+            .inventory_paths
+            .read()
+            .unwrap()
+            .first()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| cwd.join(DEFAULT_LOCAL_INVENTORY).display().to_string());
 
         let mut builtins = serde_yaml::Mapping::new();
-        builtins.insert(serde_yaml::Value::String("JET_CWD".to_string()), serde_yaml::Value::String(cwd.display().to_string()));
-        builtins.insert(serde_yaml::Value::String("JET_REPO_ROOT".to_string()), serde_yaml::Value::String(repo_root.display().to_string()));
-        builtins.insert(serde_yaml::Value::String("JET_PLAYBOOK_DIR".to_string()), serde_yaml::Value::String(playbook_dir));
-        builtins.insert(serde_yaml::Value::String("JET_ROLES_DIR".to_string()), serde_yaml::Value::String(roles_dir));
-        builtins.insert(serde_yaml::Value::String("JET_INVENTORY_DIR".to_string()), serde_yaml::Value::String(inventory_dir));
-        builtins.insert(serde_yaml::Value::String("JET_USERNAME".to_string()), serde_yaml::Value::String(self.default_user.clone()));
+        builtins.insert(
+            serde_yaml::Value::String("JET_CWD".to_string()),
+            serde_yaml::Value::String(cwd.display().to_string()),
+        );
+        builtins.insert(
+            serde_yaml::Value::String("JET_REPO_ROOT".to_string()),
+            serde_yaml::Value::String(repo_root.display().to_string()),
+        );
+        builtins.insert(
+            serde_yaml::Value::String("JET_PLAYBOOK_DIR".to_string()),
+            serde_yaml::Value::String(playbook_dir),
+        );
+        builtins.insert(
+            serde_yaml::Value::String("JET_ROLES_DIR".to_string()),
+            serde_yaml::Value::String(roles_dir),
+        );
+        builtins.insert(
+            serde_yaml::Value::String("JET_INVENTORY_DIR".to_string()),
+            serde_yaml::Value::String(inventory_dir),
+        );
+        builtins.insert(
+            serde_yaml::Value::String("JET_USERNAME".to_string()),
+            serde_yaml::Value::String(self.default_user.clone()),
+        );
 
         if let Ok(home) = env::var("HOME") {
-            builtins.insert(serde_yaml::Value::String("JET_USER_HOME".to_string()), serde_yaml::Value::String(home));
+            builtins.insert(
+                serde_yaml::Value::String("JET_USER_HOME".to_string()),
+                serde_yaml::Value::String(home),
+            );
         }
 
         blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(builtins));
@@ -858,7 +1047,6 @@ impl CliParser  {
     }
 
     fn add_role_paths_from_environment(&mut self) -> Result<(), String> {
-
         let env_roles_path = env::var("JET_ROLES_PATH");
         if env_roles_path.is_ok() {
             match parse_paths(&String::from("$JET_ROLES_PATH"), &env_roles_path.unwrap()) {
@@ -869,18 +1057,20 @@ impl CliParser  {
                             self.role_paths.write().unwrap().push(full.to_path_buf());
                         }
                     }
-                },
-                Err(y) => return Err(y)
+                }
+                Err(y) => return Err(y),
             };
         }
         return Ok(());
     }
 
     fn add_module_paths_from_environment(&mut self) -> Result<(), String> {
-
         let env_modules_path = env::var("JET_MODULES_PATH");
         if env_modules_path.is_ok() {
-            match parse_paths(&String::from("$JET_MODULES_PATH"), &env_modules_path.unwrap()) {
+            match parse_paths(
+                &String::from("$JET_MODULES_PATH"),
+                &env_modules_path.unwrap(),
+            ) {
                 Ok(paths) => {
                     for p in paths.iter() {
                         if p.is_dir() {
@@ -888,90 +1078,102 @@ impl CliParser  {
                             self.module_paths.write().unwrap().push(full.to_path_buf());
                         }
                     }
-                },
-                Err(y) => return Err(y)
+                }
+                Err(y) => return Err(y),
             };
         }
         return Ok(());
     }
 
     fn store_extra_vars(&mut self, value: &String) -> Result<(), String> {
-
         if value.starts_with("@") {
             // input is a filename where the data is YAML
 
-            let rest_of_path = value.replace("@","");
+            let rest_of_path = value.replace("@", "");
             let path = Path::new(&rest_of_path);
-            if ! path.is_file() {
-                return Err(format!("--extra-vars parameter with @ expects a file: {}", rest_of_path))
+            if !path.is_file() {
+                return Err(format!(
+                    "--extra-vars parameter with @ expects a file: {}",
+                    rest_of_path
+                ));
             }
             let extra_file = jet_file_open(path)?;
-            let parsed: Result<serde_yaml::Mapping, serde_yaml::Error> = serde_yaml::from_reader(extra_file);
+            let parsed: Result<serde_yaml::Mapping, serde_yaml::Error> =
+                serde_yaml::from_reader(extra_file);
             if parsed.is_err() {
                 show_yaml_error_in_context(&parsed.unwrap_err(), &path);
                 return Err(format!("edit the file and try again?"));
-            }   
-            blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(parsed.unwrap()));
-
+            }
+            blend_variables(
+                &mut self.extra_vars,
+                serde_yaml::Value::Mapping(parsed.unwrap()),
+            );
         } else {
             // input is inline JSON (as YAML wouldn't make sense with the newlines)
 
             let parsed: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(value);
             let actual = match parsed {
                 Ok(x) => x,
-                Err(y) => { return Err(format!("inline json is not valid: {}", y)) }
-            };   
+                Err(y) => return Err(format!("inline json is not valid: {}", y)),
+            };
             let serde_map = convert_json_vars(&actual);
             blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(serde_map));
-        
         }
-        
+
         return Ok(());
+    }
 
-     }
-
-     fn store_forward_agent(&mut self) -> Result<(), String>{
+    fn store_forward_agent(&mut self) -> Result<(), String> {
         self.forward_agent = true;
         return Ok(());
-     }
+    }
 
-     fn store_login_password(&mut self) -> Result<(), String>{
+    fn store_login_password(&mut self) -> Result<(), String> {
         let mut value = String::new();
         println!("enter login password:");
         match io::stdin().read_line(&mut value) {
-            Ok(_) => { self.login_password = Some(String::from(value.trim())); }
-            Err(e) =>  return Err(format!("failure reading input: {}", e))
+            Ok(_) => {
+                self.login_password = Some(String::from(value.trim()));
+            }
+            Err(e) => return Err(format!("failure reading input: {}", e)),
         }
         return Ok(());
-     }
+    }
 
-     fn store_groups(&mut self, value: &String) -> Result<(), String> {
+    fn store_groups(&mut self, value: &String) -> Result<(), String> {
         match split_string(value) {
-            Ok(values)  =>  { self.play_groups = Some(values); },
-            Err(err_msg) =>  return Err(format!("--{} {}", Arguments::ARGUMENT_GROUPS.as_str(), err_msg)),
+            Ok(values) => {
+                self.play_groups = Some(values);
+            }
+            Err(err_msg) => {
+                return Err(format!(
+                    "--{} {}",
+                    Arguments::ARGUMENT_GROUPS.as_str(),
+                    err_msg
+                ));
+            }
         }
         return Ok(());
-     }
+    }
 
-     fn store_async_mode(&mut self) -> Result<(), String> {
+    fn store_async_mode(&mut self) -> Result<(), String> {
         self.async_mode = true;
         Ok(())
-     }
+    }
 
-     fn store_url(&mut self, value: &String) -> Result<(), String> {
+    fn store_url(&mut self, value: &String) -> Result<(), String> {
         self.pull_url = Some(value.clone());
         Ok(())
-     }
+    }
 
-     fn store_chroot(&mut self, value: &String) -> Result<(), String> {
+    fn store_chroot(&mut self, value: &String) -> Result<(), String> {
         let path = Path::new(value);
         if !path.is_dir() {
             return Err(format!("--chroot path does not exist: {}", value));
         }
         self.chroot_path = Some(value.clone());
         Ok(())
-     }
-
+    }
 }
 
 fn resolve_repo_relative_path(repo_root: &Path, value: &str) -> Result<PathBuf, String> {
@@ -994,14 +1196,35 @@ mod tests {
 
     #[test]
     fn test_cli_mode_from_string() {
-        assert_eq!(cli_mode_from_string(&"local".to_string()).unwrap(), CLI_MODE_LOCAL);
-        assert_eq!(cli_mode_from_string(&"check-local".to_string()).unwrap(), CLI_MODE_CHECK_LOCAL);
-        assert_eq!(cli_mode_from_string(&"ssh".to_string()).unwrap(), CLI_MODE_SSH);
-        assert_eq!(cli_mode_from_string(&"check-ssh".to_string()).unwrap(), CLI_MODE_CHECK_SSH);
-        assert_eq!(cli_mode_from_string(&"__simulate".to_string()).unwrap(), CLI_MODE_SIMULATE);
-        assert_eq!(cli_mode_from_string(&"show-inventory".to_string()).unwrap(), CLI_MODE_SHOW);
-        assert_eq!(cli_mode_from_string(&"pull".to_string()).unwrap(), CLI_MODE_PULL);
-        
+        assert_eq!(
+            cli_mode_from_string(&"local".to_string()).unwrap(),
+            CLI_MODE_LOCAL
+        );
+        assert_eq!(
+            cli_mode_from_string(&"check-local".to_string()).unwrap(),
+            CLI_MODE_CHECK_LOCAL
+        );
+        assert_eq!(
+            cli_mode_from_string(&"ssh".to_string()).unwrap(),
+            CLI_MODE_SSH
+        );
+        assert_eq!(
+            cli_mode_from_string(&"check-ssh".to_string()).unwrap(),
+            CLI_MODE_CHECK_SSH
+        );
+        assert_eq!(
+            cli_mode_from_string(&"__simulate".to_string()).unwrap(),
+            CLI_MODE_SIMULATE
+        );
+        assert_eq!(
+            cli_mode_from_string(&"show-inventory".to_string()).unwrap(),
+            CLI_MODE_SHOW
+        );
+        assert_eq!(
+            cli_mode_from_string(&"pull".to_string()).unwrap(),
+            CLI_MODE_PULL
+        );
+
         assert!(cli_mode_from_string(&"invalid".to_string()).is_err());
     }
 
@@ -1014,7 +1237,7 @@ mod tests {
         assert!(is_cli_mode_valid(&"show-inventory".to_string()));
         assert!(is_cli_mode_valid(&"__simulate".to_string()));
         assert!(is_cli_mode_valid(&"pull".to_string()));
-        
+
         assert!(!is_cli_mode_valid(&"invalid".to_string()));
         assert!(!is_cli_mode_valid(&"".to_string()));
     }
@@ -1035,20 +1258,41 @@ mod tests {
     #[test]
     fn test_build_argument_map() {
         let map = build_argument_map();
-        
+
         // Test some key mappings
-        assert!(matches!(map.get("--version"), Some(Arguments::ARGUMENT_VERSION)));
-        assert!(matches!(map.get("--inventory"), Some(Arguments::ARGUMENT_INVENTORY)));
-        assert!(matches!(map.get("-i"), Some(Arguments::ARGUMENT_INVENTORY_SHORT)));
-        assert!(matches!(map.get("--playbook"), Some(Arguments::ARGUMENT_PLAYBOOK)));
-        assert!(matches!(map.get("-p"), Some(Arguments::ARGUMENT_PLAYBOOK_SHORT)));
+        assert!(matches!(
+            map.get("--version"),
+            Some(Arguments::ARGUMENT_VERSION)
+        ));
+        assert!(matches!(
+            map.get("--inventory"),
+            Some(Arguments::ARGUMENT_INVENTORY)
+        ));
+        assert!(matches!(
+            map.get("-i"),
+            Some(Arguments::ARGUMENT_INVENTORY_SHORT)
+        ));
+        assert!(matches!(
+            map.get("--playbook"),
+            Some(Arguments::ARGUMENT_PLAYBOOK)
+        ));
+        assert!(matches!(
+            map.get("-p"),
+            Some(Arguments::ARGUMENT_PLAYBOOK_SHORT)
+        ));
         assert!(matches!(map.get("--help"), Some(Arguments::ARGUMENT_HELP)));
         assert!(matches!(map.get("-v"), Some(Arguments::ARGUMENT_VERBOSE)));
         assert!(matches!(map.get("-vv"), Some(Arguments::ARGUMENT_VERBOSER)));
-        assert!(matches!(map.get("-vvv"), Some(Arguments::ARGUMENT_VERBOSEST)));
+        assert!(matches!(
+            map.get("-vvv"),
+            Some(Arguments::ARGUMENT_VERBOSEST)
+        ));
         assert!(matches!(map.get("--user"), Some(Arguments::ARGUMENT_USER)));
-        assert!(matches!(map.get("-u"), Some(Arguments::ARGUMENT_USER_SHORT)));
-        
+        assert!(matches!(
+            map.get("-u"),
+            Some(Arguments::ARGUMENT_USER_SHORT)
+        ));
+
         // Test non-existent key
         assert!(map.get("--nonexistent").is_none());
     }
@@ -1164,10 +1408,10 @@ mod tests {
     #[test]
     fn test_tags() {
         let mut parser = CliParser::new();
-        
+
         // No tags initially
         assert!(parser.tags.is_none());
-        
+
         // Set some tags
         parser.tags = Some(vec!["tag1".to_string(), "tag2".to_string()]);
         let tags = &parser.tags;
@@ -1181,10 +1425,10 @@ mod tests {
     #[test]
     fn test_batch_size() {
         let mut parser = CliParser::new();
-        
+
         // Default
         assert!(parser.batch_size.is_none());
-        
+
         // Set batch size
         parser.batch_size = Some(10);
         assert_eq!(parser.batch_size, Some(10));
@@ -1228,7 +1472,14 @@ mod tests {
         assert_eq!(parser.role_paths.read().unwrap().len(), 1);
         assert_eq!(parser.inventory_paths.read().unwrap().len(), 1);
         let extra = parser.extra_vars.as_mapping().unwrap();
-        assert_eq!(extra.get(serde_yaml::Value::String("JET_REPO_ROOT".into())).unwrap().as_str().unwrap(), repo_root.canonicalize().unwrap().display().to_string());
+        assert_eq!(
+            extra
+                .get(serde_yaml::Value::String("JET_REPO_ROOT".into()))
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            repo_root.canonicalize().unwrap().display().to_string()
+        );
     }
 
     #[test]
@@ -1251,11 +1502,23 @@ mod tests {
         env::set_current_dir(previous_dir).unwrap();
 
         assert!(result.is_ok());
-        let playbook = parser.playbook_paths.read().unwrap().first().unwrap().clone();
+        let playbook = parser
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
         assert!(playbook.ends_with("custom/pb/install.yml"));
         let roles = parser.role_paths.read().unwrap().first().unwrap().clone();
         assert!(roles.ends_with("custom/roles"));
-        let inventory = parser.inventory_paths.read().unwrap().first().unwrap().clone();
+        let inventory = parser
+            .inventory_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
         assert!(inventory.ends_with("custom/inventory"));
     }
 
@@ -1285,7 +1548,13 @@ mod tests {
         env::set_current_dir(previous_dir).unwrap();
 
         assert!(result.is_ok());
-        let playbook = parser.playbook_paths.read().unwrap().first().unwrap().clone();
+        let playbook = parser
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
         assert!(playbook.ends_with("manual/explicit.yml"));
     }
 
@@ -1298,7 +1567,7 @@ mod tests {
         assert_eq!(parts[0], "one");
         assert_eq!(parts[1], "two");
         assert_eq!(parts[2], "three");
-        
+
         // Single value
         let result = split_string(&"single".to_string());
         assert!(result.is_ok());
@@ -1325,7 +1594,10 @@ fn parse_paths(from: &String, value: &String) -> Result<Vec<PathBuf>, String> {
         if path_buf.exists() {
             results.push(path_buf)
         } else {
-            return Err(format!("path ({}) specified by ({}) does not exist", string_path, from));
+            return Err(format!(
+                "path ({}) specified by ({}) does not exist",
+                string_path, from
+            ));
         }
     }
     return Ok(results);

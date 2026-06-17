@@ -5,30 +5,38 @@
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // at your option) any later version.
-// 
+//
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use jetpack::util::io::{quit};
+// Clippy temporarily silenced (see src/lib.rs for rationale / tracking #8).
+#![allow(clippy::all)]
+
+use jetpack::cli::parser::CliParser;
+use jetpack::cli::playbooks::{
+    playbook_check_local, playbook_check_ssh, playbook_local, playbook_pull, playbook_simulate,
+    playbook_ssh,
+};
+use jetpack::cli::show::{show_inventory_group, show_inventory_host};
 use jetpack::inventory::inventory::Inventory;
-use jetpack::inventory::loading::{load_inventory};
-use jetpack::cli::show::{show_inventory_group,show_inventory_host};
-use jetpack::cli::parser::{CliParser};
-use jetpack::cli::playbooks::{playbook_ssh,playbook_local,playbook_check_ssh,playbook_check_local,playbook_simulate,playbook_pull};
-use std::sync::{Arc,RwLock};
+use jetpack::inventory::loading::load_inventory;
+use jetpack::util::io::quit;
 use std::process;
+use std::sync::{Arc, RwLock};
 
 fn main() {
-    match liftoff() { Err(e) => quit(&e), _ => {} }
+    match liftoff() {
+        Err(e) => quit(&e),
+        _ => {}
+    }
 }
 
-fn liftoff() -> Result<(),String> {
-
+fn liftoff() -> Result<(), String> {
     let mut cli_parser = CliParser::new();
     cli_parser.parse()?;
 
@@ -42,65 +50,84 @@ fn liftoff() -> Result<(),String> {
         return Ok(());
     }
 
-    let inventory : Arc<RwLock<Inventory>> = Arc::new(RwLock::new(Inventory::new()));
+    let inventory: Arc<RwLock<Inventory>> = Arc::new(RwLock::new(Inventory::new()));
 
     match cli_parser.mode {
-        jetpack::cli::parser::CLI_MODE_SSH | jetpack::cli::parser::CLI_MODE_CHECK_SSH | jetpack::cli::parser::CLI_MODE_SHOW | jetpack::cli::parser::CLI_MODE_SIMULATE => {
+        jetpack::cli::parser::CLI_MODE_SSH
+        | jetpack::cli::parser::CLI_MODE_CHECK_SSH
+        | jetpack::cli::parser::CLI_MODE_SHOW
+        | jetpack::cli::parser::CLI_MODE_SIMULATE => {
             load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
-            if ! cli_parser.inventory_set {
+            if !cli_parser.inventory_set {
                 return Err(String::from("--inventory is required"));
             }
             if inventory.read().expect("inventory read").hosts.len() == 0 {
                 return Err(String::from("no hosts found in --inventory"));
             }
-        },
-        jetpack::cli::parser::CLI_MODE_PULL | jetpack::cli::parser::CLI_MODE_LOCAL | jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => {
+        }
+        jetpack::cli::parser::CLI_MODE_PULL
+        | jetpack::cli::parser::CLI_MODE_LOCAL
+        | jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => {
             // In pull/local modes, inventory is optional. If provided, it's used for variables/groups
             if cli_parser.inventory_set {
                 load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
             }
             // Ensure localhost is in the inventory for local execution
-            inventory.write().expect("inventory write").store_host(&String::from("all"), &String::from("localhost"));
-        },
+            inventory
+                .write()
+                .expect("inventory write")
+                .store_host(&String::from("all"), &String::from("localhost"));
+        }
         _ => {
-            inventory.write().expect("inventory write").store_host(&String::from("all"), &String::from("localhost"));
+            inventory
+                .write()
+                .expect("inventory write")
+                .store_host(&String::from("all"), &String::from("localhost"));
         }
     };
 
     match cli_parser.mode {
-        jetpack::cli::parser::CLI_MODE_SHOW => {},
+        jetpack::cli::parser::CLI_MODE_SHOW => {}
         jetpack::cli::parser::CLI_MODE_PULL => {
             if !cli_parser.playbook_set && cli_parser.pull_url.is_none() {
-                return Err(String::from("--playbook or --url is required for pull mode"));
+                return Err(String::from(
+                    "--playbook or --url is required for pull mode",
+                ));
             }
-        },
+        }
         _ => {
-            if ! cli_parser.playbook_set {
+            if !cli_parser.playbook_set {
                 return Err(String::from("--playbook is required"));
             }
         }
     };
 
     if cli_parser.threads > 1 {
-        rayon::ThreadPoolBuilder::new().num_threads(cli_parser.threads).build_global().expect("build global");
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(cli_parser.threads)
+            .build_global()
+            .expect("build global");
     };
 
     let exit_status = match cli_parser.mode {
-        jetpack::cli::parser::CLI_MODE_SHOW   => match handle_show(&inventory, &cli_parser) {
+        jetpack::cli::parser::CLI_MODE_SHOW => match handle_show(&inventory, &cli_parser) {
             Ok(_) => 0,
             Err(s) => {
                 println!("{}", s);
                 1
             }
-        }
-        jetpack::cli::parser::CLI_MODE_SSH         => playbook_ssh(&inventory, &cli_parser),
-        jetpack::cli::parser::CLI_MODE_CHECK_SSH   => playbook_check_ssh(&inventory, &cli_parser),
-        jetpack::cli::parser::CLI_MODE_LOCAL       => playbook_local(&inventory, &cli_parser),
+        },
+        jetpack::cli::parser::CLI_MODE_SSH => playbook_ssh(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_CHECK_SSH => playbook_check_ssh(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_LOCAL => playbook_local(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => playbook_check_local(&inventory, &cli_parser),
-        jetpack::cli::parser::CLI_MODE_SIMULATE    => playbook_simulate(&inventory, &cli_parser),
-        jetpack::cli::parser::CLI_MODE_PULL        => playbook_pull(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_SIMULATE => playbook_simulate(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_PULL => playbook_pull(&inventory, &cli_parser),
 
-        _ => { println!("invalid CLI mode"); 1 }
+        _ => {
+            println!("invalid CLI mode");
+            1
+        }
     };
     if exit_status != 0 {
         process::exit(exit_status);

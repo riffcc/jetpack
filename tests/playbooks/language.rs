@@ -19,7 +19,7 @@ fn test_play_debug() {
         batch_size: None,
         instantiate: None,
     };
-    
+
     let debug_str = format!("{:?}", play);
     assert!(debug_str.contains("Test Play"));
     assert!(debug_str.contains("web"));
@@ -33,17 +33,15 @@ fn test_play_with_options() {
         serde_yaml::Value::String("test_var".to_string()),
         serde_yaml::Value::String("test_value".to_string()),
     );
-    
+
     let play = Play {
         name: "Complex Play".to_string(),
         groups: vec!["all".to_string()],
-        roles: Some(vec![
-            RoleInvocation {
-                role: "common".to_string(),
-                vars: None,
-                tags: Some(vec!["setup".to_string()]),
-            }
-        ]),
+        roles: Some(vec![RoleInvocation {
+            role: "common".to_string(),
+            vars: None,
+            tags: Some(vec!["setup".to_string()]),
+        }]),
         defaults: None,
         vars: Some(vars.clone()),
         vars_files: Some(vec!["vars.yml".to_string()]),
@@ -74,7 +72,7 @@ fn test_role_debug() {
         handlers: Some(vec!["handler1.yml".to_string()]),
         dependencies: None,
     };
-    
+
     let debug_str = format!("{:?}", role);
     assert!(debug_str.contains("common"));
     assert!(debug_str.contains("task1.yml"));
@@ -90,7 +88,7 @@ fn test_role_clone() {
         handlers: None,
         dependencies: None,
     };
-    
+
     let cloned = role.clone();
     assert_eq!(cloned.name, role.name);
     assert_eq!(cloned.tasks, role.tasks);
@@ -103,13 +101,13 @@ fn test_role_invocation_debug() {
         serde_yaml::Value::String("var1".to_string()),
         serde_yaml::Value::String("value1".to_string()),
     );
-    
+
     let invocation = RoleInvocation {
         role: "webserver".to_string(),
         vars: Some(vars),
         tags: Some(vec!["web".to_string(), "nginx".to_string()]),
     };
-    
+
     let debug_str = format!("{:?}", invocation);
     assert!(debug_str.contains("webserver"));
     assert!(debug_str.contains("var1"));
@@ -124,7 +122,7 @@ fn test_role_invocation_minimal() {
         vars: None,
         tags: None,
     };
-    
+
     assert_eq!(invocation.role, "minimal");
     assert!(invocation.vars.is_none());
     assert!(invocation.tags.is_none());
@@ -138,10 +136,10 @@ groups:
   - web
   - db
 "#;
-    
+
     let play: Result<Play, _> = serde_yaml::from_str(yaml);
     assert!(play.is_ok());
-    
+
     let play = play.unwrap();
     assert_eq!(play.name, "Test Play");
     assert_eq!(play.groups.len(), 2);
@@ -159,10 +157,10 @@ tasks:
 handlers:
   - restart.yml
 "#;
-    
+
     let role: Result<Role, _> = serde_yaml::from_str(yaml);
     assert!(role.is_ok());
-    
+
     let role = role.unwrap();
     assert_eq!(role.name, "common");
     assert!(role.tasks.is_some());
@@ -178,10 +176,10 @@ tags:
   - web
   - proxy
 "#;
-    
+
     let invocation: Result<RoleInvocation, _> = serde_yaml::from_str(yaml);
     assert!(invocation.is_ok());
-    
+
     let invocation = invocation.unwrap();
     assert_eq!(invocation.role, "nginx");
     assert!(invocation.tags.is_some());

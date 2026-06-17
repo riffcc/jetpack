@@ -1,5 +1,5 @@
-use jetpack::tasks::request::*;
 use jetpack::tasks::fields::Field;
+use jetpack::tasks::request::*;
 
 #[test]
 fn test_task_request_type_equality() {
@@ -14,7 +14,7 @@ fn test_sudo_details_creation() {
         user: Some("root".to_string()),
         template: "sudo -u {{ user }}".to_string(),
     };
-    
+
     assert_eq!(sudo_details.user, Some("root".to_string()));
     assert_eq!(sudo_details.template, "sudo -u {{ user }}");
 }
@@ -25,7 +25,7 @@ fn test_sudo_details_clone() {
         user: Some("admin".to_string()),
         template: "sudo template".to_string(),
     };
-    
+
     let cloned = sudo_details.clone();
     assert_eq!(cloned.user, sudo_details.user);
     assert_eq!(cloned.template, sudo_details.template);
@@ -45,12 +45,12 @@ fn test_query_request() {
         user: Some("user1".to_string()),
         template: "sudo -u {{ user }}".to_string(),
     };
-    
+
     let request = TaskRequest::query(&sudo_details);
     assert_eq!(request.request_type, TaskRequestType::Query);
     assert!(request.changes.is_empty());
     assert!(request.sudo_details.is_some());
-    
+
     let sudo = request.sudo_details.as_ref().unwrap();
     assert_eq!(sudo.user, Some("user1".to_string()));
     assert_eq!(sudo.template, "sudo -u {{ user }}");
@@ -62,12 +62,15 @@ fn test_create_request() {
         user: Some("user2".to_string()),
         template: "sudo template".to_string(),
     };
-    
+
     let request = TaskRequest::create(&sudo_details);
     assert_eq!(request.request_type, TaskRequestType::Create);
     assert!(request.changes.is_empty());
     assert!(request.sudo_details.is_some());
-    assert_eq!(request.sudo_details.as_ref().unwrap().user, Some("user2".to_string()));
+    assert_eq!(
+        request.sudo_details.as_ref().unwrap().user,
+        Some("user2".to_string())
+    );
 }
 
 #[test]
@@ -76,7 +79,7 @@ fn test_remove_request() {
         user: Some("user3".to_string()),
         template: "sudo template".to_string(),
     };
-    
+
     let request = TaskRequest::remove(&sudo_details);
     assert_eq!(request.request_type, TaskRequestType::Remove);
     assert!(request.changes.is_empty());
@@ -89,9 +92,9 @@ fn test_modify_request() {
         user: Some("user4".to_string()),
         template: "sudo template".to_string(),
     };
-    
+
     let changes = vec![Field::Owner, Field::Mode, Field::Content];
-    
+
     let request = TaskRequest::modify(&sudo_details, changes.clone());
     assert_eq!(request.request_type, TaskRequestType::Modify);
     assert_eq!(request.changes.len(), 3);
@@ -107,7 +110,7 @@ fn test_execute_request() {
         user: Some("user5".to_string()),
         template: "sudo template".to_string(),
     };
-    
+
     let request = TaskRequest::execute(&sudo_details);
     assert_eq!(request.request_type, TaskRequestType::Execute);
     assert!(request.changes.is_empty());
@@ -120,7 +123,7 @@ fn test_passive_request() {
         user: Some("user6".to_string()),
         template: "sudo template".to_string(),
     };
-    
+
     let request = TaskRequest::passive(&sudo_details);
     assert_eq!(request.request_type, TaskRequestType::Passive);
     assert!(request.changes.is_empty());
@@ -133,7 +136,7 @@ fn test_is_sudoing_with_user() {
         user: Some("root".to_string()),
         template: "sudo template".to_string(),
     };
-    
+
     let request = TaskRequest::query(&sudo_details);
     assert!(request.is_sudoing());
 }
@@ -144,7 +147,7 @@ fn test_is_sudoing_without_user() {
         user: None,
         template: "sudo template".to_string(),
     };
-    
+
     let request = TaskRequest::query(&sudo_details);
     assert!(!request.is_sudoing());
 }
@@ -167,7 +170,7 @@ fn test_all_task_request_types() {
         TaskRequestType::Execute,
         TaskRequestType::Passive,
     ];
-    
+
     // Test that each type is unique
     for (i, type1) in types.iter().enumerate() {
         for (j, type2) in types.iter().enumerate() {

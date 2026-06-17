@@ -14,27 +14,27 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::playbooks::context::PlaybookContext;
-use crate::output::{OutputHandlerRef, RecapData};
-use std::sync::Arc;
-use crate::tasks::*;
-use std::sync::RwLock;
-use crate::inventory::hosts::Host;
 use crate::connection::command::CommandResult;
+use crate::inventory::hosts::Host;
+use crate::output::{OutputHandlerRef, RecapData};
+use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::traversal::HandlerMode;
+use crate::tasks::*;
+use chrono::prelude::*;
+use guid_create::GUID;
+use serde_json::json;
+use std::collections::HashMap;
+use std::env;
+use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
-use std::fs::File;
-use serde_json::json;
-use guid_create::GUID;
-use chrono::prelude::*;
-use std::env;
-use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::RwLock;
 
 #[derive(PartialEq)]
 pub enum CheckMode {
     Yes,
-    No
+    No,
 }
 
 pub struct PlaybookVisitor {
@@ -68,21 +68,24 @@ pub struct LogData {
     pub cmd_out: Option<String>,
     pub task_status: Option<String>,
     pub host: Option<String>,
-    pub summary: Option<serde_json::map::Map<String,serde_json::Value>>
+    pub summary: Option<serde_json::map::Map<String, serde_json::Value>>,
 }
 
 impl PlaybookVisitor {
-
     pub fn new(verbosity: u32, check_mode: CheckMode, output_handler: OutputHandlerRef) -> Self {
-
-        let logpath : String = match env::var("JET_LOG") {
+        let logpath: String = match env::var("JET_LOG") {
             Ok(x) => x,
-            Err(_) => String::from("/var/log/jetp/jetp.log")
+            Err(_) => String::from("/var/log/jetp/jetp.log"),
         };
 
-        let logfile : Option<Arc<RwLock<File>>> = match OpenOptions::new().write(true).create(true).append(true).open(logpath) {
+        let logfile: Option<Arc<RwLock<File>>> = match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(logpath)
+        {
             Ok(x) => Some(Arc::new(RwLock::new(x))),
-            Err(_) => None
+            Err(_) => None,
         };
 
         Self {
@@ -104,7 +107,7 @@ impl PlaybookVisitor {
             playbook_path: ctx.playbook_path.clone(),
             role: match &ctx.role {
                 Some(x) => Some(x.name.clone()),
-                None => None
+                None => None,
             },
             task: ctx.task.clone(),
             task_ct: None,
@@ -113,7 +116,7 @@ impl PlaybookVisitor {
             cmd_out: None,
             task_status: None,
             host: None,
-            summary: None
+            summary: None,
         }
     }
 
@@ -137,7 +140,7 @@ impl PlaybookVisitor {
                     "summary": data.summary
                 });
                 writeln!(logfile.write().unwrap(), "{}", &record.to_string()).unwrap();
-            },
+            }
             None => {}
         };
     }
@@ -147,7 +150,7 @@ impl PlaybookVisitor {
         if let Some(path) = &ctx.playbook_path {
             self.output_handler.on_playbook_start(path);
         }
-        
+
         let entry = self.log_entry(&String::from("playbook/start"), Arc::clone(context));
         self.log(context, entry);
     }
@@ -157,10 +160,10 @@ impl PlaybookVisitor {
         if let Some(path) = &ctx.playbook_path {
             self.output_handler.on_playbook_end(path, success);
         }
-        
+
         let entry = self.log_entry(&String::from("playbook/stop"), Arc::clone(context));
         self.log(context, entry);
-        
+
         // Show recap
         let stats = self.host_stats.read().unwrap();
         for (host, stat) in stats.iter() {
@@ -179,11 +182,11 @@ impl PlaybookVisitor {
     pub fn on_play_start(&self, context: &Arc<RwLock<PlaybookContext>>, matched_hosts: Vec<Host>) {
         let ctx = context.read().unwrap();
         let host_names: Vec<String> = matched_hosts.iter().map(|h| h.name.clone()).collect();
-        
+
         if let Some(play_name) = &ctx.play {
             self.output_handler.on_play_start(play_name, host_names);
         }
-        
+
         let entry = self.log_entry(&String::from("play/start"), Arc::clone(context));
         self.log(context, entry);
     }
@@ -193,7 +196,7 @@ impl PlaybookVisitor {
         if let Some(play_name) = &ctx.play {
             self.output_handler.on_play_end(play_name);
         }
-        
+
         let entry = self.log_entry(&String::from("play/stop"), Arc::clone(context));
         self.log(context, entry);
     }
@@ -214,11 +217,11 @@ impl PlaybookVisitor {
         let task_name = ctx.task.as_ref().unwrap_or(&default_name);
         let name = match mode {
             HandlerMode::Handlers => format!("HANDLER: {}", task_name),
-            _ => task_name.clone()
+            _ => task_name.clone(),
         };
-        
+
         self.output_handler.on_task_start(&name, 0);
-        
+
         let mut entry = self.log_entry(&String::from("task/start"), Arc::clone(context));
         entry.task_ct = Some(0);
         self.log(context, entry);
@@ -232,74 +235,108 @@ impl PlaybookVisitor {
                 _ => self.output_handler.on_task_end(task_name),
             }
         }
-        
+
         let entry = self.log_entry(&String::from("task/stop"), Arc::clone(context));
         self.log(context, entry);
     }
 
-    pub fn on_host_task_start(&self, context: &Arc<RwLock<PlaybookContext>>, _request: &request::TaskRequest, host: &Host) {
+    pub fn on_host_task_start(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        _request: &request::TaskRequest,
+        host: &Host,
+    ) {
         let mut entry = self.log_entry(&String::from("host/task/start"), Arc::clone(context));
         entry.host = Some(host.name.clone());
         self.log(context, entry);
     }
 
-    pub fn on_host_task_ok(&self, context: &Arc<RwLock<PlaybookContext>>, request: &request::TaskRequest, response: &response::TaskResponse, host: &Host) {
-        self.output_handler.on_task_host_result(host, request, response);
-        
+    pub fn on_host_task_ok(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        request: &request::TaskRequest,
+        response: &response::TaskResponse,
+        host: &Host,
+    ) {
+        self.output_handler
+            .on_task_host_result(host, request, response);
+
         // Update stats
         let mut stats = self.host_stats.write().unwrap();
-        let host_stat = stats.entry(host.name.clone()).or_insert_with(HostStats::default);
-        
+        let host_stat = stats
+            .entry(host.name.clone())
+            .or_insert_with(HostStats::default);
+
         use crate::tasks::response::TaskStatus;
         match &response.status {
             TaskStatus::IsSkipped => {
                 host_stat.skipped += 1;
-            },
-            TaskStatus::IsModified | TaskStatus::IsCreated | TaskStatus::IsRemoved | TaskStatus::IsExecuted => {
+            }
+            TaskStatus::IsModified
+            | TaskStatus::IsCreated
+            | TaskStatus::IsRemoved
+            | TaskStatus::IsExecuted => {
                 host_stat.changed += 1;
                 host_stat.ok += 1;
-            },
+            }
             TaskStatus::IsPassive | TaskStatus::IsMatched => {
                 host_stat.ok += 1;
-            },
+            }
             _ => {
                 host_stat.ok += 1;
             }
         }
-        
+
         let mut entry = self.log_entry(&String::from("host/task/ok"), Arc::clone(context));
         entry.task_status = Some(String::from("ok"));
         entry.host = Some(host.name.clone());
         self.log(context, entry);
     }
 
-    pub fn on_host_task_failed(&self, context: &Arc<RwLock<PlaybookContext>>, request: &request::TaskRequest, response: &response::TaskResponse, host: &Host) {
-        self.output_handler.on_task_host_result(host, request, response);
-        
+    pub fn on_host_task_failed(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        request: &request::TaskRequest,
+        response: &response::TaskResponse,
+        host: &Host,
+    ) {
+        self.output_handler
+            .on_task_host_result(host, request, response);
+
         // Update stats
         let mut stats = self.host_stats.write().unwrap();
-        let host_stat = stats.entry(host.name.clone()).or_insert_with(HostStats::default);
+        let host_stat = stats
+            .entry(host.name.clone())
+            .or_insert_with(HostStats::default);
         host_stat.failed += 1;
-        
+
         let mut entry = self.log_entry(&String::from("host/task/failed"), Arc::clone(context));
         entry.task_status = Some(String::from("failed"));
         entry.host = Some(host.name.clone());
         self.log(context, entry);
     }
 
-    pub fn on_command_run(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Host, cmd: &String, result: &CommandResult) {
+    pub fn on_command_run(
+        &self,
+        context: &Arc<RwLock<PlaybookContext>>,
+        host: &Host,
+        cmd: &String,
+        result: &CommandResult,
+    ) {
         let mut entry = self.log_entry(&String::from("cmd/run"), Arc::clone(context));
         entry.host = Some(host.name.clone());
         entry.cmd = Some(cmd.clone());
         entry.cmd_rc = Some(result.rc);
-        
+
         if self.verbosity >= 2 {
-            self.output_handler.debug(&format!("Command: {} (rc={})", cmd, result.rc));
+            self.output_handler
+                .debug(&format!("Command: {} (rc={})", cmd, result.rc));
             if !result.out.is_empty() {
-                self.output_handler.debug(&format!("Output: {}", result.out));
+                self.output_handler
+                    .debug(&format!("Output: {}", result.out));
             }
         }
-        
+
         entry.cmd_out = Some(result.out.clone());
         self.log(context, entry);
     }
@@ -307,11 +344,14 @@ impl PlaybookVisitor {
     pub fn on_unreachable_host(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Host) {
         // Update stats
         let mut stats = self.host_stats.write().unwrap();
-        let host_stat = stats.entry(host.name.clone()).or_insert_with(HostStats::default);
+        let host_stat = stats
+            .entry(host.name.clone())
+            .or_insert_with(HostStats::default);
         host_stat.unreachable += 1;
-        
-        self.output_handler.error(&format!("Host {} is unreachable", host.name));
-        
+
+        self.output_handler
+            .error(&format!("Host {} is unreachable", host.name));
+
         let mut entry = self.log_entry(&String::from("host/unreachable"), Arc::clone(context));
         entry.host = Some(host.name.clone());
         self.log(context, entry);

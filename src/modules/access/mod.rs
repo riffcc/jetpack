@@ -15,6 +15,5 @@
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /** ADD MODULES HERE, KEEP ALPHABETIZED **/
-
 pub mod group;
 pub mod user;

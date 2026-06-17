@@ -11,27 +11,27 @@
 //! Color-coded per-host output in chronological order as events arrive.
 //! In non-TTY mode (pipe, CI), outputs simple `[hostname] message` lines.
 
+use crate::output::OutputHandlerRef;
 use std::io::{self, Write};
 use std::sync::mpsc;
-use crate::output::OutputHandlerRef;
 
 /// Color palette for host prefixes. 16 colors cycling.
 const HOST_COLORS: &[&str] = &[
-    "\x1b[34m",   // blue
-    "\x1b[32m",   // green
-    "\x1b[36m",   // cyan
-    "\x1b[33m",   // yellow
-    "\x1b[35m",   // magenta
-    "\x1b[91m",   // bright red
-    "\x1b[92m",   // bright green
-    "\x1b[93m",   // bright yellow
-    "\x1b[94m",   // bright blue
-    "\x1b[95m",   // bright magenta
-    "\x1b[96m",   // bright cyan
-    "\x1b[31m",   // red
-    "\x1b[37m",   // white
-    "\x1b[90m",   // bright black / gray
-    "\x1b[97m",   // bright white
+    "\x1b[34m",       // blue
+    "\x1b[32m",       // green
+    "\x1b[36m",       // cyan
+    "\x1b[33m",       // yellow
+    "\x1b[35m",       // magenta
+    "\x1b[91m",       // bright red
+    "\x1b[92m",       // bright green
+    "\x1b[93m",       // bright yellow
+    "\x1b[94m",       // bright blue
+    "\x1b[95m",       // bright magenta
+    "\x1b[96m",       // bright cyan
+    "\x1b[31m",       // red
+    "\x1b[37m",       // white
+    "\x1b[90m",       // bright black / gray
+    "\x1b[97m",       // bright white
     "\x1b[38;5;208m", // orange
 ];
 
@@ -124,20 +124,24 @@ pub struct AsyncUi {
 impl AsyncUi {
     pub fn new(hostnames: Vec<String>) -> Self {
         // Simple TTY check: see if TERM is set and not "dumb"
-        let is_tty = std::env::var("TERM")
-            .map(|t| t != "dumb")
-            .unwrap_or(false);
-        AsyncUi { hostnames, is_tty, output_handler: None }
+        let is_tty = std::env::var("TERM").map(|t| t != "dumb").unwrap_or(false);
+        AsyncUi {
+            hostnames,
+            is_tty,
+            output_handler: None,
+        }
     }
 
     /// Create an AsyncUi that delegates to `handler` instead of printing.
     /// All terminal output is suppressed; the handler receives task lifecycle
     /// events so callers can display their own progress UI.
     pub fn new_with_handler(hostnames: Vec<String>, handler: OutputHandlerRef) -> Self {
-        let is_tty = std::env::var("TERM")
-            .map(|t| t != "dumb")
-            .unwrap_or(false);
-        AsyncUi { hostnames, is_tty, output_handler: Some(handler) }
+        let is_tty = std::env::var("TERM").map(|t| t != "dumb").unwrap_or(false);
+        AsyncUi {
+            hostnames,
+            is_tty,
+            output_handler: Some(handler),
+        }
     }
 
     /// Create an event channel. Returns (sender for workers, receiver for UI).
@@ -175,7 +179,11 @@ impl AsyncUi {
             let stdout = io::stdout();
             let mut out = stdout.lock();
             if self.is_tty {
-                let _ = writeln!(out, "── Async Mode: {} hosts ──────────────", self.hostnames.len());
+                let _ = writeln!(
+                    out,
+                    "── Async Mode: {} hosts ──────────────",
+                    self.hostnames.len()
+                );
                 for (i, name) in self.hostnames.iter().enumerate() {
                     let color = HOST_COLORS[i % HOST_COLORS.len()];
                     let _ = write!(out, "  {}●{} {} ", color, RESET, name);
@@ -242,8 +250,15 @@ impl AsyncUi {
                 } => {
                     if quiet {
                         if let Some(ref h) = self.output_handler {
-                            let host_name = self.hostnames.get(host_idx).map(|s| s.as_str()).unwrap_or("unknown");
-                            h.error(&format!("Task '{}' failed on {}: {}", task_name, host_name, error));
+                            let host_name = self
+                                .hostnames
+                                .get(host_idx)
+                                .map(|s| s.as_str())
+                                .unwrap_or("unknown");
+                            h.error(&format!(
+                                "Task '{}' failed on {}: {}",
+                                task_name, host_name, error
+                            ));
                         }
                     } else if host_idx < outputs.len() {
                         let line = if self.is_tty {
@@ -306,7 +321,11 @@ impl AsyncUi {
                 HostEvent::HostFailed { host_idx, error } => {
                     if quiet {
                         if let Some(ref h) = self.output_handler {
-                            let host_name = self.hostnames.get(host_idx).map(|s| s.as_str()).unwrap_or("unknown");
+                            let host_name = self
+                                .hostnames
+                                .get(host_idx)
+                                .map(|s| s.as_str())
+                                .unwrap_or("unknown");
                             h.error(&format!("Host '{}' failed: {}", host_name, error));
                         }
                     } else if host_idx < outputs.len() {
@@ -337,11 +356,23 @@ impl AsyncUi {
 
             for ho in &outputs {
                 let status_text = if ho.failed {
-                    if self.is_tty { "\x1b[31mFAILED\x1b[0m" } else { "FAILED" }
+                    if self.is_tty {
+                        "\x1b[31mFAILED\x1b[0m"
+                    } else {
+                        "FAILED"
+                    }
                 } else if ho.completed {
-                    if self.is_tty { "\x1b[32mOK\x1b[0m" } else { "OK" }
+                    if self.is_tty {
+                        "\x1b[32mOK\x1b[0m"
+                    } else {
+                        "OK"
+                    }
                 } else {
-                    if self.is_tty { "\x1b[33mINCOMPLETE\x1b[0m" } else { "INCOMPLETE" }
+                    if self.is_tty {
+                        "\x1b[33mINCOMPLETE\x1b[0m"
+                    } else {
+                        "INCOMPLETE"
+                    }
                 };
 
                 if self.is_tty {
