@@ -658,12 +658,9 @@ impl ProxmoxLxcProvisioner {
 
             // The download is async - Proxmox spawns a task
             // Check the response for any immediate errors
-            #[derive(Deserialize)]
-            struct ApiResponse {
-                data: Option<serde_json::Value>,
-            }
-
-            let _api_resp: ApiResponse = response.json()
+            // Validate the response body parses as JSON; Proxmox acknowledges the
+            // download task with a JSON object whose payload we do not need.
+            let _api_resp: serde_json::Value = response.json()
                 .await
                 .map_err(|e| format!("Failed to parse download response: {}", e))?;
 
@@ -897,30 +894,6 @@ impl ProxmoxLxcProvisioner {
                 Some(upid) => self.wait_for_task(conn, &client, &upid).await,
                 None => Ok(()),
             }
-        })
-    }
-
-    /// Stop a container
-    fn stop_container(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
-        let url = self.get_api_url(conn, &format!("/nodes/{}/lxc/{}/status/stop", conn.node, vmid));
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("Failed to create async runtime: {}", e))?;
-
-        rt.block_on(async {
-            let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
-                .build()
-                .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
-
-            // Ignore errors - container might already be stopped
-            let _ = self.apply_auth(conn, client.post(&url))
-                .send()
-                .await;
-
-            Ok(())
         })
     }
 
@@ -1318,8 +1291,6 @@ impl Provisioner for ProxmoxLxcProvisioner {
                             vmid: Option<u64>,
                             #[serde(rename = "node")]
                             node: Option<String>,
-                            #[serde(rename = "config")]
-                            config: Option<serde_yaml::Value>,
                         }
 
                         #[derive(Deserialize)]
