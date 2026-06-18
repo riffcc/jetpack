@@ -1,13 +1,12 @@
-use jetpack::playbooks::traversal::*;
-use jetpack::inventory::inventory::Inventory;
-use jetpack::inventory::hosts::Host;
 use jetpack::cli::parser::CliParser;
-use jetpack::playbooks::context::PlaybookContext;
-use jetpack::playbooks::visitor::{PlaybookVisitor, CheckMode};
 use jetpack::connection::no::NoFactory;
+use jetpack::inventory::inventory::Inventory;
+use jetpack::playbooks::context::PlaybookContext;
+use jetpack::playbooks::traversal::*;
+use jetpack::playbooks::visitor::{CheckMode, PlaybookVisitor};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, RwLock};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 
 #[test]
 fn test_run_state_creation() {
@@ -104,9 +103,7 @@ fn test_run_state_paths() {
         PathBuf::from("/custom/roles"),
     ];
 
-    let module_paths = vec![
-        PathBuf::from("/path/to/modules"),
-    ];
+    let module_paths = vec![PathBuf::from("/path/to/modules")];
 
     let run_state = RunState {
         inventory: Arc::clone(&inventory),
