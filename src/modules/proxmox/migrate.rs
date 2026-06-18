@@ -204,7 +204,7 @@ impl IsTask for ProxmoxMigrateTask {
                         &self.timeout,
                         Some(300),
                     )?
-                    .unwrap_or(300) as u64,
+                    .unwrap_or(300),
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
@@ -226,26 +226,26 @@ impl IsAction for ProxmoxMigrateAction {
                 if let Some(node) = current_node {
                     if node == self.target_node {
                         // Already on target - no migration needed
-                        return Ok(handle.response.is_matched(request));
+                        Ok(handle.response.is_matched(request))
                     } else if node == self.source_node {
                         // On source node - needs migration
                         let changes = vec![Field::Location];
-                        return Ok(handle.response.needs_modification(request, &changes));
+                        Ok(handle.response.needs_modification(request, &changes))
                     } else {
                         // On unexpected node
-                        return Err(handle.response.is_failed(
+                        Err(handle.response.is_failed(
                             request,
                             &format!(
                                 "Guest {} found on unexpected node '{}', expected source '{}'",
                                 self.vmid, node, self.source_node
                             ),
-                        ));
+                        ))
                     }
                 } else {
-                    return Err(handle.response.is_failed(
+                    Err(handle.response.is_failed(
                         request,
                         &format!("Guest {} not found on any node", self.vmid),
-                    ));
+                    ))
                 }
             }
 

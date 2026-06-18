@@ -95,7 +95,7 @@ impl IsTask for ProxmoxLxcTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(ProxmoxLxcAction {
                 api_host: handle.template.string(
                     request,
@@ -186,7 +186,7 @@ impl IsTask for ProxmoxLxcTask {
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-        });
+        })
     }
 }
 
@@ -201,32 +201,30 @@ impl IsAction for ProxmoxLxcAction {
                 let exists = self.container_exists(handle, request)?;
                 if self.state == "absent" {
                     if exists {
-                        return Ok(handle.response.needs_removal(request));
+                        Ok(handle.response.needs_removal(request))
                     } else {
-                        return Ok(handle.response.is_matched(request));
+                        Ok(handle.response.is_matched(request))
                     }
                 } else {
                     if exists {
-                        return Ok(handle.response.is_matched(request));
+                        Ok(handle.response.is_matched(request))
                     } else {
-                        return Ok(handle.response.needs_creation(request));
+                        Ok(handle.response.needs_creation(request))
                     }
                 }
             }
 
             TaskRequestType::Create => {
                 self.create_container(handle, request)?;
-                return Ok(handle.response.is_created(request));
+                Ok(handle.response.is_created(request))
             }
 
             TaskRequestType::Remove => {
                 self.delete_container(handle, request)?;
-                return Ok(handle.response.is_removed(request));
+                Ok(handle.response.is_removed(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

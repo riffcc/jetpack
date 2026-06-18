@@ -242,14 +242,14 @@ pub fn wait_for_ssh(
         attempt += 1;
 
         // For DHCP containers: discover the IP if not yet known.
-        if current_ip.is_none() {
-            if let Some(ref getter) = ip_getter {
-                current_ip = getter();
-                if let Some(ref ip) = current_ip {
-                    eprintln!("  → IP assigned: {} — now waiting for SSH", ip);
-                    if let Some(out) = output {
-                        out.on_provision_ssh_wait(host_name, ip, timeout);
-                    }
+        if current_ip.is_none()
+            && let Some(ref getter) = ip_getter
+        {
+            current_ip = getter();
+            if let Some(ref ip) = current_ip {
+                eprintln!("  → IP assigned: {} — now waiting for SSH", ip);
+                if let Some(out) = output {
+                    out.on_provision_ssh_wait(host_name, ip, timeout);
                 }
             }
         }
@@ -257,21 +257,18 @@ pub fn wait_for_ssh(
         if let Some(ref ip) = current_ip {
             let addr_str = format!("{}:{}", ip, port);
             let parse_result = addr_str.parse::<std::net::SocketAddr>();
-            if let Ok(addr) = parse_result {
-                match TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
-                    Ok(_) => {
-                        let elapsed = start.elapsed().as_secs();
-                        if let Some(out) = output {
-                            out.on_provision_ssh_ready(host_name, elapsed, attempt);
-                        }
-                        eprintln!(
-                            "  → SSH available on {} ({}) after {}s ({} attempts)",
-                            host_name, ip, elapsed, attempt
-                        );
-                        return Ok(ip.clone());
-                    }
-                    Err(_) => {}
+            if let Ok(addr) = parse_result
+                && let Ok(_) = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+            {
+                let elapsed = start.elapsed().as_secs();
+                if let Some(out) = output {
+                    out.on_provision_ssh_ready(host_name, elapsed, attempt);
                 }
+                eprintln!(
+                    "  → SSH available on {} ({}) after {}s ({} attempts)",
+                    host_name, ip, elapsed, attempt
+                );
+                return Ok(ip.clone());
             }
         }
 
@@ -416,24 +413,24 @@ pub fn ensure_host_provisioned(
     }
 
     // Create DNS record if dns config is present and we have an IP
-    if let Some(dns_config) = dns_config {
-        if let Ok(Some(ip)) = provisioner.get_ip(provision_config, inventory_name, inventory) {
-            match crate::dns::add_host_record(dns_config, inventory_name, &ip) {
-                Ok(true) => {
-                    let hostname = crate::dns::extract_hostname(inventory_name);
-                    let zone = dns_config
-                        .zone
-                        .clone()
-                        .or_else(|| crate::dns::infer_zone(inventory_name))
-                        .unwrap_or_else(|| "?".to_string());
-                    eprintln!("  → DNS: added {} -> {} to {}", hostname, ip, zone);
-                }
-                Ok(false) => {
-                    // Record already exists with same value, no action needed
-                }
-                Err(e) => {
-                    eprintln!("  → DNS: warning: failed to add record: {}", e);
-                }
+    if let Some(dns_config) = dns_config
+        && let Ok(Some(ip)) = provisioner.get_ip(provision_config, inventory_name, inventory)
+    {
+        match crate::dns::add_host_record(dns_config, inventory_name, &ip) {
+            Ok(true) => {
+                let hostname = crate::dns::extract_hostname(inventory_name);
+                let zone = dns_config
+                    .zone
+                    .clone()
+                    .or_else(|| crate::dns::infer_zone(inventory_name))
+                    .unwrap_or_else(|| "?".to_string());
+                eprintln!("  → DNS: added {} -> {} to {}", hostname, ip, zone);
+            }
+            Ok(false) => {
+                // Record already exists with same value, no action needed
+            }
+            Err(e) => {
+                eprintln!("  → DNS: warning: failed to add record: {}", e);
             }
         }
     }

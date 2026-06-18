@@ -94,6 +94,12 @@ struct ClusterConnection {
     node: String,
 }
 
+impl Default for ProxmoxLxcProvisioner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProxmoxLxcProvisioner {
     pub fn new() -> Self {
         Self
@@ -405,10 +411,10 @@ impl ProxmoxLxcProvisioner {
 
             if let Some(containers) = api_response.data {
                 for container in containers {
-                    if let Some(ref name) = container.name {
-                        if name == hostname {
-                            return Ok(Some(container.vmid));
-                        }
+                    if let Some(ref name) = container.name
+                        && name == hostname
+                    {
+                        return Ok(Some(container.vmid));
                     }
                 }
             }
@@ -581,17 +587,16 @@ impl ProxmoxLxcProvisioner {
                 };
 
                 for item in api_resp.data {
-                    if item.format.as_deref() == Some("tgz")
+                    if (item.format.as_deref() == Some("tgz")
                         || item.format.as_deref() == Some("tar")
-                        || item.format.as_deref() == Some("tar.zst")
+                        || item.format.as_deref() == Some("tar.zst"))
+                        && let Some(volid) = item.volid
                     {
-                        if let Some(volid) = item.volid {
-                            let volid_clone = volid.clone();
-                            if let Some(name) = volid_clone.split('/').last() {
-                                if name.to_lowercase().starts_with(&prefix.to_lowercase()) {
-                                    all_matching.push((volid, name.to_string()));
-                                }
-                            }
+                        let volid_clone = volid.clone();
+                        if let Some(name) = volid_clone.split('/').next_back()
+                            && name.to_lowercase().starts_with(&prefix.to_lowercase())
+                        {
+                            all_matching.push((volid, name.to_string()));
                         }
                     }
                 }
@@ -900,13 +905,13 @@ impl ProxmoxLxcProvisioner {
                     .json()
                     .await
                     .map_err(|e| format!("Failed to parse task status: {}", e))?;
-                if let Some(task) = parsed.data {
-                    if task.status == "stopped" {
-                        return match task.exitstatus.as_deref() {
-                            Some("OK") | None => Ok(()),
-                            Some(err) => Err(format!("Proxmox task {} failed: {}", upid, err)),
-                        };
-                    }
+                if let Some(task) = parsed.data
+                    && task.status == "stopped"
+                {
+                    return match task.exitstatus.as_deref() {
+                        Some("OK") | None => Ok(()),
+                        Some(err) => Err(format!("Proxmox task {} failed: {}", upid, err)),
+                    };
                 }
             }
 
@@ -968,19 +973,10 @@ impl ProxmoxLxcProvisioner {
             params.insert("cores".to_string(), cores.to_string());
 
             // Storage and rootfs
-            let storage = config
-                .storage
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or("local-lvm");
-            let rootfs_size_raw = config
-                .rootfs_size
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or("8");
+            let storage = config.storage.as_deref().unwrap_or("local-lvm");
+            let rootfs_size_raw = config.rootfs_size.as_deref().unwrap_or("8");
             // Strip G/M suffix if present - Proxmox API expects just the number
-            let rootfs_size =
-                rootfs_size_raw.trim_end_matches(|c| c == 'G' || c == 'M' || c == 'g' || c == 'm');
+            let rootfs_size = rootfs_size_raw.trim_end_matches(['G', 'M', 'g', 'm']);
             params.insert("rootfs".to_string(), format!("{}:{}", storage, rootfs_size));
 
             // Unprivileged (default true)
@@ -1238,40 +1234,36 @@ impl Provisioner for ProxmoxLxcProvisioner {
         inventory: &Arc<RwLock<Inventory>>,
     ) -> Result<bool, String> {
         let conn = self.get_cluster_connection(config, inventory)?;
-        let hostname = config
-            .hostname
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or(inventory_name);
+        let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
 
         // First check by VMID if specified
-        if let Some(ref vmid_str) = config.vmid {
-            if let Ok(vmid) = vmid_str.parse::<u64>() {
-                let url = self.get_api_url(
-                    &conn,
-                    &format!("/nodes/{}/lxc/{}/status/current", conn.node, vmid),
-                );
+        if let Some(ref vmid_str) = config.vmid
+            && let Ok(vmid) = vmid_str.parse::<u64>()
+        {
+            let url = self.get_api_url(
+                &conn,
+                &format!("/nodes/{}/lxc/{}/status/current", conn.node, vmid),
+            );
 
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+
+            return rt.block_on(async {
+                let client = reqwest::Client::builder()
+                    .danger_accept_invalid_certs(true)
                     .build()
-                    .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+                    .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-                return rt.block_on(async {
-                    let client = reqwest::Client::builder()
-                        .danger_accept_invalid_certs(true)
-                        .build()
-                        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+                let response = self
+                    .apply_auth(&conn, client.get(&url))
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to query Proxmox API: {}", e))?;
 
-                    let response = self
-                        .apply_auth(&conn, client.get(&url))
-                        .send()
-                        .await
-                        .map_err(|e| format!("Failed to query Proxmox API: {}", e))?;
-
-                    Ok(response.status().is_success())
-                });
-            }
+                Ok(response.status().is_success())
+            });
         }
 
         // Otherwise check by hostname
@@ -1306,11 +1298,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
         // Get cluster connection FIRST (needed for container check)
         let conn = self.get_cluster_connection(&config, inventory)?;
-        let hostname = config
-            .hostname
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or(inventory_name);
+        let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
 
         // Check if container already exists FIRST - before any template operations
         if let Some(existing_vmid) = self.find_container_by_hostname(&conn, hostname)? {
@@ -1322,39 +1310,39 @@ impl Provisioner for ProxmoxLxcProvisioner {
         }
 
         // Check if we need to fetch the template (only if creating new container)
-        if let Some(ref fetch) = config.fetch {
-            if fetch == "true" || fetch == "1" || fetch == "latest" {
-                let ostemplate = config
-                    .ostemplate
-                    .as_ref()
-                    .ok_or("ostemplate required when fetch is enabled")?;
+        if let Some(ref fetch) = config.fetch
+            && (fetch == "true" || fetch == "1" || fetch == "latest")
+        {
+            let ostemplate = config
+                .ostemplate
+                .as_ref()
+                .ok_or("ostemplate required when fetch is enabled")?;
 
-                if fetch == "latest" {
-                    // First try to find local template
-                    match self.find_latest_template(&conn, ostemplate) {
-                        Ok(latest_template) => {
-                            eprintln!("  → Using existing template: {}", latest_template);
-                            // Update ostemplate to use the actual template file
-                            config.ostemplate = Some(latest_template);
-                        }
-                        Err(_) => {
-                            // Not found locally - download from Proxmox
-                            // Query Proxmox for available templates, match pattern, download
-                            let storage = config.storage.as_deref().unwrap_or("local");
-                            eprintln!(
-                                "  → Template not found locally, searching Proxmox repository..."
-                            );
-                            let downloaded =
-                                self.find_and_download_template(&conn, ostemplate, storage)?;
-                            // Update ostemplate to use the actual downloaded template file
-                            config.ostemplate = Some(format!("{}:vztmpl/{}", storage, downloaded));
-                        }
+            if fetch == "latest" {
+                // First try to find local template
+                match self.find_latest_template(&conn, ostemplate) {
+                    Ok(latest_template) => {
+                        eprintln!("  → Using existing template: {}", latest_template);
+                        // Update ostemplate to use the actual template file
+                        config.ostemplate = Some(latest_template);
                     }
-                } else {
-                    // Just download the exact template specified
-                    eprintln!("  → Fetching template: {}", ostemplate);
-                    self.download_template(&conn, ostemplate)?;
+                    Err(_) => {
+                        // Not found locally - download from Proxmox
+                        // Query Proxmox for available templates, match pattern, download
+                        let storage = config.storage.as_deref().unwrap_or("local");
+                        eprintln!(
+                            "  → Template not found locally, searching Proxmox repository..."
+                        );
+                        let downloaded =
+                            self.find_and_download_template(&conn, ostemplate, storage)?;
+                        // Update ostemplate to use the actual downloaded template file
+                        config.ostemplate = Some(format!("{}:vztmpl/{}", storage, downloaded));
+                    }
                 }
+            } else {
+                // Just download the exact template specified
+                eprintln!("  → Fetching template: {}", ostemplate);
+                self.download_template(&conn, ostemplate)?;
             }
         }
 
@@ -1410,8 +1398,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
         if let Some(ref net0) = config.net0 {
             // Format: "name=eth0,bridge=vmbr0,ip=10.10.10.2/24,gw=10.10.10.1"
             for part in net0.split(',') {
-                if part.starts_with("ip=") {
-                    let ip_cidr = &part[3..];
+                if let Some(ip_cidr) = part.strip_prefix("ip=") {
                     // Skip DHCP - we need to query for the actual IP
                     if ip_cidr.to_lowercase() != "dhcp" {
                         // Strip CIDR notation if present
@@ -1443,197 +1430,191 @@ impl Provisioner for ProxmoxLxcProvisioner {
         };
 
         // Now query the IP using the vmid
-        if let Some(ref vmid) = vmid_to_query {
-            if let Ok(vmid_num) = vmid.parse::<u64>() {
-                // Get cluster connection to query all nodes
-                let conn = self.get_cluster_connection(config, inventory)?;
+        if let Some(ref vmid) = vmid_to_query
+            && let Ok(vmid_num) = vmid.parse::<u64>()
+        {
+            // Get cluster connection to query all nodes
+            let conn = self.get_cluster_connection(config, inventory)?;
 
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+
+            let result: Result<Option<String>, String> = rt.block_on(async {
+                let client = reqwest::Client::builder()
+                    .danger_accept_invalid_certs(true)
+                    .timeout(std::time::Duration::from_secs(10))
                     .build()
-                    .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+                    .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-                let result: Result<Option<String>, String> = rt.block_on(async {
-                    let client = reqwest::Client::builder()
-                        .danger_accept_invalid_certs(true)
-                        .timeout(std::time::Duration::from_secs(10))
-                        .build()
-                        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+                // First, get list of all cluster nodes
+                let nodes_url = self.get_api_url(&conn, "/nodes");
+                let nodes_response = self
+                    .apply_auth(&conn, client.get(&nodes_url))
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to get nodes: {}", e))?;
 
-                    // First, get list of all cluster nodes
-                    let nodes_url = self.get_api_url(&conn, "/nodes");
-                    let nodes_response = self
-                        .apply_auth(&conn, client.get(&nodes_url))
+                #[derive(Deserialize)]
+                struct NodeInfo {
+                    node: String,
+                }
+
+                #[derive(Deserialize)]
+                struct NodesResponse {
+                    data: Vec<NodeInfo>,
+                }
+
+                let nodes_resp: NodesResponse = nodes_response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse nodes: {}", e))?;
+
+                // Try each node using /interfaces — reads the container's actual
+                // network namespace, so it always returns the real DHCP-assigned IP.
+                // The /status/current endpoint only returns the config net0 string
+                // (e.g., "ip=dhcp"), never the runtime-assigned address.
+                #[derive(Deserialize)]
+                struct Iface {
+                    // Proxmox LXC /interfaces returns "inet" for IPv4 (e.g. "10.1.21.26/16")
+                    name: Option<String>,
+                    inet: Option<String>,
+                }
+
+                #[derive(Deserialize)]
+                struct IfacesApiResponse {
+                    data: Option<Vec<Iface>>,
+                }
+
+                for node_info in nodes_resp.data {
+                    let node_name = &node_info.node;
+                    let ifaces_url = self.get_api_url(
+                        &conn,
+                        &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num),
+                    );
+
+                    let ifaces_response = self
+                        .apply_auth(&conn, client.get(&ifaces_url))
                         .send()
                         .await
-                        .map_err(|e| format!("Failed to get nodes: {}", e))?;
+                        .map_err(|e| {
+                            format!("Failed to query interfaces on node {}: {}", node_name, e)
+                        })?;
 
-                    #[derive(Deserialize)]
-                    struct NodeInfo {
-                        node: String,
+                    // Skip nodes where the container doesn't live (404 / non-success).
+                    if !ifaces_response.status().is_success() {
+                        continue;
                     }
 
-                    #[derive(Deserialize)]
-                    struct NodesResponse {
-                        data: Vec<NodeInfo>,
-                    }
-
-                    let nodes_resp: NodesResponse = nodes_response
-                        .json()
-                        .await
-                        .map_err(|e| format!("Failed to parse nodes: {}", e))?;
-
-                    // Try each node using /interfaces — reads the container's actual
-                    // network namespace, so it always returns the real DHCP-assigned IP.
-                    // The /status/current endpoint only returns the config net0 string
-                    // (e.g., "ip=dhcp"), never the runtime-assigned address.
-                    #[derive(Deserialize)]
-                    struct Iface {
-                        // Proxmox LXC /interfaces returns "inet" for IPv4 (e.g. "10.1.21.26/16")
-                        name: Option<String>,
-                        inet: Option<String>,
-                    }
-
-                    #[derive(Deserialize)]
-                    struct IfacesApiResponse {
-                        data: Option<Vec<Iface>>,
-                    }
-
-                    for node_info in nodes_resp.data {
-                        let node_name = &node_info.node;
-                        let ifaces_url = self.get_api_url(
-                            &conn,
-                            &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num),
-                        );
-
-                        let ifaces_response = self
-                            .apply_auth(&conn, client.get(&ifaces_url))
-                            .send()
-                            .await
-                            .map_err(|e| {
-                                format!("Failed to query interfaces on node {}: {}", node_name, e)
-                            })?;
-
-                        // Skip nodes where the container doesn't live (404 / non-success).
-                        if !ifaces_response.status().is_success() {
-                            continue;
-                        }
-
-                        if let Ok(api_resp) = ifaces_response.json::<IfacesApiResponse>().await {
-                            if let Some(ifaces) = api_resp.data {
-                                for iface in ifaces {
-                                    if iface.name.as_deref() == Some("lo") {
-                                        continue; // skip loopback
-                                    }
-                                    if let Some(ref inet) = iface.inet {
-                                        // Strip CIDR mask: "10.1.21.26/16" → "10.1.21.26"
-                                        let ip = inet.split('/').next().unwrap_or(inet);
-                                        if !ip.is_empty() && ip != "127.0.0.1" {
-                                            return Ok(Some(ip.to_string()));
-                                        }
-                                    }
+                    if let Ok(api_resp) = ifaces_response.json::<IfacesApiResponse>().await
+                        && let Some(ifaces) = api_resp.data
+                    {
+                        for iface in ifaces {
+                            if iface.name.as_deref() == Some("lo") {
+                                continue; // skip loopback
+                            }
+                            if let Some(ref inet) = iface.inet {
+                                // Strip CIDR mask: "10.1.21.26/16" → "10.1.21.26"
+                                let ip = inet.split('/').next().unwrap_or(inet);
+                                if !ip.is_empty() && ip != "127.0.0.1" {
+                                    return Ok(Some(ip.to_string()));
                                 }
                             }
                         }
                     }
+                }
 
-                    // Fallback: try cluster-wide resources to find the container
-                    let resources_url = self.get_api_url(&conn, "/cluster/resources");
-                    let resources_response = self
-                        .apply_auth(&conn, client.get(&resources_url))
-                        .send()
+                // Fallback: try cluster-wide resources to find the container
+                let resources_url = self.get_api_url(&conn, "/cluster/resources");
+                let resources_response = self
+                    .apply_auth(&conn, client.get(&resources_url))
+                    .send()
+                    .await
+                    .map_err(|e| format!("Failed to get cluster resources: {}", e))?;
+
+                if resources_response.status().is_success() {
+                    #[derive(Deserialize)]
+                    struct Resource {
+                        #[serde(rename = "vmid")]
+                        vmid: Option<u64>,
+                        #[serde(rename = "node")]
+                        node: Option<String>,
+                    }
+
+                    #[derive(Deserialize)]
+                    struct ResourcesResponse {
+                        data: Vec<Resource>,
+                    }
+
+                    let resources_resp: ResourcesResponse = resources_response
+                        .json()
                         .await
-                        .map_err(|e| format!("Failed to get cluster resources: {}", e))?;
+                        .map_err(|e| format!("Failed to parse resources: {}", e))?;
 
-                    if resources_response.status().is_success() {
-                        #[derive(Deserialize)]
-                        struct Resource {
-                            #[serde(rename = "vmid")]
-                            vmid: Option<u64>,
-                            #[serde(rename = "node")]
-                            node: Option<String>,
-                        }
+                    for resource in resources_resp.data {
+                        if resource.vmid == Some(vmid_num)
+                            && let Some(node_name) = resource.node
+                        {
+                            // Use /interfaces to read the container's live network state.
+                            let ifaces_url = self.get_api_url(
+                                &conn,
+                                &format!("/nodes/{}/lxc/{}/interfaces", node_name, vmid_num),
+                            );
+                            let ifaces_response = self
+                                .apply_auth(&conn, client.get(&ifaces_url))
+                                .send()
+                                .await
+                                .map_err(|e| {
+                                    format!(
+                                        "Failed to query interfaces on node {}: {}",
+                                        node_name, e
+                                    )
+                                })?;
 
-                        #[derive(Deserialize)]
-                        struct ResourcesResponse {
-                            data: Vec<Resource>,
-                        }
+                            if ifaces_response.status().is_success() {
+                                // Proxmox LXC /interfaces returns {name, hwaddr, inet, inet6}
+                                // NOT the QEMU-agent format {ip-addresses, ip-address-type}.
+                                #[derive(Deserialize)]
+                                struct Iface {
+                                    name: Option<String>,
+                                    inet: Option<String>,
+                                }
 
-                        let resources_resp: ResourcesResponse = resources_response
-                            .json()
-                            .await
-                            .map_err(|e| format!("Failed to parse resources: {}", e))?;
+                                #[derive(Deserialize)]
+                                struct ApiResponse {
+                                    data: Option<Vec<Iface>>,
+                                }
 
-                        for resource in resources_resp.data {
-                            if resource.vmid == Some(vmid_num) {
-                                if let Some(node_name) = resource.node {
-                                    // Use /interfaces to read the container's live network state.
-                                    let ifaces_url = self.get_api_url(
-                                        &conn,
-                                        &format!(
-                                            "/nodes/{}/lxc/{}/interfaces",
-                                            node_name, vmid_num
-                                        ),
-                                    );
-                                    let ifaces_response = self
-                                        .apply_auth(&conn, client.get(&ifaces_url))
-                                        .send()
-                                        .await
-                                        .map_err(|e| {
-                                            format!(
-                                                "Failed to query interfaces on node {}: {}",
-                                                node_name, e
-                                            )
-                                        })?;
-
-                                    if ifaces_response.status().is_success() {
-                                        // Proxmox LXC /interfaces returns {name, hwaddr, inet, inet6}
-                                        // NOT the QEMU-agent format {ip-addresses, ip-address-type}.
-                                        #[derive(Deserialize)]
-                                        struct Iface {
-                                            name: Option<String>,
-                                            inet: Option<String>,
+                                if let Ok(api_resp) = ifaces_response.json::<ApiResponse>().await
+                                    && let Some(ifaces) = api_resp.data
+                                {
+                                    for iface in ifaces {
+                                        if iface.name.as_deref() == Some("lo") {
+                                            continue;
                                         }
-
-                                        #[derive(Deserialize)]
-                                        struct ApiResponse {
-                                            data: Option<Vec<Iface>>,
-                                        }
-
-                                        if let Ok(api_resp) =
-                                            ifaces_response.json::<ApiResponse>().await
-                                        {
-                                            if let Some(ifaces) = api_resp.data {
-                                                for iface in ifaces {
-                                                    if iface.name.as_deref() == Some("lo") {
-                                                        continue;
-                                                    }
-                                                    if let Some(ref inet) = iface.inet {
-                                                        let ip =
-                                                            inet.split('/').next().unwrap_or(inet);
-                                                        if !ip.is_empty() && ip != "127.0.0.1" {
-                                                            return Ok(Some(ip.to_string()));
-                                                        }
-                                                    }
-                                                }
+                                        if let Some(ref inet) = iface.inet {
+                                            let ip = inet.split('/').next().unwrap_or(inet);
+                                            if !ip.is_empty() && ip != "127.0.0.1" {
+                                                return Ok(Some(ip.to_string()));
                                             }
                                         }
                                     }
-
-                                    // Note: /status/current only returns the config net0 string
-                                    // (e.g., "ip=dhcp"), never the runtime-assigned DHCP address.
-                                    // /interfaces is the only correct source for DHCP IPs.
                                 }
                             }
+
+                            // Note: /status/current only returns the config net0 string
+                            // (e.g., "ip=dhcp"), never the runtime-assigned DHCP address.
+                            // /interfaces is the only correct source for DHCP IPs.
                         }
                     }
-
-                    Ok(None)
-                });
-
-                if let Ok(Some(ip)) = result {
-                    return Ok(Some(ip));
                 }
+
+                Ok(None)
+            });
+
+            if let Ok(Some(ip)) = result {
+                return Ok(Some(ip));
             }
         }
 
@@ -1647,11 +1628,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
         inventory: &Arc<RwLock<Inventory>>,
     ) -> Result<(), String> {
         let conn = self.get_cluster_connection(config, inventory)?;
-        let hostname = config
-            .hostname
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or(inventory_name);
+        let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
 
         // Find by VMID first, then hostname
         let vmid = if let Some(ref vmid_str) = config.vmid {

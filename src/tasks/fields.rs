@@ -49,6 +49,6 @@ impl Field {
         result.push(Field::Owner);
         result.push(Field::Group);
         result.push(Field::Mode);
-        return result;
+        result
     }
 }

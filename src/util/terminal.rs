@@ -19,21 +19,21 @@ pub fn markdown_print(markdown: &String) {
 }
 
 pub fn banner(msg: &String) {
-    let markdown = String::from(format!(
+    let markdown = format!(
         "|:-|\n\
                                         |{}|\n\
                                         |-",
         msg
-    ));
+    );
     markdown_print(&markdown);
 }
 
 pub fn two_column_table(header_a: &String, header_b: &String, elements: &Vec<(String, String)>) {
     let mut buffer = String::from("|:-|:-\n");
-    buffer.push_str(&String::from(format!("|{}|{}\n", header_a, header_b)));
+    buffer.push_str(&format!("|{}|{}\n", header_a, header_b));
     for (a, b) in elements.iter() {
         buffer.push_str(&String::from("|-|-\n"));
-        buffer.push_str(&String::from(format!("|{}|{}\n", a, b)));
+        buffer.push_str(&format!("|{}|{}\n", a, b));
     }
     buffer.push_str(&String::from("|-|-\n"));
     markdown_print(&buffer);
@@ -41,11 +41,11 @@ pub fn two_column_table(header_a: &String, header_b: &String, elements: &Vec<(St
 
 pub fn captioned_display(caption: &String, body: &String) {
     banner(caption);
-    println!("");
+    println!();
     for line in body.lines() {
         println!("    {}", line);
     }
-    println!("");
+    println!();
 }
 
 #[cfg(test)]

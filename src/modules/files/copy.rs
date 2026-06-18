@@ -62,7 +62,7 @@ impl IsTask for CopyTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let src_str = handle
             .template
-            .string(&request, tm, &String::from("src"), &self.src)?;
+            .string(request, tm, &String::from("src"), &self.src)?;
         let recursive = self.recursive.unwrap_or(false);
 
         let src_path = if recursive {
@@ -89,18 +89,18 @@ impl IsTask for CopyTask {
                 .find_file_path(request, tm, &String::from("src"), &src_str)?
         };
 
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(CopyAction {
                 src: src_path,
                 dest: handle
                     .template
-                    .path(&request, tm, &String::from("dest"), &self.dest)?,
+                    .path(request, tm, &String::from("dest"), &self.dest)?,
                 recursive,
-                attributes: FileAttributesInput::template(&handle, &request, tm, &self.attributes)?,
+                attributes: FileAttributesInput::template(handle, request, tm, &self.attributes)?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -137,7 +137,7 @@ impl IsAction for CopyAction {
                 // this query leg is (at least originally) the same as the template module query except these two lines
                 // to calculate the checksum differently
                 let src_path = self.src.as_path();
-                let local_512 = handle.local.get_sha512(request, &src_path, true)?;
+                let local_512 = handle.local.get_sha512(request, src_path, true)?;
                 let remote_512 = handle.remote.get_sha512(request, &self.dest)?;
                 if !remote_512.eq(&local_512) {
                     changes.push(Field::Content);
@@ -145,12 +145,12 @@ impl IsAction for CopyAction {
                 if !changes.is_empty() {
                     return Ok(handle.response.needs_modification(request, &changes));
                 }
-                return Ok(handle.response.is_matched(request));
+                Ok(handle.response.is_matched(request))
             }
 
             TaskRequestType::Create => {
                 self.do_copy(handle, request, None)?;
-                return Ok(handle.response.is_created(request));
+                Ok(handle.response.is_created(request))
             }
 
             TaskRequestType::Modify => {
@@ -172,14 +172,12 @@ impl IsAction for CopyAction {
                         Recurse::No,
                     )?;
                 }
-                return Ok(handle
+                Ok(handle
                     .response
-                    .is_modified(request, request.changes.clone()));
+                    .is_modified(request, request.changes.clone()))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -200,7 +198,7 @@ impl CopyAction {
                 /* after save */
                 match handle.remote.process_all_common_file_attributes(
                     request,
-                    &f,
+                    f,
                     &self.attributes,
                     Recurse::No,
                 ) {
@@ -208,7 +206,7 @@ impl CopyAction {
                     Err(y) => Err(y),
                 }
             })?;
-        return Ok(());
+        Ok(())
     }
 
     /// Recursively copy a local directory tree to the remote.

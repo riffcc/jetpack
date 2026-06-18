@@ -80,16 +80,16 @@ impl IsTask for GithubReleaseTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let repo = handle
             .template
-            .string(&request, tm, &String::from("repo"), &self.repo)?;
+            .string(request, tm, &String::from("repo"), &self.repo)?;
         let channel = match &self.channel {
             Some(c) => handle
                 .template
-                .string(&request, tm, &String::from("channel"), c)?,
+                .string(request, tm, &String::from("channel"), c)?,
             None => String::from("latest"), // Default to latest (stable) releases
         };
         let version_filter = match &self.version_filter {
             Some(v) => Some(handle.template.string(
-                &request,
+                request,
                 tm,
                 &String::from("version_filter"),
                 v,
@@ -99,7 +99,7 @@ impl IsTask for GithubReleaseTask {
 
         if self.save.is_some() && self.set.is_some() {
             return Err(handle.response.is_failed(
-                &request,
+                request,
                 &String::from("Cannot use both 'save' and 'set' parameters"),
             ));
         }
@@ -108,7 +108,7 @@ impl IsTask for GithubReleaseTask {
             Some(s) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("save"), s)?,
+                    .string(request, tm, &String::from("save"), s)?,
             ),
             None => None,
         };
@@ -116,19 +116,19 @@ impl IsTask for GithubReleaseTask {
             Some(s) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("set"), s)?,
+                    .string(request, tm, &String::from("set"), s)?,
             ),
             None => None,
         };
 
         if save_var.is_none() && set_var.is_none() {
             return Err(handle.response.is_failed(
-                &request,
+                request,
                 &String::from("Must specify either 'save' or 'set' parameter to store the version"),
             ));
         }
 
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(GithubReleaseAction {
                 repo,
                 channel,
@@ -136,9 +136,9 @@ impl IsTask for GithubReleaseTask {
                 save_var,
                 set_var,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -149,9 +149,7 @@ impl IsAction for GithubReleaseAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_passive(&request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
 
             TaskRequestType::Passive => {
                 let releases = self.fetch_github_releases(handle, request)?;
@@ -159,7 +157,7 @@ impl IsAction for GithubReleaseAction {
 
                 if filtered_releases.is_empty() {
                     return Err(handle.response.is_failed(
-                        &request,
+                        request,
                         &format!("No releases found for {} matching criteria", self.repo),
                     ));
                 }
@@ -186,12 +184,10 @@ impl IsAction for GithubReleaseAction {
                     handle.host.write().unwrap().update_variables(mapping);
                 }
 
-                return Ok(handle.response.is_passive(&request));
+                Ok(handle.response.is_passive(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -210,7 +206,7 @@ impl GithubReleaseAction {
             .map_err(|e| {
                 handle
                     .response
-                    .is_failed(&request, &format!("Failed to create async runtime: {}", e))
+                    .is_failed(request, &format!("Failed to create async runtime: {}", e))
             })?;
 
         rt.block_on(async {
@@ -220,12 +216,12 @@ impl GithubReleaseAction {
                 .map_err(|e| {
                     handle
                         .response
-                        .is_failed(&request, &format!("Failed to create HTTP client: {}", e))
+                        .is_failed(request, &format!("Failed to create HTTP client: {}", e))
                 })?;
 
             let response = client.get(&url).send().await.map_err(|e| {
                 handle.response.is_failed(
-                    &request,
+                    request,
                     &format!("Failed to fetch releases from GitHub: {}", e),
                 )
             })?;
@@ -234,7 +230,7 @@ impl GithubReleaseAction {
                 let status = response.status();
                 let text = response.text().await.unwrap_or_default();
                 return Err(handle.response.is_failed(
-                    &request,
+                    request,
                     &format!("GitHub API returned status {}: {}", status, text),
                 ));
             }
@@ -242,7 +238,7 @@ impl GithubReleaseAction {
             let releases: Vec<GithubRelease> = response.json().await.map_err(|e| {
                 handle
                     .response
-                    .is_failed(&request, &format!("Failed to parse GitHub response: {}", e))
+                    .is_failed(request, &format!("Failed to parse GitHub response: {}", e))
             })?;
 
             Ok(releases)
@@ -299,10 +295,10 @@ impl GithubReleaseAction {
     fn matches_version_filter(&self, tag: &str, filter: &str) -> bool {
         let version_str = tag.trim_start_matches('v');
 
-        if let Ok(version) = Version::parse(version_str) {
-            if let Ok(req) = VersionReq::parse(filter) {
-                return req.matches(&version);
-            }
+        if let Ok(version) = Version::parse(version_str)
+            && let Ok(req) = VersionReq::parse(filter)
+        {
+            return req.matches(&version);
         }
 
         false

@@ -25,6 +25,12 @@ pub struct ConnectionCache {
     connections: HashMap<String, Arc<Mutex<dyn Connection>>>,
 }
 
+impl Default for ConnectionCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionCache {
     pub fn new() -> Self {
         Self {
@@ -44,12 +50,12 @@ impl ConnectionCache {
 
     pub fn has_connection(&self, host: &Arc<RwLock<Host>>) -> bool {
         let host2 = host.read().expect("host read");
-        return self.connections.contains_key(&host2.name.clone());
+        self.connections.contains_key(&host2.name.clone())
     }
 
     pub fn get_connection(&self, host: &Arc<RwLock<Host>>) -> Arc<Mutex<dyn Connection>> {
         let host2 = host.read().expect("host read");
-        return Arc::clone(self.connections.get(&host2.name.clone()).unwrap());
+        Arc::clone(self.connections.get(&host2.name.clone()).unwrap())
     }
 
     pub fn clear(&mut self) {

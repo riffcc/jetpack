@@ -152,10 +152,10 @@ impl OutputHandler for TerminalOutputHandler {
 
         println!("{} => {}", status, host.name);
 
-        if self.verbosity > 0 || response.status == TaskStatus::Failed {
-            if let Some(msg) = &response.msg {
-                println!("  {}", msg);
-            }
+        if (self.verbosity > 0 || response.status == TaskStatus::Failed)
+            && let Some(msg) = &response.msg
+        {
+            println!("  {}", msg);
         }
     }
 

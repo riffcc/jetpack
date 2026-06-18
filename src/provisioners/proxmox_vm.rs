@@ -42,6 +42,12 @@ struct ClusterConnection {
     node: String,
 }
 
+impl Default for ProxmoxVmProvisioner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProxmoxVmProvisioner {
     pub fn new() -> Self {
         Self
@@ -366,11 +372,11 @@ impl ProxmoxVmProvisioner {
             params.insert("name".to_string(), hostname.to_string());
 
             // Memory (default 2048)
-            let memory = config.memory.as_ref().map(|s| s.as_str()).unwrap_or("2048");
+            let memory = config.memory.as_deref().unwrap_or("2048");
             params.insert("memory".to_string(), memory.to_string());
 
             // Cores (default 4)
-            let cores = config.cores.as_ref().map(|s| s.as_str()).unwrap_or("4");
+            let cores = config.cores.as_deref().unwrap_or("4");
             params.insert("cores".to_string(), cores.to_string());
 
             // CPU type
@@ -381,11 +387,7 @@ impl ProxmoxVmProvisioner {
 
             // Disk - empty disk on specified storage
             // Format: storage:size where size is in GB (e.g., "moosefs:20")
-            let storage = config
-                .storage
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or("local-lvm");
+            let storage = config.storage.as_deref().unwrap_or("local-lvm");
             let disk_size = config
                 .rootfs_size
                 .as_ref()
@@ -465,10 +467,10 @@ impl ProxmoxVmProvisioner {
             };
 
             // If we didn't specify MAC, query the VM to get the generated one
-            if mac.is_none() {
-                if let Ok(Some(generated_mac)) = self.get_vm_mac(conn, vmid).await {
-                    return Ok(generated_mac);
-                }
+            if mac.is_none()
+                && let Ok(Some(generated_mac)) = self.get_vm_mac(conn, vmid).await
+            {
+                return Ok(generated_mac);
             }
 
             Ok(mac.unwrap_or_default())
@@ -504,14 +506,14 @@ impl ProxmoxVmProvisioner {
         let api_resp: ProxmoxApiResponse<VmConfig> =
             resp.json().await.map_err(|e| format!("Parse: {}", e))?;
 
-        if let Some(cfg) = api_resp.data {
-            if let Some(net0) = cfg.net0 {
-                // Extract MAC from net0 config
-                // Format: virtio=XX:XX:XX:XX:XX:XX,bridge=vmbr0,...
-                for part in net0.split(',') {
-                    if part.starts_with("virtio=") || part.starts_with("e1000=") {
-                        return Ok(Some(part.split('=').nth(1).unwrap_or("").to_string()));
-                    }
+        if let Some(cfg) = api_resp.data
+            && let Some(net0) = cfg.net0
+        {
+            // Extract MAC from net0 config
+            // Format: virtio=XX:XX:XX:XX:XX:XX,bridge=vmbr0,...
+            for part in net0.split(',') {
+                if part.starts_with("virtio=") || part.starts_with("e1000=") {
+                    return Ok(Some(part.split('=').nth(1).unwrap_or("").to_string()));
                 }
             }
         }
@@ -580,30 +582,30 @@ impl Provisioner for ProxmoxVmProvisioner {
         let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
 
         // Check by VMID if specified
-        if let Some(ref vmid_str) = config.vmid {
-            if let Ok(vmid) = vmid_str.parse::<u64>() {
-                let url = self.api_url(
-                    &conn,
-                    &format!("/nodes/{}/qemu/{}/status/current", conn.node, vmid),
-                );
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("Runtime: {}", e))?;
+        if let Some(ref vmid_str) = config.vmid
+            && let Ok(vmid) = vmid_str.parse::<u64>()
+        {
+            let url = self.api_url(
+                &conn,
+                &format!("/nodes/{}/qemu/{}/status/current", conn.node, vmid),
+            );
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Runtime: {}", e))?;
 
-                return rt.block_on(async {
-                    let client = reqwest::Client::builder()
-                        .danger_accept_invalid_certs(true)
-                        .build()
-                        .map_err(|e| format!("HTTP: {}", e))?;
-                    let resp = self
-                        .apply_auth(&conn, client.get(&url))
-                        .send()
-                        .await
-                        .map_err(|e| format!("API: {}", e))?;
-                    Ok(resp.status().is_success())
-                });
-            }
+            return rt.block_on(async {
+                let client = reqwest::Client::builder()
+                    .danger_accept_invalid_certs(true)
+                    .build()
+                    .map_err(|e| format!("HTTP: {}", e))?;
+                let resp = self
+                    .apply_auth(&conn, client.get(&url))
+                    .send()
+                    .await
+                    .map_err(|e| format!("API: {}", e))?;
+                Ok(resp.status().is_success())
+            });
         }
 
         Ok(self.find_vm(&conn, hostname)?.is_some())

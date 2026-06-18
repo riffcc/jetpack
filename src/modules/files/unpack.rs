@@ -63,16 +63,16 @@ impl IsTask for UnpackTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let src = handle
             .template
-            .path(&request, tm, &String::from("src"), &self.src)?;
+            .path(request, tm, &String::from("src"), &self.src)?;
         let dest = handle
             .template
-            .path(&request, tm, &String::from("dest"), &self.dest)?;
+            .path(request, tm, &String::from("dest"), &self.dest)?;
 
         let mode = match &self.mode {
             Some(m) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("mode"), m)?,
+                    .string(request, tm, &String::from("mode"), m)?,
             ),
             None => None,
         };
@@ -81,7 +81,7 @@ impl IsTask for UnpackTask {
             Some(o) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("owner"), o)?,
+                    .string(request, tm, &String::from("owner"), o)?,
             ),
             None => None,
         };
@@ -90,12 +90,12 @@ impl IsTask for UnpackTask {
             Some(g) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("group"), g)?,
+                    .string(request, tm, &String::from("group"), g)?,
             ),
             None => None,
         };
 
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(UnpackAction {
                 src,
                 dest,
@@ -103,9 +103,9 @@ impl IsTask for UnpackTask {
                 owner,
                 group,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -124,7 +124,7 @@ impl IsAction for UnpackAction {
                 // Route the check through the connection so it works for both
                 // local and remote execution.
                 let check_cmd = format!("test -f '{}'", self.src);
-                let exists = match handle.remote.run(&request, &check_cmd, CheckRc::Unchecked) {
+                let exists = match handle.remote.run(request, &check_cmd, CheckRc::Unchecked) {
                     Ok(result) => {
                         let (rc, _) = cmd_info(&result);
                         rc == 0
@@ -133,7 +133,7 @@ impl IsAction for UnpackAction {
                 };
                 if !exists {
                     return Err(handle.response.is_failed(
-                        &request,
+                        request,
                         &format!("Source archive does not exist: {}", self.src),
                     ));
                 }
@@ -148,13 +148,13 @@ impl IsAction for UnpackAction {
                 if self.group.is_some() {
                     changes.push(Field::Group);
                 }
-                return Ok(handle.response.needs_modification(&request, &changes));
+                Ok(handle.response.needs_modification(request, &changes))
             }
 
             TaskRequestType::Modify => {
                 // Create destination directory if it doesn't exist
                 handle.remote.run(
-                    &request,
+                    request,
                     &format!("mkdir -p \"{}\"", self.dest),
                     CheckRc::Checked,
                 )?;
@@ -178,7 +178,7 @@ impl IsAction for UnpackAction {
                         .ok_or_else(|| {
                             handle
                                 .response
-                                .is_failed(&request, &String::from("Invalid source filename"))
+                                .is_failed(request, &String::from("Invalid source filename"))
                         })?;
                     format!(
                         "gunzip -c \"{}\" > \"{}/{}\"",
@@ -192,7 +192,7 @@ impl IsAction for UnpackAction {
                         .ok_or_else(|| {
                             handle
                                 .response
-                                .is_failed(&request, &String::from("Invalid source filename"))
+                                .is_failed(request, &String::from("Invalid source filename"))
                         })?;
                     format!(
                         "bunzip2 -c \"{}\" > \"{}/{}\"",
@@ -206,24 +206,22 @@ impl IsAction for UnpackAction {
                         .ok_or_else(|| {
                             handle
                                 .response
-                                .is_failed(&request, &String::from("Invalid source filename"))
+                                .is_failed(request, &String::from("Invalid source filename"))
                         })?;
                     format!("unxz -c \"{}\" > \"{}/{}\"", self.src, self.dest, filename)
                 } else {
                     return Err(handle.response.is_failed(
-                        &request,
+                        request,
                         &format!("Unsupported archive format: {}", self.src),
                     ));
                 };
 
-                handle
-                    .remote
-                    .run(&request, &extract_cmd, CheckRc::Checked)?;
+                handle.remote.run(request, &extract_cmd, CheckRc::Checked)?;
 
                 // Apply permissions if specified
                 if let Some(ref mode) = self.mode {
                     handle.remote.run(
-                        &request,
+                        request,
                         &format!("chmod -R {} \"{}\"", mode, self.dest),
                         CheckRc::Checked,
                     )?;
@@ -239,7 +237,7 @@ impl IsAction for UnpackAction {
                     };
 
                     handle.remote.run(
-                        &request,
+                        request,
                         &format!("chown -R {} \"{}\"", owner_str, self.dest),
                         CheckRc::Checked,
                     )?;
@@ -255,12 +253,10 @@ impl IsAction for UnpackAction {
                 if self.group.is_some() {
                     changes.push(Field::Group);
                 }
-                return Ok(handle.response.is_modified(&request, changes));
+                Ok(handle.response.is_modified(request, changes))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

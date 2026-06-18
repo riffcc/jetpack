@@ -125,7 +125,7 @@ pub enum Task {
 impl Task {
     pub fn get_module(&self) -> String {
         // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
-        return match self {
+        match self {
             Task::Apt(x) => x.get_module(),
             Task::Assert(x) => x.get_module(),
             Task::Copy(x) => x.get_module(),
@@ -162,12 +162,12 @@ impl Task {
             Task::Wait_For_Others(x) => x.get_module(),
             Task::Yum(x) => x.get_module(),
             Task::Zypper(x) => x.get_module(),
-        };
+        }
     }
 
     pub fn get_name(&self) -> Option<String> {
         // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
-        return match self {
+        match self {
             Task::Apt(x) => x.get_name(),
             Task::Assert(x) => x.get_name(),
             Task::Copy(x) => x.get_name(),
@@ -204,12 +204,12 @@ impl Task {
             Task::Wait_For_Others(x) => x.get_name(),
             Task::Yum(x) => x.get_name(),
             Task::Zypper(x) => x.get_name(),
-        };
+        }
     }
 
     pub fn get_with(&self) -> Option<PreLogicInput> {
         // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
-        return match self {
+        match self {
             Task::Apt(x) => x.get_with(),
             Task::Assert(x) => x.get_with(),
             Task::Copy(x) => x.get_with(),
@@ -246,7 +246,7 @@ impl Task {
             Task::Wait_For_Others(x) => x.get_with(),
             Task::Yum(x) => x.get_with(),
             Task::Zypper(x) => x.get_with(),
-        };
+        }
     }
 
     pub fn evaluate(
@@ -256,7 +256,7 @@ impl Task {
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
-        return match self {
+        match self {
             Task::Apt(x) => x.evaluate(handle, request, tm),
             Task::Assert(x) => x.evaluate(handle, request, tm),
             Task::Copy(x) => x.evaluate(handle, request, tm),
@@ -293,16 +293,16 @@ impl Task {
             Task::Wait_For_Others(x) => x.evaluate(handle, request, tm),
             Task::Yum(x) => x.evaluate(handle, request, tm),
             Task::Zypper(x) => x.evaluate(handle, request, tm),
-        };
+        }
     }
 
     // ==== END MODULE REGISTRY CONFIG ====
 
     pub fn get_display_name(&self) -> String {
-        return match self.get_name() {
+        match self.get_name() {
             Some(x) => x,
             _ => self.get_module(),
-        };
+        }
     }
 
     /// Returns true if this task is a `wait_for_others` barrier task.

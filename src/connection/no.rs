@@ -33,6 +33,12 @@ use std::sync::RwLock;
 
 pub struct NoFactory {}
 
+impl Default for NoFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NoFactory {
     pub fn new() -> Self {
         Self {}
@@ -48,18 +54,24 @@ impl ConnectionFactory for NoFactory {
         // we just pretend everything is Linux for now
         host.write().unwrap().os_type = Some(HostOSType::Linux);
         let conn: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(NoConnection::new()));
-        return Ok(conn);
+        Ok(conn)
     }
     fn get_local_connection(
         &self,
         _context: &Arc<RwLock<PlaybookContext>>,
     ) -> Result<Arc<Mutex<dyn Connection>>, String> {
         let conn: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(NoConnection::new()));
-        return Ok(conn);
+        Ok(conn)
     }
 }
 
 pub struct NoConnection {}
+
+impl Default for NoConnection {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl NoConnection {
     pub fn new() -> Self {
@@ -70,12 +82,12 @@ impl NoConnection {
 impl Connection for NoConnection {
     fn whoami(&self) -> Result<String, String> {
         // we don't really bother with saying what username is connected
-        return Ok(String::from("root"));
+        Ok(String::from("root"))
     }
 
     fn connect(&mut self) -> Result<(), String> {
         // all connections are imaginary so there's nothing to do
-        return Ok(());
+        Ok(())
     }
 
     fn run_command(
@@ -86,14 +98,14 @@ impl Connection for NoConnection {
         _forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         // all commands return junk output pretending they were successful
-        return Ok(response.command_ok(
+        Ok(response.command_ok(
             request,
             &Arc::new(Some(CommandResult {
                 cmd: cmd.clone(),
                 out: String::from("__simulated__"),
                 rc: 0,
             })),
-        ));
+        ))
     }
 
     fn write_data(
@@ -104,7 +116,7 @@ impl Connection for NoConnection {
         _remote_path: &String,
     ) -> Result<(), Arc<TaskResponse>> {
         // no data is transferred, we just pretend things were successful
-        return Ok(());
+        Ok(())
     }
 
     fn copy_file(
@@ -115,7 +127,7 @@ impl Connection for NoConnection {
         _dest: &String,
     ) -> Result<(), Arc<TaskResponse>> {
         // no data is transferred, as per above
-        return Ok(());
+        Ok(())
     }
 
     fn fetch_file(
@@ -125,6 +137,6 @@ impl Connection for NoConnection {
         _remote_path: &String,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         // simulation mode — return empty bytes
-        return Ok(Vec::new());
+        Ok(Vec::new())
     }
 }

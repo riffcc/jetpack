@@ -14,9 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-// Clippy temporarily silenced (see src/lib.rs for rationale / tracking #8).
-#![allow(clippy::all)]
-
 use jetpack::cli::parser::CliParser;
 use jetpack::cli::playbooks::{
     full_check, inventory_check, playbook_check_local, playbook_check_ssh, playbook_local,
@@ -30,9 +27,8 @@ use std::process;
 use std::sync::{Arc, RwLock};
 
 fn main() {
-    match liftoff() {
-        Err(e) => quit(&e),
-        _ => {}
+    if let Err(e) = liftoff() {
+        quit(&e)
     }
 }
 
@@ -61,7 +57,7 @@ fn liftoff() -> Result<(), String> {
             if !cli_parser.inventory_set {
                 return Err(String::from("--inventory is required"));
             }
-            if inventory.read().expect("inventory read").hosts.len() == 0 {
+            if inventory.read().expect("inventory read").hosts.is_empty() {
                 return Err(String::from("no hosts found in --inventory"));
             }
         }
@@ -142,7 +138,7 @@ fn liftoff() -> Result<(), String> {
     if exit_status != 0 {
         process::exit(exit_status);
     }
-    return Ok(());
+    Ok(())
 }
 
 pub fn handle_show(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> Result<(), String> {
@@ -158,5 +154,5 @@ pub fn handle_show(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> Re
     for host_name in parser.show_hosts.iter() {
         show_inventory_host(inventory, &host_name.clone())?;
     }
-    return Ok(());
+    Ok(())
 }

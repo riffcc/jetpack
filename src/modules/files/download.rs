@@ -64,16 +64,16 @@ impl IsTask for DownloadTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let url = handle
             .template
-            .string(&request, tm, &String::from("url"), &self.url)?;
+            .string(request, tm, &String::from("url"), &self.url)?;
         let dest = handle
             .template
-            .path(&request, tm, &String::from("dest"), &self.dest)?;
+            .path(request, tm, &String::from("dest"), &self.dest)?;
 
         let mode = match &self.mode {
             Some(m) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("mode"), m)?,
+                    .string(request, tm, &String::from("mode"), m)?,
             ),
             None => None,
         };
@@ -82,7 +82,7 @@ impl IsTask for DownloadTask {
             Some(o) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("owner"), o)?,
+                    .string(request, tm, &String::from("owner"), o)?,
             ),
             None => None,
         };
@@ -91,7 +91,7 @@ impl IsTask for DownloadTask {
             Some(g) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("group"), g)?,
+                    .string(request, tm, &String::from("group"), g)?,
             ),
             None => None,
         };
@@ -100,13 +100,13 @@ impl IsTask for DownloadTask {
             Some(f) => {
                 let force_str = handle
                     .template
-                    .string(&request, tm, &String::from("force"), f)?;
+                    .string(request, tm, &String::from("force"), f)?;
                 force_str == "true" || force_str == "yes" || force_str == "1"
             }
             None => false,
         };
 
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(DownloadAction {
                 url,
                 dest,
@@ -115,9 +115,9 @@ impl IsTask for DownloadTask {
                 group,
                 force,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -131,7 +131,7 @@ impl IsAction for DownloadAction {
             TaskRequestType::Query => {
                 // Check if file exists on the target host
                 let check_cmd = format!("test -f '{}'", self.dest);
-                let exists = match handle.remote.run(&request, &check_cmd, CheckRc::Unchecked) {
+                let exists = match handle.remote.run(request, &check_cmd, CheckRc::Unchecked) {
                     Ok(result) => {
                         let (rc, _) = cmd_info(&result);
                         rc == 0
@@ -141,7 +141,7 @@ impl IsAction for DownloadAction {
 
                 if exists && !self.force {
                     // File already exists and force is not set
-                    return Ok(handle.response.is_matched(&request));
+                    Ok(handle.response.is_matched(request))
                 } else {
                     // File doesn't exist or force is set
                     let mut changes = vec![Field::Content];
@@ -154,24 +154,23 @@ impl IsAction for DownloadAction {
                     if self.group.is_some() {
                         changes.push(Field::Group);
                     }
-                    return Ok(handle.response.needs_modification(&request, &changes));
+                    Ok(handle.response.needs_modification(request, &changes))
                 }
             }
 
             TaskRequestType::Modify => {
                 // Create parent directory on target if needed
-                if let Some(parent) = std::path::Path::new(&self.dest).parent() {
-                    if let Some(parent_str) = parent.to_str() {
-                        if !parent_str.is_empty() {
-                            let mkdir_cmd = format!("mkdir -p '{}'", parent_str);
-                            handle.remote.run(&request, &mkdir_cmd, CheckRc::Checked)?;
-                        }
-                    }
+                if let Some(parent) = std::path::Path::new(&self.dest).parent()
+                    && let Some(parent_str) = parent.to_str()
+                    && !parent_str.is_empty()
+                {
+                    let mkdir_cmd = format!("mkdir -p '{}'", parent_str);
+                    handle.remote.run(request, &mkdir_cmd, CheckRc::Checked)?;
                 }
 
                 // Check if curl is available (required for !download)
                 let has_curl = match handle.remote.run(
-                    &request,
+                    request,
                     &String::from("command -v curl"),
                     CheckRc::Unchecked,
                 ) {
@@ -183,7 +182,7 @@ impl IsAction for DownloadAction {
                 };
 
                 if !has_curl {
-                    return Err(handle.response.is_failed(&request,
+                    return Err(handle.response.is_failed(request,
                         &String::from("curl is required for !download but not found. Install curl first: apt install curl")));
                 }
 
@@ -191,12 +190,12 @@ impl IsAction for DownloadAction {
                 let download_cmd = format!("curl -fsSL -o '{}' '{}'", self.dest, self.url);
                 handle
                     .remote
-                    .run(&request, &download_cmd, CheckRc::Checked)?;
+                    .run(request, &download_cmd, CheckRc::Checked)?;
 
                 // Apply permissions if specified
                 if let Some(ref mode) = self.mode {
                     let chmod_cmd = format!("chmod {} '{}'", mode, self.dest);
-                    handle.remote.run(&request, &chmod_cmd, CheckRc::Checked)?;
+                    handle.remote.run(request, &chmod_cmd, CheckRc::Checked)?;
                 }
 
                 // Apply ownership if specified
@@ -208,7 +207,7 @@ impl IsAction for DownloadAction {
                         (None, None) => unreachable!(),
                     };
                     let chown_cmd = format!("chown {} '{}'", owner_str, self.dest);
-                    handle.remote.run(&request, &chown_cmd, CheckRc::Checked)?;
+                    handle.remote.run(request, &chown_cmd, CheckRc::Checked)?;
                 }
 
                 let mut changes = vec![Field::Content];
@@ -221,12 +220,10 @@ impl IsAction for DownloadAction {
                 if self.group.is_some() {
                     changes.push(Field::Group);
                 }
-                return Ok(handle.response.is_modified(&request, changes));
+                Ok(handle.response.is_modified(request, changes))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

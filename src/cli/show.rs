@@ -29,7 +29,7 @@ fn string_slice(values: &Vec<String>) -> String {
         let tmp = values[0..499].to_vec();
         return format!("{}, ...", tmp.join(", "));
     }
-    return values.join(", ");
+    values.join(", ")
 }
 
 // ==============================================================================================================
@@ -73,12 +73,12 @@ pub fn show_inventory_host(
         &String::from(""),
         &host_elements,
     );
-    println!("");
+    println!();
 
     captioned_display(&String::from("Variables"), &blended_variables);
-    println!("");
+    println!();
 
-    return Ok(());
+    Ok(())
 }
 
 // jetp show --inventory <path> # implicit --group all
@@ -97,7 +97,7 @@ pub fn show_inventory_group(
     let group = binding.read().unwrap();
 
     println!("Group: {}", group_name);
-    println!("");
+    println!();
 
     let mut descendants: Vec<String> = group.get_descendant_group_names();
     let mut children: Vec<String> = group.get_subgroup_names();
@@ -114,8 +114,8 @@ pub fn show_inventory_group(
     child_hosts.sort();
 
     let blended_variables = group.get_blended_variables_yaml()?;
-    let descendant_hosts_count = String::from(format!("{}", descendant_hosts.len()));
-    let child_hosts_count = String::from(format!("{}", child_hosts.len()));
+    let descendant_hosts_count = format!("{}", descendant_hosts.len());
+    let child_hosts_count = format!("{}", child_hosts.len());
 
     // TODO: add a method that "..."'s these strings if too long - just use for hosts
 
@@ -149,16 +149,16 @@ pub fn show_inventory_group(
         &String::from(""),
         &group_elements,
     );
-    println!("");
+    println!();
 
     two_column_table(
         &String::from("Host Report:"),
         &String::from(""),
         &host_elements,
     );
-    println!("");
+    println!();
     captioned_display(&String::from("Variables"), &blended_variables);
-    println!("");
+    println!();
 
-    return Ok(());
+    Ok(())
 }

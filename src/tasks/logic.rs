@@ -82,7 +82,7 @@ impl PreLogicInput {
             return Ok(None);
         }
         let input2 = input.as_ref().unwrap();
-        return Ok(Some(PreLogicEvaluated {
+        Ok(Some(PreLogicEvaluated {
             condition: input2.condition.clone(),
             sudo: handle.template.string_option_no_spaces(
                 request,
@@ -96,7 +96,7 @@ impl PreLogicInput {
             items: input2.items.clone(),
             tags: input2.tags.clone(),
             skip_if_exists: input2.skip_if_exists.clone(), // Don't template here - do it in FSM
-        }));
+        }))
     }
 }
 
@@ -111,7 +111,7 @@ impl PostLogicInput {
             return Ok(None);
         }
         let input2 = input.as_ref().unwrap();
-        return Ok(Some(PostLogicEvaluated {
+        Ok(Some(PostLogicEvaluated {
             notify: handle.template.string_option_trim(
                 request,
                 tm,
@@ -139,7 +139,7 @@ impl PostLogicInput {
                 &input2.retry,
                 0,
             )?,
-        }));
+        }))
     }
 }
 
@@ -150,7 +150,7 @@ pub fn template_items(
     tm: TemplateMode,
     items_input: &Option<ItemsInput>,
 ) -> Result<Vec<serde_yaml::Value>, Arc<TaskResponse>> {
-    return match items_input {
+    match items_input {
         None => Ok(empty_items_vector()),
 
         // with/items: varname
@@ -161,26 +161,22 @@ pub fn template_items(
                 .read()
                 .unwrap()
                 .get_complete_blended_variables(&handle.host, BlendTarget::NotTemplateModule);
-            match blended.contains_key(&x) {
+            match blended.contains_key(x) {
                 true => {
-                    let value: serde_yaml::Value = blended.get(&x).unwrap().clone();
+                    let value: serde_yaml::Value = blended.get(x).unwrap().clone();
                     match value {
                         serde_yaml::Value::Sequence(vs) => {
                             template_serde_sequence(handle, request, tm, vs)
                         }
-                        _ => {
-                            return Err(handle.response.is_failed(
-                                request,
-                                &format!("with/items variable did not resolve to a list"),
-                            ));
-                        }
+                        _ => Err(handle.response.is_failed(
+                            request,
+                            &"with/items variable did not resolve to a list".to_string(),
+                        )),
                     }
                 }
-                false => {
-                    return Err(handle
-                        .response
-                        .is_failed(request, &format!("variable not found for items: {}", x)));
-                }
+                false => Err(handle
+                    .response
+                    .is_failed(request, &format!("variable not found for items: {}", x))),
             }
         }
         Some(ItemsInput::ItemsList(x)) => {
@@ -195,11 +191,11 @@ pub fn template_items(
             }
             Ok(output)
         }
-    };
+    }
 }
 
 pub fn empty_items_vector() -> Vec<serde_yaml::Value> {
-    return vec![serde_yaml::Value::Bool(true)];
+    vec![serde_yaml::Value::Bool(true)]
 }
 
 pub fn template_serde_sequence(
@@ -220,7 +216,7 @@ pub fn template_serde_sequence(
             x => output.push(x.clone()),
         }
     }
-    return Ok(output);
+    Ok(output)
 }
 
 #[cfg(test)]

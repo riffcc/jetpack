@@ -76,7 +76,7 @@ impl PlaybookRunner {
             let inv = Arc::new(RwLock::new(Inventory::new()));
             if !self.config.inventory_paths.read().unwrap().is_empty() {
                 load_inventory(&inv, Arc::clone(&self.config.inventory_paths))
-                    .map_err(|e| JetpackError::Inventory(e))?;
+                    .map_err(JetpackError::Inventory)?;
             }
             inv
         };

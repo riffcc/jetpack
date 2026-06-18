@@ -44,28 +44,28 @@ impl Response {
     }
 
     pub fn get_context(&self) -> Arc<RwLock<PlaybookContext>> {
-        return Arc::clone(&self.run_state.context);
+        Arc::clone(&self.run_state.context)
     }
 
     pub fn get_visitor(&self) -> Arc<RwLock<PlaybookVisitor>> {
-        return Arc::clone(&self.run_state.visitor);
+        Arc::clone(&self.run_state.visitor)
     }
 
     pub fn is_failed(&self, _request: &Arc<TaskRequest>, msg: &String) -> Arc<TaskResponse> {
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::Failed,
             changes: Vec::new(),
             msg: Some(msg.clone()),
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn not_supported(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
         // modules should return this on any request legs they don't support... though they should also never
         // be called against those legs if the Query leg is written correctly!
-        return self.is_failed(request, &String::from("not supported"));
+        self.is_failed(request, &String::from("not supported"))
     }
 
     pub fn command_failed(
@@ -82,14 +82,14 @@ impl Response {
                 &Arc::clone(&self.host),
                 &Arc::clone(result),
             );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::Failed,
             changes: Vec::new(),
             msg: Some(String::from("command failed")),
-            command_result: Arc::clone(&result),
+            command_result: Arc::clone(result),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn command_ok(
@@ -106,14 +106,14 @@ impl Response {
                 &Arc::clone(&self.host),
                 &Arc::clone(result),
             );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsExecuted,
             changes: Vec::new(),
             msg: None,
-            command_result: Arc::clone(&result),
+            command_result: Arc::clone(result),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn is_skipped(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -122,14 +122,14 @@ impl Response {
             request.request_type == TaskRequestType::Validate,
             "is_skipped response can only be returned for a validation request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsSkipped,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn is_matched(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -141,14 +141,14 @@ impl Response {
             "is_matched response can only be returned for a query request, was {:?}",
             request.request_type
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsMatched,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn is_created(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -157,14 +157,14 @@ impl Response {
             request.request_type == TaskRequestType::Create,
             "is_executed response can only be returned for a creation request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsCreated,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     // see also command_ok for shortcuts, as used in the shell module.
@@ -174,14 +174,14 @@ impl Response {
             request.request_type == TaskRequestType::Execute,
             "is_executed response can only be returned for a creation request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsExecuted,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn is_removed(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -190,14 +190,14 @@ impl Response {
             request.request_type == TaskRequestType::Remove,
             "is_removed response can only be returned for a remove request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsRemoved,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn is_passive(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -207,14 +207,14 @@ impl Response {
                 || request.request_type == TaskRequestType::Execute,
             "is_passive response can only be returned for a passive or execute request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsPassive,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn is_modified(
@@ -227,14 +227,14 @@ impl Response {
             request.request_type == TaskRequestType::Modify,
             "is_modified response can only be returned for a modification request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::IsModified,
-            changes: changes,
+            changes,
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn needs_creation(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -243,14 +243,14 @@ impl Response {
             request.request_type == TaskRequestType::Query,
             "needs_creation response can only be returned for a query request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::NeedsCreation,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn needs_modification(
@@ -264,14 +264,14 @@ impl Response {
             "needs_modification response can only be returned for a query request"
         );
         assert!(!changes.is_empty(), "changes must not be empty");
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::NeedsModification,
             changes: changes.clone(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn needs_removal(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -280,14 +280,14 @@ impl Response {
             request.request_type == TaskRequestType::Query,
             "needs_removal response can only be returned for a query request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::NeedsRemoval,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn needs_execution(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -297,14 +297,14 @@ impl Response {
             request.request_type == TaskRequestType::Query,
             "needs_execution response can only be returned for a query request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::NeedsExecution,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 
     pub fn needs_passive(&self, request: &Arc<TaskRequest>) -> Arc<TaskResponse> {
@@ -313,13 +313,13 @@ impl Response {
             request.request_type == TaskRequestType::Query,
             "needs_passive response can only be returned for a query request"
         );
-        return Arc::new(TaskResponse {
+        Arc::new(TaskResponse {
             status: TaskStatus::NeedsPassive,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
-        });
+        })
     }
 }

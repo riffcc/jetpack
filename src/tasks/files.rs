@@ -113,7 +113,7 @@ impl FileAttributesInput {
             let templated_mode_string =
                 handle
                     .template
-                    .string(request, tm, &String::from("mode"), &mode_input)?;
+                    .string(request, tm, &String::from("mode"), mode_input)?;
 
             // Accept both 0o755 (Rust-style) and 0755 (traditional Unix octal prefix).
             // Plain digits like "755" are NOT accepted — an explicit prefix is required to
@@ -155,7 +155,7 @@ impl FileAttributesInput {
             final_mode_value = None;
         }
 
-        return Ok(Some(FileAttributesEvaluated {
+        Ok(Some(FileAttributesEvaluated {
             owner: handle.template.string_option_no_spaces(
                 request,
                 tm,
@@ -169,7 +169,7 @@ impl FileAttributesInput {
                 &input2.group,
             )?,
             mode: final_mode_value,
-        }));
+        }))
     }
 }
 

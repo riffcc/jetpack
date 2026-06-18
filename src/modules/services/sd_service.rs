@@ -65,7 +65,7 @@ impl IsTask for SystemdServiceTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(SystemdServiceAction {
                 service: handle.template.string_no_spaces(
                     request,
@@ -74,27 +74,27 @@ impl IsTask for SystemdServiceTask {
                     &self.service,
                 )?,
                 enabled: handle.template.boolean_option_default_none(
-                    &request,
+                    request,
                     tm,
                     &String::from("enabled"),
                     &self.enabled,
                 )?,
                 started: handle.template.boolean_option_default_none(
-                    &request,
+                    request,
                     tm,
                     &String::from("started"),
                     &self.started,
                 )?,
                 restart: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("restart"),
                     &self.restart,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -144,10 +144,10 @@ impl IsAction for SystemdServiceAction {
                     _ => {}
                 };
 
-                if changes.len() > 0 {
-                    return Ok(handle.response.needs_modification(request, &changes));
+                if !changes.is_empty() {
+                    Ok(handle.response.needs_modification(request, &changes))
                 } else {
-                    return Ok(handle.response.is_matched(request));
+                    Ok(handle.response.is_matched(request))
                 }
             }
 
@@ -166,14 +166,12 @@ impl IsAction for SystemdServiceAction {
                     self.do_disable(handle, request)?;
                 }
 
-                return Ok(handle
+                Ok(handle
                     .response
-                    .is_modified(request, request.changes.clone()));
+                    .is_modified(request, request.changes.clone()))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -225,10 +223,10 @@ impl SystemdServiceAction {
             ));
         }
 
-        return Ok(ServiceDetails {
+        Ok(ServiceDetails {
             enabled: is_enabled,
             started: is_active,
-        });
+        })
     }
 
     pub fn do_start(
@@ -237,7 +235,7 @@ impl SystemdServiceAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("systemctl start '{}'", self.service);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     pub fn do_stop(
@@ -246,7 +244,7 @@ impl SystemdServiceAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("systemctl stop '{}'", self.service);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     pub fn do_enable(
@@ -255,7 +253,7 @@ impl SystemdServiceAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("systemctl enable '{}'", self.service);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     pub fn do_disable(
@@ -264,7 +262,7 @@ impl SystemdServiceAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("systemctl disable '{}'", self.service);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     pub fn do_restart(
@@ -273,6 +271,6 @@ impl SystemdServiceAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("systemctl restart '{}'", self.service);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 }

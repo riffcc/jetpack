@@ -24,18 +24,13 @@ use std::fmt;
 use std::sync::{Condvar, Mutex};
 
 /// Barrier mode controlling behavior when hosts withdraw.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BarrierMode {
     /// Barrier passes with remaining hosts. Default.
+    #[default]
     Loose,
     /// Barrier fails if any host withdraws.
     Strict,
-}
-
-impl Default for BarrierMode {
-    fn default() -> Self {
-        BarrierMode::Loose
-    }
 }
 
 /// Errors that can occur when waiting on a barrier.

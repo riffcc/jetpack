@@ -53,59 +53,59 @@ pub struct SudoDetails {
 
 impl TaskRequest {
     pub fn validate() -> Arc<Self> {
-        return Arc::new(Self {
+        Arc::new(Self {
             request_type: TaskRequestType::Validate,
             changes: Vec::new(),
             sudo_details: None,
-        });
+        })
     }
 
     pub fn query(sudo_details: &SudoDetails) -> Arc<Self> {
-        return Arc::new(Self {
+        Arc::new(Self {
             request_type: TaskRequestType::Query,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
-        });
+        })
     }
 
     pub fn create(sudo_details: &SudoDetails) -> Arc<Self> {
-        return Arc::new(Self {
+        Arc::new(Self {
             request_type: TaskRequestType::Create,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
-        });
+        })
     }
 
     pub fn remove(sudo_details: &SudoDetails) -> Arc<Self> {
-        return Arc::new(Self {
+        Arc::new(Self {
             request_type: TaskRequestType::Remove,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
-        });
+        })
     }
 
     pub fn modify(sudo_details: &SudoDetails, changes: Vec<Field>) -> Arc<Self> {
-        return Arc::new(Self {
+        Arc::new(Self {
             request_type: TaskRequestType::Modify,
-            changes: changes,
+            changes,
             sudo_details: Some(sudo_details.clone()),
-        });
+        })
     }
 
     pub fn execute(sudo_details: &SudoDetails) -> Arc<Self> {
-        return Arc::new(Self {
+        Arc::new(Self {
             request_type: TaskRequestType::Execute,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
-        });
+        })
     }
 
     pub fn passive(sudo_details: &SudoDetails) -> Arc<Self> {
-        return Arc::new(Self {
+        Arc::new(Self {
             request_type: TaskRequestType::Passive,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
-        });
+        })
     }
 
     pub fn is_sudoing(&self) -> bool {
@@ -113,6 +113,6 @@ impl TaskRequest {
         if sudo_details.is_none() || sudo_details.as_ref().unwrap().user.is_none() {
             return false;
         }
-        return true;
+        true
     }
 }

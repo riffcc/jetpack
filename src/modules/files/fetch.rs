@@ -81,7 +81,7 @@ impl IsTask for FetchTask {
             ),
             None => None,
         };
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(FetchAction {
                 src: handle
                     .template
@@ -90,7 +90,7 @@ impl IsTask for FetchTask {
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-        });
+        })
     }
 }
 
@@ -139,15 +139,16 @@ impl IsAction for FetchAction {
                 if let Some(dest) = &self.dest {
                     // Ensure parent directory exists.
                     let dest_path = Path::new(dest);
-                    if let Some(parent) = dest_path.parent() {
-                        if !parent.as_os_str().is_empty() && !parent.exists() {
-                            std::fs::create_dir_all(parent).map_err(|e| {
-                                handle.response.is_failed(
-                                    request,
-                                    &format!("mkdir failed for {}: {}", parent.display(), e),
-                                )
-                            })?;
-                        }
+                    if let Some(parent) = dest_path.parent()
+                        && !parent.as_os_str().is_empty()
+                        && !parent.exists()
+                    {
+                        std::fs::create_dir_all(parent).map_err(|e| {
+                            handle.response.is_failed(
+                                request,
+                                &format!("mkdir failed for {}: {}", parent.display(), e),
+                            )
+                        })?;
                     }
                     std::fs::write(dest_path, &content).map_err(|e| {
                         handle

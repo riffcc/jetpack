@@ -97,17 +97,17 @@ pub trait PackageManagementModule {
                 }
             }
 
-            if changes.len() > 0 {
-                return Ok(handle.response.needs_modification(request, &changes));
+            if !changes.is_empty() {
+                Ok(handle.response.needs_modification(request, &changes))
             } else {
-                return Ok(handle.response.is_matched(request));
+                Ok(handle.response.is_matched(request))
             }
         } else {
             // package is not installed
-            return match self.is_remove() {
+            match self.is_remove() {
                 true => Ok(handle.response.is_matched(request)),
                 false => Ok(handle.response.needs_creation(request)),
-            };
+            }
         }
     }
 
@@ -117,32 +117,28 @@ pub trait PackageManagementModule {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return self.common_package_query(handle, request);
-            }
+            TaskRequestType::Query => self.common_package_query(handle, request),
 
             TaskRequestType::Create => {
                 self.install_package(handle, request)?;
-                return Ok(handle.response.is_created(request));
+                Ok(handle.response.is_created(request))
             }
 
             TaskRequestType::Modify => {
                 if request.changes.contains(&Field::Version) {
                     self.update_package(handle, request)?;
                 }
-                return Ok(handle
+                Ok(handle
                     .response
-                    .is_modified(request, request.changes.clone()));
+                    .is_modified(request, request.changes.clone()))
             }
 
             TaskRequestType::Remove => {
                 self.remove_package(handle, request)?;
-                return Ok(handle.response.is_removed(request));
+                Ok(handle.response.is_removed(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

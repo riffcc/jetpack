@@ -57,22 +57,22 @@ impl IsTask for FileTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(FileAction {
                 remove: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("remove"),
                     &self.remove,
                 )?,
                 path: handle
                     .template
-                    .path(&request, tm, &String::from("path"), &self.path)?,
-                attributes: FileAttributesInput::template(&handle, &request, tm, &self.attributes)?,
+                    .path(request, tm, &String::from("path"), &self.path)?,
+                attributes: FileAttributesInput::template(handle, request, tm, &self.attributes)?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -94,22 +94,22 @@ impl IsAction for FileAction {
                 )?;
                 if remote_mode.is_none() {
                     if self.remove {
-                        return Ok(handle.response.is_matched(request));
+                        Ok(handle.response.is_matched(request))
                     } else {
-                        return Ok(handle.response.needs_creation(request));
+                        Ok(handle.response.needs_creation(request))
                     }
                 } else {
                     let is_dir = handle.remote.get_is_directory(request, &self.path)?;
                     if is_dir {
-                        return Err(handle
+                        Err(handle
                             .response
-                            .is_failed(request, &format!("{} is a directory", self.path)));
+                            .is_failed(request, &format!("{} is a directory", self.path)))
                     } else if self.remove {
-                        return Ok(handle.response.needs_removal(request));
+                        Ok(handle.response.needs_removal(request))
                     } else if changes.is_empty() {
-                        return Ok(handle.response.is_matched(request));
+                        Ok(handle.response.is_matched(request))
                     } else {
-                        return Ok(handle.response.needs_modification(request, &changes));
+                        Ok(handle.response.needs_modification(request, &changes))
                     }
                 }
             }
@@ -122,7 +122,7 @@ impl IsAction for FileAction {
                     &self.attributes,
                     Recurse::No,
                 )?;
-                return Ok(handle.response.is_created(request));
+                Ok(handle.response.is_created(request))
             }
 
             TaskRequestType::Modify => {
@@ -133,20 +133,18 @@ impl IsAction for FileAction {
                     &request.changes,
                     Recurse::No,
                 )?;
-                return Ok(handle
+                Ok(handle
                     .response
-                    .is_modified(request, request.changes.clone()));
+                    .is_modified(request, request.changes.clone()))
             }
 
             TaskRequestType::Remove => {
                 handle.remote.delete_file(request, &self.path)?;
-                return Ok(handle.response.is_removed(request));
+                Ok(handle.response.is_removed(request))
             }
 
             // no passive or execute leg
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

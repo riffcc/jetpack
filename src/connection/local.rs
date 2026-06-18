@@ -54,7 +54,7 @@ impl LocalFactory {
         let mut lc = LocalConnection::new(&Arc::clone(&host));
         lc.connect().expect("connection ok");
         Self {
-            inventory: Arc::clone(&inventory),
+            inventory: Arc::clone(inventory),
             local_connection: Arc::new(Mutex::new(lc)),
         }
     }
@@ -82,14 +82,14 @@ impl ConnectionFactory for LocalFactory {
             }
         }
         let conn: Arc<Mutex<dyn Connection>> = Arc::clone(&self.local_connection);
-        return Ok(conn);
+        Ok(conn)
     }
     fn get_local_connection(
         &self,
         _context: &Arc<RwLock<PlaybookContext>>,
     ) -> Result<Arc<Mutex<dyn Connection>>, String> {
         let conn: Arc<Mutex<dyn Connection>> = Arc::clone(&self.local_connection);
-        return Ok(conn);
+        Ok(conn)
     }
 }
 
@@ -100,7 +100,7 @@ pub struct LocalConnection {
 impl LocalConnection {
     pub fn new(host: &Arc<RwLock<Host>>) -> Self {
         Self {
-            host: Arc::clone(&host),
+            host: Arc::clone(host),
         }
     }
 
@@ -118,20 +118,20 @@ impl Connection for LocalConnection {
     fn whoami(&self) -> Result<String, String> {
         // get the currently logged in user.
         let user_result = env::var("USER");
-        return match user_result {
+        match user_result {
             Ok(x) => Ok(x),
             Err(y) => Err(format!("environment variable $USER: {y}")),
-        };
+        }
     }
 
     fn connect(&mut self) -> Result<(), String> {
         // upon connection make sure the localhost detection routine runs
         let result = detect_os(&self.host);
         if result.is_ok() {
-            return Ok(());
+            Ok(())
         } else {
             let (_rc, out) = result.unwrap_err();
-            return Err(out);
+            Err(out)
         }
     }
 
@@ -150,37 +150,33 @@ impl Connection for LocalConnection {
                 Some(rc) => {
                     let mut out = convert_out(&x.stdout, &x.stderr);
                     self.trim_newlines(&mut out);
-                    return Ok(response.command_ok(
+                    Ok(response.command_ok(
                         request,
                         &Arc::new(Some(CommandResult {
                             cmd: cmd.clone(),
                             out: out.clone(),
-                            rc: rc,
+                            rc,
                         })),
-                    ));
+                    ))
                 }
-                None => {
-                    return Err(response.command_failed(
-                        request,
-                        &Arc::new(Some(CommandResult {
-                            cmd: cmd.clone(),
-                            out: String::from(""),
-                            rc: 418,
-                        })),
-                    ));
-                }
-            },
-            Err(_x) => {
-                return Err(response.command_failed(
+                None => Err(response.command_failed(
                     request,
                     &Arc::new(Some(CommandResult {
                         cmd: cmd.clone(),
                         out: String::from(""),
-                        rc: 404,
+                        rc: 418,
                     })),
-                ));
-            }
-        };
+                )),
+            },
+            Err(_x) => Err(response.command_failed(
+                request,
+                &Arc::new(Some(CommandResult {
+                    cmd: cmd.clone(),
+                    out: String::from(""),
+                    rc: 404,
+                })),
+            )),
+        }
     }
 
     fn fetch_file(
@@ -203,11 +199,11 @@ impl Connection for LocalConnection {
         // FIXME: this (temporary) implementation currently loads the file contents into memory which we do not want
         // copy the files with system calls instead.
         let remote_path2 = Path::new(remote_path);
-        let result = std::fs::copy(src, &remote_path2);
-        return match result {
+        let result = std::fs::copy(src, remote_path2);
+        match result {
             Ok(_x) => Ok(()),
-            Err(e) => return Err(response.is_failed(&request, &format!("copy failed: {:?}", e))),
-        };
+            Err(e) => Err(response.is_failed(request, &format!("copy failed: {:?}", e))),
+        }
     }
 
     fn write_data(
@@ -223,7 +219,7 @@ impl Connection for LocalConnection {
                 Ok(x) => x,
                 Err(y) => {
                     return Err(response.is_failed(
-                        &request,
+                        request,
                         &format!("failed to open: {}: {:?}", remote_path, y),
                     ));
                 }
@@ -233,17 +229,17 @@ impl Connection for LocalConnection {
                 Ok(_) => {}
                 Err(y) => {
                     return Err(response.is_failed(
-                        &request,
+                        request,
                         &format!("failed to write: {}: {:?}", remote_path, y),
                     ));
                 }
             };
         } else {
-            let mut file = match File::create(&path) {
+            let mut file = match File::create(path) {
                 Ok(x) => x,
                 Err(y) => {
                     return Err(response.is_failed(
-                        &request,
+                        request,
                         &format!("failed to create: {}: {:?}", remote_path, y),
                     ));
                 }
@@ -253,13 +249,13 @@ impl Connection for LocalConnection {
                 Ok(_) => {}
                 Err(y) => {
                     return Err(response.is_failed(
-                        &request,
+                        request,
                         &format!("failed to write: {}: {:?}", remote_path, y),
                     ));
                 }
             };
         }
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -274,9 +270,9 @@ pub fn convert_out(output: &Vec<u8>, err: &Vec<u8>) -> String {
         Ok(val) => val.to_string(),
         Err(_) => String::from("invalid UTF-8 characters in response"),
     };
-    base.push_str("\n");
+    base.push('\n');
     base.push_str(&rest);
-    return base.trim().to_string();
+    base.trim().to_string()
 }
 
 fn detect_os(host: &Arc<RwLock<Host>>) -> Result<(), (i32, String)> {
@@ -284,7 +280,7 @@ fn detect_os(host: &Arc<RwLock<Host>>) -> Result<(), (i32, String)> {
 
     let mut base = Command::new("uname");
     let command = base.arg("-a");
-    return match command.output() {
+    match command.output() {
         Ok(x) => match x.status.code() {
             Some(0) => {
                 let out = convert_out(&x.stdout, &x.stderr);
@@ -302,5 +298,5 @@ fn detect_os(host: &Arc<RwLock<Host>>) -> Result<(), (i32, String)> {
             _ => Err((418, String::from("uname -a failed without status code"))),
         },
         Err(_x) => Err((418, String::from("uname -a failed without status code"))),
-    };
+    }
 }

@@ -50,13 +50,13 @@ impl IsTask for SetTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(SetAction {
                 vars: self.vars.clone(), /* templating will happen below */
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -67,9 +67,7 @@ impl IsAction for SetAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_passive(&request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
 
             TaskRequestType::Passive => {
                 /* so far this only templates top level strings, which is probably sufficient, rather than strings found in deeper levels */
@@ -94,12 +92,10 @@ impl IsAction for SetAction {
                 }
 
                 handle.host.write().unwrap().update_variables(mapping);
-                return Ok(handle.response.is_passive(&request));
+                Ok(handle.response.is_passive(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

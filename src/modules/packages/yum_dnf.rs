@@ -59,7 +59,7 @@ impl IsTask for YumDnfTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(YumDnfAction {
                 package: handle.template.string_no_spaces(
                     request,
@@ -68,27 +68,27 @@ impl IsTask for YumDnfTask {
                     &self.package,
                 )?,
                 version: handle.template.string_option_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("version"),
                     &self.version,
                 )?,
                 update: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("update"),
                     &self.update,
                 )?,
                 remove: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("remove"),
                     &self.remove,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -98,21 +98,21 @@ impl IsAction for YumDnfAction {
         handle: &Arc<TaskHandle>,
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        return self.common_dispatch(handle, request);
+        self.common_dispatch(handle, request)
     }
 }
 
 impl PackageManagementModule for YumDnfAction {
     fn is_update(&self) -> bool {
-        return self.update;
+        self.update
     }
 
     fn is_remove(&self) -> bool {
-        return self.remove;
+        self.remove
     }
 
     fn get_version(&self) -> Option<String> {
-        return self.version.clone();
+        self.version.clone()
     }
 
     fn initial_setup(
@@ -121,7 +121,7 @@ impl PackageManagementModule for YumDnfAction {
         request: &Arc<TaskRequest>,
     ) -> Result<(), Arc<TaskResponse>> {
         self.set_package_preference(handle, request)?;
-        return Ok(());
+        Ok(())
     }
 
     fn get_local_version(
@@ -142,7 +142,7 @@ impl PackageManagementModule for YumDnfAction {
         let result = handle.remote.run(request, &cmd, CheckRc::Unchecked)?;
         let (_rc, out) = cmd_info(&result);
         let details = self.parse_local_package_details(&out.clone())?;
-        return Ok(details);
+        Ok(details)
     }
 
     fn get_remote_version(
@@ -159,7 +159,7 @@ impl PackageManagementModule for YumDnfAction {
             .run_unsafe(request, &cmd, CheckRc::Unchecked)?;
         let (_rc, out) = cmd_info(&result);
         let details = self.parse_remote_package_details(&out.clone())?;
-        return Ok(details);
+        Ok(details)
     }
 
     fn install_package(
@@ -177,7 +177,7 @@ impl PackageManagementModule for YumDnfAction {
                 self.version.as_ref().unwrap()
             ),
         };
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn update_package(
@@ -187,7 +187,7 @@ impl PackageManagementModule for YumDnfAction {
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let which = self.get_package_manager(handle);
         let cmd = format!("{} update '{}' -y", which, self.package);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn remove_package(
@@ -197,7 +197,7 @@ impl PackageManagementModule for YumDnfAction {
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let which = self.get_package_manager(handle);
         let cmd = format!("{} remove '{}' -y", which, self.package);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 }
 
@@ -274,12 +274,12 @@ impl YumDnfAction {
             }
         }
         if name.is_some() && version.is_some() {
-            return Ok(Some(PackageDetails {
+            Ok(Some(PackageDetails {
                 name: name.unwrap().clone(),
                 version: version.unwrap().clone(),
-            }));
+            }))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
@@ -296,6 +296,6 @@ impl YumDnfAction {
                 }));
             }
         }
-        return Ok(None);
+        Ok(None)
     }
 }

@@ -14,6 +14,12 @@ pub struct Inventory {
     backup_localhost: Arc<RwLock<Host>>,
 }
 
+impl Default for Inventory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Inventory {
     pub fn new() -> Self {
         Self {
@@ -24,16 +30,16 @@ impl Inventory {
     }
 
     pub fn has_group(&self, group_name: &String) -> bool {
-        return self.groups.contains_key(&group_name.clone());
+        self.groups.contains_key(&group_name.clone())
     }
 
     pub fn get_group(&self, group_name: &String) -> Arc<RwLock<Group>> {
         let arc = self.groups.get(group_name).unwrap();
-        return Arc::clone(&arc);
+        Arc::clone(arc)
     }
 
     pub fn has_host(&self, host_name: &String) -> bool {
-        return self.hosts.contains_key(host_name);
+        self.hosts.contains_key(host_name)
     }
 
     pub fn get_host(&self, host_name: &String) -> Arc<RwLock<Host>> {
@@ -43,9 +49,9 @@ impl Inventory {
 
         if self.has_host(host_name) {
             let host = self.hosts.get(host_name).unwrap();
-            return Arc::clone(&host);
+            Arc::clone(host)
         } else if host_name.eq("localhost") {
-            return Arc::clone(&self.backup_localhost);
+            Arc::clone(&self.backup_localhost)
         } else {
             panic!("internal error: code should call has_host before get_host");
         }
@@ -80,10 +86,10 @@ impl Inventory {
         host_name: &String,
         host: Arc<RwLock<Host>>,
     ) {
-        if !self.has_host(&host_name) {
+        if !self.has_host(host_name) {
             panic!("host does not exist");
         }
-        if !self.has_group(&group_name) {
+        if !self.has_group(group_name) {
             self.create_group(group_name);
         }
         let group_obj = self.get_group(group_name);
@@ -121,8 +127,8 @@ impl Inventory {
     }
 
     pub fn store_host(&mut self, group_name: &String, host_name: &String) {
-        if !(self.has_host(&host_name)) {
-            self.create_host(&host_name);
+        if !(self.has_host(host_name)) {
+            self.create_host(host_name);
         }
         let host = self.get_host(host_name);
         self.associate_host(group_name, host_name, Arc::clone(&host));
@@ -141,7 +147,7 @@ impl Inventory {
             Arc::new(RwLock::new(Group::new(&group_name.clone()))),
         );
         if !group_name.eq(&String::from("all")) {
-            self.associate_subgroup(&String::from("all"), &group_name);
+            self.associate_subgroup(&String::from("all"), group_name);
         }
     }
 
@@ -296,7 +302,7 @@ impl Inventory {
         }
 
         // Find hosts NOT on this node that depend on these services
-        for (_hostname, host) in &self.hosts {
+        for host in self.hosts.values() {
             if let Ok(h) = host.read() {
                 // Skip hosts on the same node (they'll be down anyway)
                 if h.get_runs_on().as_deref() == Some(node_name) {

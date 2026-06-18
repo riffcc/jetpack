@@ -54,13 +54,13 @@ impl IsTask for StatTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(StatAction {
                 path: handle
                     .template
-                    .path(&request, tm, &String::from("path"), &self.path)?,
+                    .path(request, tm, &String::from("path"), &self.path)?,
                 save: handle.template.string_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("save"),
                     &self.save,
@@ -68,7 +68,7 @@ impl IsTask for StatTask {
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-        });
+        })
     }
 }
 
@@ -79,19 +79,15 @@ impl IsAction for StatAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_passive(request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
 
             TaskRequestType::Passive => {
                 let stat = stat_file(handle, request, &self.path)?;
                 save_results(handle, request, &self.save, stat)?;
-                return Ok(handle.response.is_passive(request));
+                Ok(handle.response.is_passive(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -127,16 +123,16 @@ fn stat_file(
                 // we can add other properties here, such as file+directory size, including contents, SELinux attributes, etc
                 // return None for the ones that are not supported
                 let (owner, group) = ownership.unwrap();
-                return Ok(StatResult {
+                Ok(StatResult {
                     exists: true,
-                    is_dir: is_dir,
+                    is_dir,
                     mode: Some(format!("0o{}", mode)),
                     owner: Some(owner),
                     group: Some(group),
-                });
+                })
             } else {
                 // file was seemingly deleted between two command executions above, should basically never happen
-                return Ok(DOESNT_EXIST);
+                Ok(DOESNT_EXIST)
             }
         }
         // file didn't exist the first time we were looking for it

@@ -78,15 +78,11 @@ impl PlaybookVisitor {
             Err(_) => String::from("/var/log/jetp/jetp.log"),
         };
 
-        let logfile: Option<Arc<RwLock<File>>> = match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .append(true)
-            .open(logpath)
-        {
-            Ok(x) => Some(Arc::new(RwLock::new(x))),
-            Err(_) => None,
-        };
+        let logfile: Option<Arc<RwLock<File>>> =
+            match OpenOptions::new().create(true).append(true).open(logpath) {
+                Ok(x) => Some(Arc::new(RwLock::new(x))),
+                Err(_) => None,
+            };
 
         Self {
             check_mode,
@@ -105,10 +101,7 @@ impl PlaybookVisitor {
             event: event.clone(),
             play: ctx.play.clone(),
             playbook_path: ctx.playbook_path.clone(),
-            role: match &ctx.role {
-                Some(x) => Some(x.name.clone()),
-                None => None,
-            },
+            role: ctx.role.as_ref().map(|x| x.name.clone()),
             task: ctx.task.clone(),
             task_ct: None,
             cmd: None,
@@ -121,27 +114,24 @@ impl PlaybookVisitor {
     }
 
     pub fn log(&self, _context: &Arc<RwLock<PlaybookContext>>, data: LogData) {
-        match &self.logfile {
-            Some(logfile) => {
-                let record = json!({
-                    "utc": Utc::now().to_rfc3339(),
-                    "run_id": self.run_id,
-                    "event": data.event,
-                    "playbook_path": data.playbook_path,
-                    "play": data.play,
-                    "role": data.role,
-                    "task": data.task,
-                    "task_ct": data.task_ct,
-                    "host": data.host,
-                    "cmd": data.cmd,
-                    "cmd_rc": data.cmd_rc,
-                    "cmd_out": data.cmd_out,
-                    "task_status": data.task_status,
-                    "summary": data.summary
-                });
-                writeln!(logfile.write().unwrap(), "{}", &record.to_string()).unwrap();
-            }
-            None => {}
+        if let Some(logfile) = &self.logfile {
+            let record = json!({
+                "utc": Utc::now().to_rfc3339(),
+                "run_id": self.run_id,
+                "event": data.event,
+                "playbook_path": data.playbook_path,
+                "play": data.play,
+                "role": data.role,
+                "task": data.task,
+                "task_ct": data.task_ct,
+                "host": data.host,
+                "cmd": data.cmd,
+                "cmd_rc": data.cmd_rc,
+                "cmd_out": data.cmd_out,
+                "task_status": data.task_status,
+                "summary": data.summary
+            });
+            writeln!(logfile.write().unwrap(), "{}", &record.to_string()).unwrap();
         };
     }
 
@@ -263,9 +253,7 @@ impl PlaybookVisitor {
 
         // Update stats
         let mut stats = self.host_stats.write().unwrap();
-        let host_stat = stats
-            .entry(host.name.clone())
-            .or_insert_with(HostStats::default);
+        let host_stat = stats.entry(host.name.clone()).or_default();
 
         use crate::tasks::response::TaskStatus;
         match &response.status {
@@ -305,9 +293,7 @@ impl PlaybookVisitor {
 
         // Update stats
         let mut stats = self.host_stats.write().unwrap();
-        let host_stat = stats
-            .entry(host.name.clone())
-            .or_insert_with(HostStats::default);
+        let host_stat = stats.entry(host.name.clone()).or_default();
         host_stat.failed += 1;
 
         let mut entry = self.log_entry(&String::from("host/task/failed"), Arc::clone(context));
@@ -344,9 +330,7 @@ impl PlaybookVisitor {
     pub fn on_unreachable_host(&self, context: &Arc<RwLock<PlaybookContext>>, host: &Host) {
         // Update stats
         let mut stats = self.host_stats.write().unwrap();
-        let host_stat = stats
-            .entry(host.name.clone())
-            .or_insert_with(HostStats::default);
+        let host_stat = stats.entry(host.name.clone()).or_default();
         host_stat.unreachable += 1;
 
         self.output_handler

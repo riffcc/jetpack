@@ -62,7 +62,7 @@ impl IsTask for ExternalTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(ExternalAction {
                 use_module: handle.template.find_module_path(
                     request,
@@ -97,27 +97,27 @@ impl IsTask for ExternalTask {
                     }
                 },
                 save: handle.template.string_option_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("save"),
                     &self.save,
                 )?,
                 failed_when: handle.template.string_option_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("failed_when"),
                     &self.failed_when,
                 )?,
                 changed_when: handle.template.string_option_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("changed_when"),
                     &self.changed_when,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -128,9 +128,7 @@ impl IsAction for ExternalAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_execution(&request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_execution(request)),
 
             TaskRequestType::Execute => {
                 let (_tmp_path1, tmp_file1) = handle.remote.get_transfer_location(request)?;
@@ -145,7 +143,7 @@ impl IsAction for ExternalAction {
                     request,
                     self.use_module.as_path(),
                     &module_str_path.clone(),
-                    |_f| return Ok(()),
+                    |_f| Ok(()),
                 )?;
 
                 handle.remote.write_data(
@@ -154,7 +152,7 @@ impl IsAction for ExternalAction {
                     &param_str_path.clone(),
                     |_f| {
                         // not using the after save handler for this module
-                        return Ok(());
+                        Ok(())
                     },
                 )?;
 
@@ -213,7 +211,7 @@ impl IsAction for ExternalAction {
                     save_results(&handle.host, self.save.as_ref().unwrap(), map_data);
                 }
 
-                return match should_fail {
+                match should_fail {
                     true => Err(handle
                         .response
                         .command_failed(request, &Arc::clone(&task_result.command_result))),
@@ -221,12 +219,10 @@ impl IsAction for ExternalAction {
                         true => Ok(task_result),
                         false => Ok(handle.response.is_passive(request)),
                     },
-                };
+                }
             }
 
-            _ => {
-                return Err(handle.response.not_supported(&request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -260,7 +256,7 @@ fn build_results_map(
                 .is_failed(request, &format!("response should be a map: {}", out)));
         }
     }
-    return Ok(result);
+    Ok(result)
 }
 
 fn save_results(host: &Arc<RwLock<Host>>, key: &String, map_data: serde_yaml::Mapping) {
