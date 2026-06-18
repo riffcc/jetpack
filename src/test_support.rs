@@ -142,6 +142,7 @@ pub fn test_handle(connection: Arc<Mutex<dyn Connection>>) -> Arc<TaskHandle> {
         tags: None,
         allow_localhost_delegation: false,
         is_pull_mode: false,
+        syntax_mode: false,
         play_groups: None,
         output_handler: None,
         async_mode: false,

@@ -21,6 +21,7 @@ use crate::connection::local::LocalFactory;
 use crate::connection::no::NoFactory;
 use crate::connection::ssh::SshFactory;
 use crate::inventory::inventory::Inventory;
+use crate::inventory::loading::load_inventory;
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::traversal::{RunState, playbook_traversal};
 use crate::playbooks::visitor::{CheckMode, PlaybookVisitor};
@@ -54,6 +55,83 @@ pub fn playbook_check_local(inventory: &Arc<RwLock<Inventory>>, parser: &CliPars
 
 pub fn playbook_simulate(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
     return playbook(inventory, parser, CheckMode::No, ConnectionMode::Simulate);
+}
+
+pub fn playbook_syntax_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
+    // Statically validate playbooks/roles/tasks/templates without resolving
+    // groups, targeting hosts, provisioning, or executing. See syntax_mode in
+    // traversal.rs. Structural errors propagate as Err from playbook_traversal
+    // and surface as a non-zero exit here.
+    let run_state = Arc::new(RunState {
+        inventory: Arc::clone(inventory),
+        playbook_paths: Arc::clone(&parser.playbook_paths),
+        role_paths: Arc::clone(&parser.role_paths),
+        module_paths: Arc::clone(&parser.module_paths),
+        limit_hosts: parser.limit_hosts.clone(),
+        limit_groups: parser.limit_groups.clone(),
+        batch_size: parser.batch_size.clone(),
+        context: Arc::new(RwLock::new(PlaybookContext::new(parser))),
+        visitor: Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No))),
+        connection_factory: Arc::new(RwLock::new(NoFactory::new())),
+        tags: parser.tags.clone(),
+        allow_localhost_delegation: parser.allow_localhost_delegation,
+        is_pull_mode: false,
+        syntax_mode: true,
+        play_groups: parser.play_groups.clone(),
+        output_handler: None,
+        async_mode: parser.async_mode,
+        playbook_contents: Vec::new(),
+        processed_role_tasks: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        processed_role_handlers: Arc::new(RwLock::new(std::collections::HashSet::new())),
+        role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+        fetched_files: Arc::new(Mutex::new(HashMap::new())),
+    });
+    return match playbook_traversal(&run_state) {
+        Ok(_) => 0,
+        Err(s) => {
+            println!("{}", s);
+            1
+        }
+    };
+}
+
+pub fn inventory_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
+    // Validate inventory trees (groups/, group_vars/, host_vars/) by loading them
+    // through the same loader real runs use. load_inventory already reports
+    // precise YAML errors via show_yaml_error_in_context.
+    if !parser.inventory_set {
+        println!("inventory-check requires --inventory");
+        return 1;
+    }
+    return match load_inventory(inventory, Arc::clone(&parser.inventory_paths)) {
+        Ok(_) => {
+            let count = inventory.read().expect("inventory read").hosts.len();
+            println!("inventory OK ({} hosts)", count);
+            0
+        }
+        Err(s) => {
+            println!("{}", s);
+            1
+        }
+    };
+}
+
+pub fn full_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
+    // Run syntax-check across all --playbook targets, then inventory-check across
+    // all --inventory targets. Returns non-zero if either phase fails. Inventory
+    // is optional (skipped with a notice when --inventory is absent).
+    let syntax_rc = playbook_syntax_check(inventory, parser);
+    let inventory_rc = if parser.inventory_set {
+        inventory_check(inventory, parser)
+    } else {
+        println!("full-check: no --inventory provided, skipping inventory check");
+        0
+    };
+    return if syntax_rc != 0 || inventory_rc != 0 {
+        1
+    } else {
+        0
+    };
 }
 
 pub fn playbook_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
@@ -109,6 +187,7 @@ fn playbook(
         tags: parser.tags.clone(),
         allow_localhost_delegation: parser.allow_localhost_delegation,
         is_pull_mode: false,
+        syntax_mode: false,
         play_groups: parser.play_groups.clone(),
         output_handler: None,
         async_mode: parser.async_mode,
@@ -194,6 +273,7 @@ fn playbook_with_pull(
         tags: parser.tags.clone(),
         allow_localhost_delegation: parser.allow_localhost_delegation,
         is_pull_mode: true,
+        syntax_mode: false,
         play_groups: parser.play_groups.clone(),
         output_handler: None,
         async_mode: parser.async_mode,

@@ -38,6 +38,7 @@ fn create_test_response() -> Response {
         tags: None,
         allow_localhost_delegation: false,
         is_pull_mode: false,
+        syntax_mode: false,
         play_groups: None,
         processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
         processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),

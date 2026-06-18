@@ -19,8 +19,8 @@
 
 use jetpack::cli::parser::CliParser;
 use jetpack::cli::playbooks::{
-    playbook_check_local, playbook_check_ssh, playbook_local, playbook_pull, playbook_simulate,
-    playbook_ssh,
+    full_check, inventory_check, playbook_check_local, playbook_check_ssh, playbook_local,
+    playbook_pull, playbook_simulate, playbook_ssh, playbook_syntax_check,
 };
 use jetpack::cli::show::{show_inventory_group, show_inventory_host};
 use jetpack::inventory::inventory::Inventory;
@@ -78,6 +78,13 @@ fn liftoff() -> Result<(), String> {
                 .expect("inventory write")
                 .store_host(&String::from("all"), &String::from("localhost"));
         }
+        jetpack::cli::parser::CLI_MODE_SYNTAX
+        | jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK
+        | jetpack::cli::parser::CLI_MODE_FULL_CHECK => {
+            // validation modes load inventory on demand inside the check
+            // functions; do not seed localhost so inventory-check inspects the
+            // on-disk tree exactly as declared.
+        }
         _ => {
             inventory
                 .write()
@@ -87,7 +94,7 @@ fn liftoff() -> Result<(), String> {
     };
 
     match cli_parser.mode {
-        jetpack::cli::parser::CLI_MODE_SHOW => {}
+        jetpack::cli::parser::CLI_MODE_SHOW | jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK => {}
         jetpack::cli::parser::CLI_MODE_PULL => {
             if !cli_parser.playbook_set && cli_parser.pull_url.is_none() {
                 return Err(String::from(
@@ -123,6 +130,9 @@ fn liftoff() -> Result<(), String> {
         jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => playbook_check_local(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_SIMULATE => playbook_simulate(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_PULL => playbook_pull(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_SYNTAX => playbook_syntax_check(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK => inventory_check(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_FULL_CHECK => full_check(&inventory, &cli_parser),
 
         _ => {
             println!("invalid CLI mode");

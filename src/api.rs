@@ -168,6 +168,7 @@ impl PlaybookRunner {
             tags: self.config.tags.clone(),
             allow_localhost_delegation: self.config.allow_localhost_delegation,
             is_pull_mode: false,
+            syntax_mode: false,
             play_groups: None,
             output_handler: Some(self.output_handler.clone()),
             async_mode: self.config.async_mode,
