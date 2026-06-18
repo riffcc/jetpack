@@ -209,7 +209,7 @@ echo "WORKLOAD_ID=$WORKLOAD_ID"
 
         for line in output.lines() {
             if let Some(value) = line.strip_prefix("VIRT_TYPE=") {
-                virt_type = VirtualizationType::from_str(value.trim());
+                virt_type = VirtualizationType::parse(value.trim());
             } else if let Some(value) = line.strip_prefix("WORKLOAD_ID=") {
                 let val = value.trim();
                 if !val.is_empty() {

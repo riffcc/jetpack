@@ -231,23 +231,22 @@ impl GroupAction {
             }),
             0 => {
                 let items: Vec<&str> = out.split(":").collect();
-                let users: HashSet<String>;
-                // getent group from pkg shadow on alpine leaves the third colon off
-                // if no users are asigned to the group. F.e:
-                // A group with users assigned on any linux including alpine
-                //     users:x:100:alice,bob
-                // A group with no users assigned on any linux
-                //     users:x:100:
-                // versus alpine
-                //     users:x:100
-                // Thus the length of  a Vec after split is always 4 on any linux exept alpine
-                // where it is 3 if no users assigned. So we need to handle that here:
-                if items.len() == 4 {
+                let users: HashSet<String> = if items.len() == 4 {
+                    // getent group from pkg shadow on alpine leaves the third colon off
+                    // if no users are asigned to the group. F.e:
+                    // A group with users assigned on any linux including alpine
+                    //     users:x:100:alice,bob
+                    // A group with no users assigned on any linux
+                    //     users:x:100:
+                    // versus alpine
+                    //     users:x:100
+                    // Thus the length of  a Vec after split is always 4 on any linux exept alpine
+                    // where it is 3 if no users assigned. So we need to handle that here:
                     let str_vec: Vec<&str> = items[3].split(",").collect();
-                    users = str_vec.iter().map(|&s| s.to_string()).collect();
+                    str_vec.iter().map(|&s| s.to_string()).collect()
                 } else {
-                    users = HashSet::new();
-                }
+                    HashSet::new()
+                };
                 Ok(GroupDetails {
                     exists: true,
                     gid: Some(items[2].parse().unwrap()),
@@ -271,8 +270,8 @@ impl GroupAction {
 
     fn create_group_command(&self) -> String {
         let mut cmd = String::from("groupadd");
-        if self.gid.is_some() {
-            cmd.push_str(&format!(" -g '{}'", self.gid.as_ref().unwrap()));
+        if let Some(gid) = &self.gid {
+            cmd.push_str(&format!(" -g '{}'", gid));
         }
         if self.system && self.gid.is_none() {
             cmd.push_str(" -r");
@@ -282,8 +281,8 @@ impl GroupAction {
     }
 
     fn create_group_users_command(&self) -> Option<String> {
-        if self.users.is_some() {
-            let final_users: Vec<String> = self.users.as_ref().unwrap().iter().cloned().collect();
+        if let Some(users) = &self.users {
+            let final_users: Vec<String> = users.iter().cloned().collect();
             Some(format!(
                 "gpasswd -M '{}' '{}'",
                 final_users.join(","),
@@ -294,11 +293,11 @@ impl GroupAction {
         }
     }
 
-    fn modify_group_command(&self, _actual: &GroupDetails, changes: &Vec<Field>) -> Option<String> {
+    fn modify_group_command(&self, _actual: &GroupDetails, changes: &[Field]) -> Option<String> {
         if changes.contains(&Field::Gid) {
             let mut cmd = String::from("groupmod");
-            if self.gid.is_some() && changes.contains(&Field::Gid) {
-                cmd.push_str(&format!(" -g '{}'", self.gid.as_ref().unwrap()));
+            if let Some(gid) = &self.gid {
+                cmd.push_str(&format!(" -g '{}'", gid));
             }
             cmd.push_str(&format!(" '{}'", self.group));
             return Some(cmd);
@@ -309,15 +308,17 @@ impl GroupAction {
     fn modify_group_users_command(
         &self,
         actual: &GroupDetails,
-        changes: &Vec<Field>,
+        changes: &[Field],
     ) -> Option<String> {
-        if self.users.is_some() && changes.contains(&Field::Users) {
+        if let Some(self_users) = &self.users
+            && changes.contains(&Field::Users)
+        {
             match self.append {
                 true => {
                     match &actual.users {
                         // if some users already exist, we need to add the new ones
                         Some(actual_users) => {
-                            let mut users = self.users.clone().unwrap();
+                            let mut users = self_users.clone();
                             for user in actual_users {
                                 users.insert(user.clone());
                             }
@@ -330,8 +331,7 @@ impl GroupAction {
                         }
                         // otherwise we just take the new ones
                         None => {
-                            let final_users: Vec<String> =
-                                self.users.as_ref().unwrap().iter().cloned().collect();
+                            let final_users: Vec<String> = self_users.iter().cloned().collect();
                             return Some(format!(
                                 "gpasswd -M '{}' '{}'",
                                 final_users.join(","),
@@ -342,8 +342,7 @@ impl GroupAction {
                 }
                 // just replace existing users with new users
                 false => {
-                    let final_users: Vec<String> =
-                        self.users.as_ref().unwrap().iter().cloned().collect();
+                    let final_users: Vec<String> = self_users.iter().cloned().collect();
                     return Some(format!(
                         "gpasswd -M '{}' '{}'",
                         final_users.join(","),

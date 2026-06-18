@@ -176,39 +176,32 @@ impl IsAction for ExternalAction {
 
                 let map_data = build_results_map(handle, request, rc, &out)?;
 
-                let should_fail = match self.failed_when.is_none() {
-                    true => match rc {
-                        0 => false,
-                        _ => true,
-                    },
-                    false => {
-                        let condition = self.failed_when.as_ref().unwrap();
-                        handle.template.test_condition_with_extra_data(
-                            request,
-                            TemplateMode::Strict,
-                            condition,
-                            &handle.host,
-                            map_data.clone(),
-                        )?
-                    }
+                let should_fail = if let Some(condition) = &self.failed_when {
+                    handle.template.test_condition_with_extra_data(
+                        request,
+                        TemplateMode::Strict,
+                        condition,
+                        &handle.host,
+                        map_data.clone(),
+                    )?
+                } else {
+                    rc != 0
                 };
 
-                let should_mark_changed = match self.changed_when.is_none() {
-                    true => true,
-                    false => {
-                        let condition = self.changed_when.as_ref().unwrap();
-                        handle.template.test_condition_with_extra_data(
-                            request,
-                            TemplateMode::Strict,
-                            condition,
-                            &handle.host,
-                            map_data.clone(),
-                        )?
-                    }
+                let should_mark_changed = if let Some(condition) = &self.changed_when {
+                    handle.template.test_condition_with_extra_data(
+                        request,
+                        TemplateMode::Strict,
+                        condition,
+                        &handle.host,
+                        map_data.clone(),
+                    )?
+                } else {
+                    true
                 };
 
-                if self.save.is_some() {
-                    save_results(&handle.host, self.save.as_ref().unwrap(), map_data);
+                if let Some(save) = &self.save {
+                    save_results(&handle.host, save, map_data);
                 }
 
                 match should_fail {
@@ -231,7 +224,7 @@ fn build_results_map(
     handle: &Arc<TaskHandle>,
     request: &Arc<TaskRequest>,
     rc: i32,
-    out: &String,
+    out: &str,
 ) -> Result<serde_yaml::Mapping, Arc<TaskResponse>> {
     let mut result = serde_yaml::Mapping::new();
     let data: serde_yaml::Value = match serde_yaml::from_str(out) {
@@ -259,10 +252,10 @@ fn build_results_map(
     Ok(result)
 }
 
-fn save_results(host: &Arc<RwLock<Host>>, key: &String, map_data: serde_yaml::Mapping) {
+fn save_results(host: &Arc<RwLock<Host>>, key: &str, map_data: serde_yaml::Mapping) {
     let mut result = serde_yaml::Mapping::new();
     result.insert(
-        serde_yaml::Value::String(key.clone()),
+        serde_yaml::Value::String(key.to_string()),
         serde_yaml::Value::Mapping(map_data.clone()),
     );
     host.write().unwrap().update_variables(result);

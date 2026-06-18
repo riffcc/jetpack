@@ -68,8 +68,8 @@ impl Connection for RecordingConnection {
         &self,
         _response: &Arc<Response>,
         _request: &Arc<TaskRequest>,
-        _data: &String,
-        _remote_path: &String,
+        _data: &str,
+        _remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         Ok(())
     }
@@ -79,7 +79,7 @@ impl Connection for RecordingConnection {
         _response: &Arc<Response>,
         _request: &Arc<TaskRequest>,
         _src: &Path,
-        _dest: &String,
+        _dest: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         Ok(())
     }
@@ -88,7 +88,7 @@ impl Connection for RecordingConnection {
         &self,
         _response: &Arc<Response>,
         _request: &Arc<TaskRequest>,
-        _remote_path: &String,
+        _remote_path: &str,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         Ok(Vec::new())
     }
@@ -101,15 +101,15 @@ impl Connection for RecordingConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         _forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        self.log.lock().unwrap().push(cmd.clone());
+        self.log.lock().unwrap().push(cmd.to_string());
         let rc = (self.rc_for)(cmd);
         Ok(response.command_ok(
             request,
             &Arc::new(Some(CommandResult {
-                cmd: cmd.clone(),
+                cmd: cmd.to_string(),
                 out: String::new(),
                 rc,
             })),

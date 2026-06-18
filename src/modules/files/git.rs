@@ -152,18 +152,21 @@ impl IsAction for GitAction {
                             // when a git directory has already been checked out at a given location
                             _ => {
                                 let local_version = self.get_local_version(handle, request)?;
-                                if local_version.is_none() {
-                                    changes.push(Field::Version);
-                                } else {
-                                    let remote_version =
-                                        self.get_remote_version(handle, request)?;
-                                    let local_branch = self.get_local_branch(handle, request)?;
-                                    if self.update && (!remote_version.eq(&local_version.unwrap()))
-                                    {
+                                match local_version {
+                                    None => {
                                         changes.push(Field::Version);
                                     }
-                                    if !local_branch.eq(&self.branch) {
-                                        changes.push(Field::Branch);
+                                    Some(local_version) => {
+                                        let remote_version =
+                                            self.get_remote_version(handle, request)?;
+                                        let local_branch =
+                                            self.get_local_branch(handle, request)?;
+                                        if self.update && (!remote_version.eq(&local_version)) {
+                                            changes.push(Field::Version);
+                                        }
+                                        if !local_branch.eq(&self.branch) {
+                                            changes.push(Field::Branch);
+                                        }
                                     }
                                 }
 

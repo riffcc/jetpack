@@ -141,7 +141,7 @@ impl MoveAction {
         request: &Arc<TaskRequest>,
         path: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
-        handle.remote.file_exists(request, &path.to_string())
+        handle.remote.file_exists(request, path)
     }
 
     fn check_parent_dir_exists(
@@ -155,10 +155,7 @@ impl MoveAction {
         {
             // Not root directory
             let parent_dir = &self.dest[..slash_pos];
-            if !handle
-                .remote
-                .get_is_directory(request, &parent_dir.to_string())?
-            {
+            if !handle.remote.get_is_directory(request, parent_dir)? {
                 return Err(handle.response.is_failed(
                     request,
                     &format!("Parent directory '{}' does not exist", parent_dir),

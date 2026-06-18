@@ -95,10 +95,10 @@ impl PlaybookVisitor {
         }
     }
 
-    pub fn log_entry(&self, event: &String, context: Arc<RwLock<PlaybookContext>>) -> LogData {
+    pub fn log_entry(&self, event: &str, context: Arc<RwLock<PlaybookContext>>) -> LogData {
         let ctx = context.read().unwrap();
         LogData {
-            event: event.clone(),
+            event: event.to_string(),
             play: ctx.play.clone(),
             playbook_path: ctx.playbook_path.clone(),
             role: ctx.role.as_ref().map(|x| x.name.clone()),

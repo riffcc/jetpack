@@ -30,9 +30,9 @@ pub struct Group {
 }
 
 impl Group {
-    pub fn new(name: &String) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
-            name: name.clone(),
+            name: name.to_string(),
             subgroups: HashMap::new(),
             parents: HashMap::new(),
             hosts: HashMap::new(),
@@ -40,18 +40,19 @@ impl Group {
         }
     }
 
-    pub fn add_subgroup(&mut self, name: &String, subgroup: Arc<RwLock<Group>>) {
+    pub fn add_subgroup(&mut self, name: &str, subgroup: Arc<RwLock<Group>>) {
         assert!(!name.eq(&self.name));
-        self.subgroups.insert(name.clone(), Arc::clone(&subgroup));
+        self.subgroups
+            .insert(name.to_string(), Arc::clone(&subgroup));
     }
 
-    pub fn add_host(&mut self, name: &String, host: Arc<RwLock<Host>>) {
-        self.hosts.insert(name.clone(), Arc::clone(&host));
+    pub fn add_host(&mut self, name: &str, host: Arc<RwLock<Host>>) {
+        self.hosts.insert(name.to_string(), Arc::clone(&host));
     }
 
-    pub fn add_parent(&mut self, name: &String, parent: Arc<RwLock<Group>>) {
+    pub fn add_parent(&mut self, name: &str, parent: Arc<RwLock<Group>>) {
         assert!(!name.eq(&self.name));
-        self.parents.insert(name.clone(), Arc::clone(&parent));
+        self.parents.insert(name.to_string(), Arc::clone(&parent));
     }
 
     pub fn get_ancestor_groups(&self, depth_limit: usize) -> HashMap<String, Arc<RwLock<Group>>> {

@@ -73,7 +73,7 @@ use crate::tasks::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const MODULE: &str = "instantiate";
@@ -650,8 +650,8 @@ impl InstantiateAction {
         &self,
         handle: &Arc<TaskHandle>,
         request: &Arc<TaskRequest>,
-        host_vars_dir: &PathBuf,
-        groups_dir: &PathBuf,
+        host_vars_dir: &Path,
+        groups_dir: &Path,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         // Remove host_vars files
         for hostname in &self.hostnames {

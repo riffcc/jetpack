@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-pub fn markdown_print(markdown: &String) {
+pub fn markdown_print(markdown: &str) {
     termimad::print_text(markdown);
 }
 
-pub fn banner(msg: &String) {
+pub fn banner(msg: &str) {
     let markdown = format!(
         "|:-|\n\
                                         |{}|\n\
@@ -28,7 +28,7 @@ pub fn banner(msg: &String) {
     markdown_print(&markdown);
 }
 
-pub fn two_column_table(header_a: &String, header_b: &String, elements: &Vec<(String, String)>) {
+pub fn two_column_table(header_a: &str, header_b: &str, elements: &[(String, String)]) {
     let mut buffer = String::from("|:-|:-\n");
     buffer.push_str(&format!("|{}|{}\n", header_a, header_b));
     for (a, b) in elements.iter() {
@@ -39,7 +39,7 @@ pub fn two_column_table(header_a: &String, header_b: &String, elements: &Vec<(St
     markdown_print(&buffer);
 }
 
-pub fn captioned_display(caption: &String, body: &String) {
+pub fn captioned_display(caption: &str, body: &str) {
     banner(caption);
     println!();
     for line in body.lines() {

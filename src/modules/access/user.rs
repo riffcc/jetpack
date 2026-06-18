@@ -326,17 +326,17 @@ impl UserAction {
     fn create_user_command(&self) -> String {
         let mut cmd = String::from("useradd");
 
-        if self.uid.is_some() {
-            cmd.push_str(&format!(" -u '{}'", self.uid.as_ref().unwrap()));
+        if let Some(uid) = &self.uid {
+            cmd.push_str(&format!(" -u '{}'", uid));
         }
         if self.system && self.uid.is_none() {
             cmd.push_str(" -r");
         }
-        if self.gid.is_some() {
-            cmd.push_str(&format!(" -g '{}'", self.gid.as_ref().unwrap()));
+        if let Some(gid) = &self.gid {
+            cmd.push_str(&format!(" -g '{}'", gid));
         }
-        if self.groups.is_some() {
-            let final_groups: Vec<String> = self.groups.as_ref().unwrap().iter().cloned().collect();
+        if let Some(groups) = &self.groups {
+            let final_groups: Vec<String> = groups.iter().cloned().collect();
             cmd.push_str(&format!(" -G '{}'", final_groups.join(",")));
         }
         if self.create_home {
@@ -349,11 +349,11 @@ impl UserAction {
         } else {
             cmd.push_str(" -N");
         }
-        if self.gecos.is_some() {
-            cmd.push_str(&format!(" -c '{}'", self.gecos.as_ref().unwrap()));
+        if let Some(gecos) = &self.gecos {
+            cmd.push_str(&format!(" -c '{}'", gecos));
         }
-        if self.shell.is_some() {
-            cmd.push_str(&format!(" -s '{}'", self.shell.as_ref().unwrap()));
+        if let Some(shell) = &self.shell {
+            cmd.push_str(&format!(" -s '{}'", shell));
         }
 
         cmd.push_str(&format!(" '{}'", self.user));
@@ -363,26 +363,26 @@ impl UserAction {
     fn modify_user_command(&self, actual: &UserDetails) -> String {
         let mut cmd = String::from("usermod");
 
-        if self.uid.is_some() {
-            cmd.push_str(&format!(" -u '{}'", self.uid.as_ref().unwrap()));
+        if let Some(uid) = &self.uid {
+            cmd.push_str(&format!(" -u '{}'", uid));
         }
-        if self.gid.is_some() {
-            cmd.push_str(&format!(" -g '{}'", self.gid.as_ref().unwrap()));
+        if let Some(gid) = &self.gid {
+            cmd.push_str(&format!(" -g '{}'", gid));
         }
-        if self.gecos.is_some() {
-            cmd.push_str(&format!(" -c '{}'", self.gecos.as_ref().unwrap()));
+        if let Some(gecos) = &self.gecos {
+            cmd.push_str(&format!(" -c '{}'", gecos));
         }
-        if self.shell.is_some() {
-            cmd.push_str(&format!(" -s '{}'", self.shell.as_ref().unwrap()));
+        if let Some(shell) = &self.shell {
+            cmd.push_str(&format!(" -s '{}'", shell));
         }
 
-        if self.groups.is_some() {
+        if let Some(self_groups) = &self.groups {
             match self.append {
                 true => {
                     match &actual.groups {
                         // if some groups already exist, we need to add the new ones
                         Some(actual_groups) => {
-                            let mut groups = self.groups.clone().unwrap();
+                            let mut groups = self_groups.clone();
                             for group in actual_groups {
                                 groups.insert(group.clone());
                             }
@@ -391,16 +391,14 @@ impl UserAction {
                         }
                         // otherwise we just take the new ones
                         None => {
-                            let final_groups: Vec<String> =
-                                self.groups.as_ref().unwrap().iter().cloned().collect();
+                            let final_groups: Vec<String> = self_groups.iter().cloned().collect();
                             cmd.push_str(&format!(" -G '{}'", final_groups.join(",")));
                         }
                     }
                 }
                 // just replace existing groups with new groups
                 false => {
-                    let final_groups: Vec<String> =
-                        self.groups.as_ref().unwrap().iter().cloned().collect();
+                    let final_groups: Vec<String> = self_groups.iter().cloned().collect();
                     cmd.push_str(&format!(" -G '{}'", final_groups.join(",")));
                 }
             }

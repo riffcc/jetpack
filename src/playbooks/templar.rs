@@ -61,14 +61,14 @@ impl Templar {
 
     pub fn render(
         &self,
-        template: &String,
+        template: &str,
         data: serde_yaml::Mapping,
         template_mode: TemplateMode,
     ) -> Result<String, String> {
         match template_mode {
             TemplateMode::Off => Ok(String::from("empty")),
             TemplateMode::Strict => {
-                let mut rendered = template.clone();
+                let mut rendered = template.to_string();
                 for _ in 0..8 {
                     let next = HANDLEBARS
                         .render_template(&rendered, &data)
@@ -87,7 +87,7 @@ impl Templar {
 
     pub fn test_condition(
         &self,
-        expr: &String,
+        expr: &str,
         data: serde_yaml::Mapping,
         template_mode: TemplateMode,
     ) -> Result<bool, String> {

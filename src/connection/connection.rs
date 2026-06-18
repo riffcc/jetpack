@@ -33,8 +33,8 @@ pub trait Connection: Send + Sync {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        data: &String,
-        remote_path: &String,
+        data: &str,
+        remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>>;
 
     fn copy_file(
@@ -42,14 +42,14 @@ pub trait Connection: Send + Sync {
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
         src: &Path,
-        dest: &String,
+        dest: &str,
     ) -> Result<(), Arc<TaskResponse>>;
 
     fn fetch_file(
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
+        remote_path: &str,
     ) -> Result<Vec<u8>, Arc<TaskResponse>>;
 
     fn whoami(&self) -> Result<String, String>;
@@ -58,7 +58,7 @@ pub trait Connection: Send + Sync {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>>;
 }

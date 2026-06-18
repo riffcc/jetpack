@@ -105,10 +105,10 @@ impl PlaybookVisitor {
         self.output_handler.is_some()
     }
 
-    pub fn log_entry(&self, event: &String, context: Arc<RwLock<PlaybookContext>>) -> LogData {
+    pub fn log_entry(&self, event: &str, context: Arc<RwLock<PlaybookContext>>) -> LogData {
         let ctx = context.read().unwrap();
         LogData {
-            event: event.clone(),
+            event: event.to_string(),
             play: ctx.play.clone(),
             playbook_path: ctx.playbook_path.clone(),
             role: ctx.role.as_ref().map(|x| x.name.clone()),
@@ -159,8 +159,8 @@ impl PlaybookVisitor {
         if log.cmd.is_some() {
             obj.insert(String::from("cmd"), json!(log.cmd.clone().unwrap()));
         }
-        if log.cmd_rc.is_some() {
-            obj.insert(String::from("cmd_rc"), json!(log.cmd_rc.unwrap()));
+        if let Some(cmd_rc) = log.cmd_rc {
+            obj.insert(String::from("cmd_rc"), json!(cmd_rc));
         }
         if log.cmd_out.is_some() {
             obj.insert(String::from("cmd_out"), json!(log.cmd_out.clone().unwrap()));
@@ -317,15 +317,10 @@ impl PlaybookVisitor {
         };
 
         self.banner();
-        if role.is_none() {
-            println!("> begin {}: {}", what, task);
+        if let Some(role) = role.as_ref() {
+            println!("> ({}) begin {}: {}", role.name, what, task);
         } else {
-            println!(
-                "> ({}) begin {}: {}",
-                role.as_ref().unwrap().name,
-                what,
-                task
-            );
+            println!("> begin {}: {}", what, task);
         }
 
         let log_entry = self.log_entry(&String::from("TASK_START"), Arc::clone(context));
@@ -355,26 +350,26 @@ impl PlaybookVisitor {
         match result {
             crate::provisioners::ProvisionResult::Created => {
                 println!("{color_blue}✓ {} => provisioned{color_reset}", host_name);
-                ctx.increment_attempted_for_host(&host_name.to_string());
-                ctx.increment_created_for_host(&host_name.to_string());
+                ctx.increment_attempted_for_host(host_name);
+                ctx.increment_created_for_host(host_name);
             }
             crate::provisioners::ProvisionResult::Updated => {
                 println!(
                     "{color_blue}✓ {} => provision updated{color_reset}",
                     host_name
                 );
-                ctx.increment_attempted_for_host(&host_name.to_string());
-                ctx.increment_modified_for_host(&host_name.to_string());
+                ctx.increment_attempted_for_host(host_name);
+                ctx.increment_modified_for_host(host_name);
             }
             crate::provisioners::ProvisionResult::AlreadyExists => {
                 // Already exists counts as matched
-                ctx.increment_attempted_for_host(&host_name.to_string());
-                ctx.increment_matched_for_host(&host_name.to_string());
+                ctx.increment_attempted_for_host(host_name);
+                ctx.increment_matched_for_host(host_name);
             }
             crate::provisioners::ProvisionResult::Destroyed => {
                 println!("{color_blue}✓ {} => destroyed{color_reset}", host_name);
-                ctx.increment_attempted_for_host(&host_name.to_string());
-                ctx.increment_removed_for_host(&host_name.to_string());
+                ctx.increment_attempted_for_host(host_name);
+                ctx.increment_removed_for_host(host_name);
             }
         }
     }
@@ -399,15 +394,14 @@ impl PlaybookVisitor {
         println!("… {} => notified: {}", host2.name, which_handler);
     }
 
-    pub fn on_host_delegate(&self, host: &Arc<RwLock<Host>>, delegated: &String) {
+    pub fn on_host_delegate(&self, host: &Arc<RwLock<Host>>, delegated: &str) {
         if self.is_quiet() {
             return;
         }
         let host2 = host.read().unwrap();
         println!(
             "{color_blue}✓ {} => delegating to: {}{color_reset}",
-            &host2.name,
-            delegated.clone()
+            &host2.name, delegated
         );
     }
 
@@ -679,18 +673,14 @@ impl PlaybookVisitor {
         &self,
         context: &Arc<RwLock<PlaybookContext>>,
         host: &Arc<RwLock<Host>>,
-        path: &String,
+        path: &str,
     ) {
         if self.is_quiet() {
             return;
         }
         let host2 = host.read().unwrap();
         if context.read().unwrap().verbosity > 0 {
-            println!(
-                "{color_blue}! {} => transferring to: {}",
-                host2.name,
-                &path.clone()
-            );
+            println!("{color_blue}! {} => transferring to: {}", host2.name, path);
         }
     }
 
@@ -698,14 +688,14 @@ impl PlaybookVisitor {
         &self,
         context: &Arc<RwLock<PlaybookContext>>,
         host: &Arc<RwLock<Host>>,
-        cmd: &String,
+        cmd: &str,
     ) {
         if self.is_quiet() {
             return;
         }
         let host2 = host.read().unwrap();
         if context.read().unwrap().verbosity > 0 {
-            println!("{color_blue}! {} => exec: {}", host2.name, &cmd.clone());
+            println!("{color_blue}! {} => exec: {}", host2.name, cmd);
         }
     }
 
@@ -801,7 +791,7 @@ impl PlaybookVisitor {
         );
 
         crate::util::terminal::markdown_print(&mode_table);
-        println!("{}", format!("\n{summary}"));
+        println!("\n{summary}");
         println!();
 
         let mut log_entry = self.log_entry(&String::from("SUMMARY"), Arc::clone(context));

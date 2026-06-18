@@ -216,7 +216,7 @@ impl PacmanAction {
         }
     }
 
-    pub fn parse_package_details(&self, out: &String) -> Option<PackageDetails> {
+    pub fn parse_package_details(&self, out: &str) -> Option<PackageDetails> {
         let mut name: Option<String> = None;
         let mut version: Option<String> = None;
         for line in out.lines() {
@@ -227,9 +227,9 @@ impl PacmanAction {
             let mut tokens = line.split(":");
             let key = tokens.nth(0);
             let value = tokens.nth(0);
-            if key.is_some() && value.is_some() {
-                let key2 = key.unwrap().trim();
-                let value2 = value.unwrap().trim();
+            if let (Some(k), Some(v)) = (key, value) {
+                let key2 = k.trim();
+                let value2 = v.trim();
                 if key2.eq("Name") {
                     name = Some(value2.to_string());
                 }
@@ -239,13 +239,9 @@ impl PacmanAction {
                 }
             }
         }
-        if name.is_some() && version.is_some() {
-            Some(PackageDetails {
-                name: name.unwrap().clone(),
-                version: version.unwrap().clone(),
-            })
-        } else {
-            None
+        match (name, version) {
+            (Some(name), Some(version)) => Some(PackageDetails { name, version }),
+            _ => None,
         }
     }
 }

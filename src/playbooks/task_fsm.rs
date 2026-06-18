@@ -175,6 +175,8 @@ pub fn fsm_run_task(
     Ok(())
 }
 
+// Factoring this return type would require restructuring callers across the FSM
+#[allow(clippy::type_complexity)]
 fn get_actual_connection(
     run_state: &Arc<RunState>,
     host: &Arc<RwLock<Host>>,
@@ -300,12 +302,12 @@ fn run_task_on_host(
     };
 
     // if we are delegating, tell the user
-    if delegated.is_some() {
+    if let Some(delegated) = &delegated {
         run_state
             .visitor
             .read()
             .unwrap()
-            .on_host_delegate(host, &delegated.unwrap());
+            .on_host_delegate(host, delegated);
     }
 
     // process the YAML inputs of the task and turn them into something we can  use
@@ -465,15 +467,16 @@ fn run_task_on_host(
 
     // looping over a list of no items should be impossible unless someone passed in a variable that was
     // an empty list
-    if last.is_some() {
-        last.unwrap()
-    } else {
-        Err(handle
+    match last {
+        Some(last) => last,
+        None => Err(handle
             .response
-            .is_failed(&validate, &String::from("with/items contained no entries")))
+            .is_failed(&validate, &String::from("with/items contained no entries"))),
     }
 }
 
+// FSM step bundles per-task context; grouping into a struct would cascade through callers
+#[allow(clippy::too_many_arguments)]
 // the "on this host" method body from _task
 fn run_task_on_host_inner(
     run_state: &Arc<RunState>,
@@ -518,8 +521,8 @@ fn run_task_on_host_inner(
         }
 
         // if sudo was requested on the specific task override any sudo computations above
-        if logic.sudo.is_some() {
-            sudo = Some(logic.sudo.as_ref().unwrap().clone());
+        if let Some(s) = &logic.sudo {
+            sudo = Some(s.clone());
         }
     }
 
@@ -708,25 +711,25 @@ fn run_task_on_host_inner(
 
     // if and/notify is present, notify handlers when changed actions are seen
 
-    if result.is_ok() && post_logic.is_some() {
-        let logic = post_logic.as_ref().as_ref().unwrap();
-        if are_handlers == HandlerMode::NormalTasks && result.is_ok() && logic.notify.is_some() {
-            let notify = logic.notify.as_ref().unwrap().clone();
-            let status = &result.as_ref().unwrap().status;
-            match status {
-                TaskStatus::IsCreated
-                | TaskStatus::IsModified
-                | TaskStatus::IsRemoved
-                | TaskStatus::IsExecuted => {
-                    run_state
-                        .visitor
-                        .read()
-                        .unwrap()
-                        .on_notify_handler(host, &notify.clone());
-                    host.write().unwrap().notify(play_count, &notify.clone());
-                }
-                _ => {}
+    if let Ok(result_ok) = &result
+        && let Some(logic) = post_logic.as_ref()
+        && are_handlers == HandlerMode::NormalTasks
+        && let Some(notify) = &logic.notify
+    {
+        let status = &result_ok.status;
+        match status {
+            TaskStatus::IsCreated
+            | TaskStatus::IsModified
+            | TaskStatus::IsRemoved
+            | TaskStatus::IsExecuted => {
+                run_state
+                    .visitor
+                    .read()
+                    .unwrap()
+                    .on_notify_handler(host, notify);
+                host.write().unwrap().notify(play_count, notify);
             }
+            _ => {}
         }
     }
 

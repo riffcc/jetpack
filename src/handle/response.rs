@@ -51,11 +51,11 @@ impl Response {
         Arc::clone(&self.run_state.visitor)
     }
 
-    pub fn is_failed(&self, _request: &Arc<TaskRequest>, msg: &String) -> Arc<TaskResponse> {
+    pub fn is_failed(&self, _request: &Arc<TaskRequest>, msg: &str) -> Arc<TaskResponse> {
         Arc::new(TaskResponse {
             status: TaskStatus::Failed,
             changes: Vec::new(),
-            msg: Some(msg.clone()),
+            msg: Some(msg.to_string()),
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
@@ -256,7 +256,7 @@ impl Response {
     pub fn needs_modification(
         &self,
         request: &Arc<TaskRequest>,
-        changes: &Vec<Field>,
+        changes: &[Field],
     ) -> Arc<TaskResponse> {
         // a response from a query function that requests invocation of the modify leg.
         assert!(
@@ -266,7 +266,7 @@ impl Response {
         assert!(!changes.is_empty(), "changes must not be empty");
         Arc::new(TaskResponse {
             status: TaskStatus::NeedsModification,
-            changes: changes.clone(),
+            changes: changes.to_vec(),
             msg: None,
             command_result: Arc::new(None),
             with: Arc::new(None),

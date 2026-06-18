@@ -168,10 +168,9 @@ pub fn template_items(
                         serde_yaml::Value::Sequence(vs) => {
                             template_serde_sequence(handle, request, tm, vs)
                         }
-                        _ => Err(handle.response.is_failed(
-                            request,
-                            &"with/items variable did not resolve to a list".to_string(),
-                        )),
+                        _ => Err(handle
+                            .response
+                            .is_failed(request, "with/items variable did not resolve to a list")),
                     }
                 }
                 false => Err(handle

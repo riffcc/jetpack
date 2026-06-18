@@ -70,14 +70,9 @@ pub fn show_yaml_error_in_context(yaml_error: &serde_yaml::Error, path: &Path) {
         .to_string(),
     );
 
-    let show_start: usize;
     let mut show_stop: usize = error_line + YAML_ERROR_SHOW_LINES;
 
-    if error_line < YAML_ERROR_SHOW_LINES {
-        show_start = 0;
-    } else {
-        show_start = error_line - YAML_ERROR_SHOW_LINES;
-    }
+    let show_start: usize = error_line.saturating_sub(YAML_ERROR_SHOW_LINES);
 
     if show_stop > line_count {
         show_stop = line_count;

@@ -121,30 +121,25 @@ impl FactsAction {
         Ok(())
     }
 
-    fn insert_string(
-        &self,
-        mapping: &Arc<RwLock<serde_yaml::Mapping>>,
-        key: &String,
-        value: &String,
-    ) {
+    fn insert_string(&self, mapping: &Arc<RwLock<serde_yaml::Mapping>>, key: &str, value: &str) {
         mapping.write().unwrap().insert(
-            serde_yaml::Value::String(key.clone()),
-            serde_yaml::Value::String(value.clone()),
+            serde_yaml::Value::String(key.to_string()),
+            serde_yaml::Value::String(value.to_string()),
         );
     }
 
     fn insert_json(
         &self,
         mapping: &Arc<RwLock<serde_yaml::Mapping>>,
-        key: &String,
-        value: &String,
+        key: &str,
+        value: &str,
     ) -> Result<(), String> {
         match serde_json::from_str(value) {
             Ok(json) => {
                 mapping
                     .write()
                     .unwrap()
-                    .insert(serde_yaml::Value::String(key.clone()), json);
+                    .insert(serde_yaml::Value::String(key.to_string()), json);
                 Ok(())
             }
             Err(y) => Err(format!("error processing fact JSON: {:?}", y)),
@@ -204,11 +199,11 @@ impl FactsAction {
             let mut tokens = line.split("=");
             let key = tokens.nth(0);
             let value = tokens.nth(0);
-            if key.is_some() && value.is_some() {
-                let mut k1 = key.unwrap().trim().to_string();
+            if let (Some(k), Some(v)) = (key, value) {
+                let mut k1 = k.trim().to_string();
                 k1.make_ascii_lowercase();
-                let v1 = value.unwrap().trim().to_string().replace("\"", "");
-                self.insert_string(mapping, &format!("jet_os_release_{}", k1), &v1.clone());
+                let v1 = v.trim().to_string().replace("\"", "");
+                self.insert_string(mapping, &format!("jet_os_release_{}", k1), &v1);
                 if k1.eq("id_like") {
                     if v1.find("rhel").is_some() {
                         self.insert_string(

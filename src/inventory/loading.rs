@@ -149,11 +149,13 @@ fn load_groups_directory(inventory: &Arc<RwLock<Inventory>>, path: &Path) -> Res
         let groups_file = jet_file_open(groups_file_path)?;
         let groups_file_parse_result: Result<YamlGroup, serde_yaml::Error> =
             serde_yaml::from_reader(groups_file);
-        if groups_file_parse_result.is_err() {
-            show_yaml_error_in_context(&groups_file_parse_result.unwrap_err(), groups_file_path);
-            return Err("edit the file and try again?".to_string());
-        }
-        let yaml_result = groups_file_parse_result.unwrap();
+        let yaml_result = match groups_file_parse_result {
+            Ok(y) => y,
+            Err(e) => {
+                show_yaml_error_in_context(&e, groups_file_path);
+                return Err("edit the file and try again?".to_string());
+            }
+        };
         add_group_file_contents_to_inventory(inventory, group_name.clone(), &yaml_result);
         Ok(())
     })?;
@@ -222,11 +224,13 @@ fn load_vars_directory(
         let file = jet_file_open(vars_path)?;
         let file_parse_result: Result<serde_yaml::Mapping, serde_yaml::Error> =
             serde_yaml::from_reader(file);
-        if file_parse_result.is_err() {
-            show_yaml_error_in_context(&file_parse_result.unwrap_err(), vars_path);
-            return Err("edit the file and try again?".to_string());
-        }
-        let yaml_result = file_parse_result.unwrap();
+        let yaml_result = match file_parse_result {
+            Ok(y) => y,
+            Err(e) => {
+                show_yaml_error_in_context(&e, vars_path);
+                return Err("edit the file and try again?".to_string());
+            }
+        };
 
         // serialize the vars again just to make them easier to store/output elsewhere
         // this will also remove any comments and shorten things up
@@ -323,14 +327,16 @@ fn load_dynamic_inventory(inv: &Arc<RwLock<Inventory>>, path: &Path) -> Result<(
 
     let file_parse_result: Result<HashMap<String, DynamicInventoryJsonEntry>, serde_json::Error> =
         serde_json::from_str(&output);
-    if file_parse_result.is_err() {
-        return Err(format!(
-            "error parsing dynamic inventory source: {:?}: {:?}",
-            path.display(),
-            &file_parse_result.unwrap_err()
-        ));
-    }
-    let json_result = file_parse_result.unwrap();
+    let json_result = match file_parse_result {
+        Ok(j) => j,
+        Err(e) => {
+            return Err(format!(
+                "error parsing dynamic inventory source: {:?}: {:?}",
+                path.display(),
+                e
+            ));
+        }
+    };
 
     for (possible_group_name, entry) in json_result.iter() {
         let group_name = match possible_group_name.eq("_meta") {
@@ -344,8 +350,7 @@ fn load_dynamic_inventory(inv: &Arc<RwLock<Inventory>>, path: &Path) -> Result<(
         inventory.store_group(&group_name);
         let group = inventory.get_group(&group_name);
 
-        if entry.hostvars.is_some() {
-            let hostvars = entry.hostvars.as_ref().unwrap();
+        if let Some(hostvars) = &entry.hostvars {
             for (host_name, values) in hostvars.iter() {
                 inventory.store_host(&group_name, host_name);
                 let host = inventory.get_host(host_name);
@@ -354,8 +359,7 @@ fn load_dynamic_inventory(inv: &Arc<RwLock<Inventory>>, path: &Path) -> Result<(
                 hst.update_variables(vars);
             }
         }
-        if entry.hosts.is_some() {
-            let hosts = entry.hosts.as_ref().unwrap();
+        if let Some(hosts) = &entry.hosts {
             for host_name in hosts.iter() {
                 inventory.store_host(&group_name, host_name);
             }

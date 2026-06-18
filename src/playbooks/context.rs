@@ -28,7 +28,7 @@ use guid_create::GUID;
 use std::collections::HashMap;
 use std::env;
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 // the playbook traversal state, and a little bit more than that.
@@ -142,8 +142,8 @@ impl PlaybookContext {
     // or CLI options. These values are not guaranteed to be used as magic
     // variables could still exist in inventory for particular hosts
 
-    pub fn set_ssh_user(&mut self, ssh_user: &String) {
-        self.ssh_user = ssh_user.clone();
+    pub fn set_ssh_user(&mut self, ssh_user: &str) {
+        self.ssh_user = ssh_user.to_string();
     }
 
     pub fn set_ssh_port(&mut self, ssh_port: i64) {
@@ -153,7 +153,7 @@ impl PlaybookContext {
     // used in traversal to tell the context what the current set of possible
     // hosts is.
 
-    pub fn set_targetted_hosts(&mut self, hosts: &Vec<Arc<RwLock<Host>>>) {
+    pub fn set_targetted_hosts(&mut self, hosts: &[Arc<RwLock<Host>>]) {
         self.targetted_hosts.clear();
         for host in hosts.iter() {
             let hostname = host.read().unwrap().name.clone();
@@ -181,7 +181,7 @@ impl PlaybookContext {
         self.failed_hosts.insert(hostname.clone(), Arc::clone(host));
     }
 
-    pub fn set_playbook_path(&mut self, path: &PathBuf) {
+    pub fn set_playbook_path(&mut self, path: &Path) {
         self.playbook_path = Some(path_as_string(path));
         self.playbook_directory = Some(directory_as_string(path));
     }
@@ -202,14 +202,14 @@ impl PlaybookContext {
         }
     }
 
-    pub fn set_role(&mut self, role: &Role, invocation: &RoleInvocation, role_path: &String) {
+    pub fn set_role(&mut self, role: &Role, invocation: &RoleInvocation, role_path: &str) {
         self.role = Some(role.clone());
-        self.role_path = Some(role_path.clone());
-        if role.defaults.is_some() {
-            *self.role_defaults_storage.write().unwrap() = role.defaults.as_ref().unwrap().clone();
+        self.role_path = Some(role_path.to_string());
+        if let Some(defaults) = &role.defaults {
+            *self.role_defaults_storage.write().unwrap() = defaults.clone();
         }
-        if invocation.vars.is_some() {
-            *self.role_vars_storage.write().unwrap() = invocation.vars.as_ref().unwrap().clone();
+        if let Some(vars) = &invocation.vars {
+            *self.role_vars_storage.write().unwrap() = vars.clone();
         }
     }
 
@@ -298,7 +298,7 @@ impl PlaybookContext {
 
     pub fn render_template(
         &self,
-        template: &String,
+        template: &str,
         host: &Arc<RwLock<Host>>,
         blend_target: BlendTarget,
         template_mode: TemplateMode,
@@ -315,7 +315,7 @@ impl PlaybookContext {
 
     pub fn test_condition(
         &self,
-        expr: &String,
+        expr: &str,
         host: &Arc<RwLock<Host>>,
         tm: TemplateMode,
     ) -> Result<bool, String> {
@@ -327,7 +327,7 @@ impl PlaybookContext {
 
     pub fn test_condition_with_extra_data(
         &self,
-        expr: &String,
+        expr: &str,
         host: &Arc<RwLock<Host>>,
         vars_input: serde_yaml::Mapping,
         tm: TemplateMode,
@@ -490,65 +490,83 @@ impl PlaybookContext {
         self.task_count += 1;
     }
 
-    pub fn increment_attempted_for_host(&mut self, host: &String) {
+    pub fn increment_attempted_for_host(&mut self, host: &str) {
         *self
             .attempted_count_for_host
-            .entry(host.clone())
+            .entry(host.to_string())
             .or_insert(0) += 1;
     }
 
-    pub fn increment_created_for_host(&mut self, host: &String) {
-        *self.created_count_for_host.entry(host.clone()).or_insert(0) += 1;
+    pub fn increment_created_for_host(&mut self, host: &str) {
+        *self
+            .created_count_for_host
+            .entry(host.to_string())
+            .or_insert(0) += 1;
         *self
             .adjusted_count_for_host
-            .entry(host.clone())
+            .entry(host.to_string())
             .or_insert(0) += 1;
     }
 
-    pub fn increment_removed_for_host(&mut self, host: &String) {
-        *self.removed_count_for_host.entry(host.clone()).or_insert(0) += 1;
+    pub fn increment_removed_for_host(&mut self, host: &str) {
+        *self
+            .removed_count_for_host
+            .entry(host.to_string())
+            .or_insert(0) += 1;
         *self
             .adjusted_count_for_host
-            .entry(host.clone())
+            .entry(host.to_string())
             .or_insert(0) += 1;
     }
 
-    pub fn increment_modified_for_host(&mut self, host: &String) {
+    pub fn increment_modified_for_host(&mut self, host: &str) {
         *self
             .modified_count_for_host
-            .entry(host.clone())
+            .entry(host.to_string())
             .or_insert(0) += 1;
         *self
             .adjusted_count_for_host
-            .entry(host.clone())
+            .entry(host.to_string())
             .or_insert(0) += 1;
     }
 
-    pub fn increment_executed_for_host(&mut self, host: &String) {
+    pub fn increment_executed_for_host(&mut self, host: &str) {
         *self
             .executed_count_for_host
-            .entry(host.clone())
+            .entry(host.to_string())
             .or_insert(0) += 1;
         *self
             .adjusted_count_for_host
-            .entry(host.clone())
+            .entry(host.to_string())
             .or_insert(0) += 1;
     }
 
-    pub fn increment_failed_for_host(&mut self, host: &String) {
-        *self.failed_count_for_host.entry(host.clone()).or_insert(0) += 1;
+    pub fn increment_failed_for_host(&mut self, host: &str) {
+        *self
+            .failed_count_for_host
+            .entry(host.to_string())
+            .or_insert(0) += 1;
     }
 
-    pub fn increment_passive_for_host(&mut self, host: &String) {
-        *self.passive_count_for_host.entry(host.clone()).or_insert(0) += 1;
+    pub fn increment_passive_for_host(&mut self, host: &str) {
+        *self
+            .passive_count_for_host
+            .entry(host.to_string())
+            .or_insert(0) += 1;
     }
 
-    pub fn increment_matched_for_host(&mut self, host: &String) {
-        *self.matched_count_for_host.entry(host.clone()).or_insert(0) += 1;
+    pub fn increment_matched_for_host(&mut self, host: &str) {
+        *self
+            .matched_count_for_host
+            .entry(host.to_string())
+            .or_insert(0) += 1;
     }
 
-    pub fn increment_skipped_for_host(&mut self, host: &String) {
-        *self.skipped_count_for_host.entry(host.clone()).or_insert(0) += 1;
+    pub fn increment_skipped_for_host(&mut self, host: &str) {
+        *self
+            .skipped_count_for_host
+            .entry(host.to_string())
+            .or_insert(0) += 1;
     }
 
     pub fn get_total_attempted_count(&self) -> usize {

@@ -23,7 +23,7 @@ use crate::util::yaml::blend_variables;
 use guid_create::GUID;
 use std::collections::HashMap;
 use std::env;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 pub struct PlaybookContext {
@@ -141,7 +141,7 @@ impl PlaybookContext {
     // Copy all existing methods from the original context.rs below...
     // (These would be copied from the original file)
 
-    pub fn set_playbook_path(&mut self, path: &PathBuf) {
+    pub fn set_playbook_path(&mut self, path: &Path) {
         self.playbook_path = Some(path_as_string(path));
         self.playbook_directory = Some(directory_as_string(path));
     }

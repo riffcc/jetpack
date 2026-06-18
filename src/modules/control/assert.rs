@@ -111,7 +111,7 @@ fn eval_list(
     handle: &Arc<TaskHandle>,
     request: &Arc<TaskRequest>,
     tm: TemplateMode,
-    list: &Vec<String>,
+    list: &[String],
 ) -> Result<Vec<bool>, Arc<TaskResponse>> {
     let mut results: Vec<bool> = Vec::new();
     for item in list.iter() {
@@ -130,28 +130,18 @@ impl IsAction for AssertAction {
             TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
 
             TaskRequestType::Passive => {
-                let mut fail = false;
-                if !self.r#true {
-                    fail = true;
-                } else if self.r#false {
-                    fail = true;
-                } else if self.all_true.contains(&false) {
-                    fail = true;
-                } else if self.all_false.contains(&true) {
-                    fail = true;
-                } else if !self.some_true.contains(&true) {
-                    fail = true;
-                }
+                let fail = !self.r#true
+                    || self.r#false
+                    || self.all_true.contains(&false)
+                    || self.all_false.contains(&true)
+                    || !self.some_true.contains(&true);
                 if fail {
-                    if self.msg.is_some() {
-                        return Err(handle.response.is_failed(
-                            request,
-                            &format!("assertion failed: {}", self.msg.as_ref().unwrap()),
-                        ));
-                    } else {
+                    if let Some(msg) = &self.msg {
                         return Err(handle
                             .response
-                            .is_failed(request, &"assertion failed".to_string()));
+                            .is_failed(request, &format!("assertion failed: {}", msg)));
+                    } else {
+                        return Err(handle.response.is_failed(request, "assertion failed"));
                     }
                 }
                 Ok(handle.response.is_passive(request))

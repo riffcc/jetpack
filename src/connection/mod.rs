@@ -17,6 +17,8 @@
 pub mod cache;
 pub mod chroot;
 pub mod command;
+// Renaming the `connection` module would cascade through every importer; allow the name shadowing.
+#[allow(clippy::module_inception)]
 pub mod connection;
 pub mod factory;
 pub mod local;

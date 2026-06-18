@@ -46,7 +46,7 @@ pub enum VirtualizationType {
 }
 
 impl VirtualizationType {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "lxc" | "container" => VirtualizationType::Lxc,
             "qemu" | "vm" | "kvm" => VirtualizationType::Qemu,
@@ -94,7 +94,7 @@ impl DependencyReader {
     /// Get the virtualization type
     pub fn get_virtualization(vars: &serde_yaml::Mapping) -> VirtualizationType {
         Self::get_string(vars, vars::VIRTUALIZATION)
-            .map(|s| VirtualizationType::from_str(&s))
+            .map(|s| VirtualizationType::parse(&s))
             .unwrap_or(VirtualizationType::Unknown)
     }
 
@@ -316,37 +316,31 @@ mod tests {
 
     #[test]
     fn test_virtualization_from_str() {
-        assert_eq!(VirtualizationType::from_str("lxc"), VirtualizationType::Lxc);
-        assert_eq!(VirtualizationType::from_str("LXC"), VirtualizationType::Lxc);
+        assert_eq!(VirtualizationType::parse("lxc"), VirtualizationType::Lxc);
+        assert_eq!(VirtualizationType::parse("LXC"), VirtualizationType::Lxc);
         assert_eq!(
-            VirtualizationType::from_str("container"),
+            VirtualizationType::parse("container"),
             VirtualizationType::Lxc
         );
+        assert_eq!(VirtualizationType::parse("qemu"), VirtualizationType::Qemu);
+        assert_eq!(VirtualizationType::parse("vm"), VirtualizationType::Qemu);
+        assert_eq!(VirtualizationType::parse("kvm"), VirtualizationType::Qemu);
+        assert_eq!(VirtualizationType::parse("pod"), VirtualizationType::Pod);
+        assert_eq!(VirtualizationType::parse("k8s"), VirtualizationType::Pod);
         assert_eq!(
-            VirtualizationType::from_str("qemu"),
-            VirtualizationType::Qemu
-        );
-        assert_eq!(VirtualizationType::from_str("vm"), VirtualizationType::Qemu);
-        assert_eq!(
-            VirtualizationType::from_str("kvm"),
-            VirtualizationType::Qemu
-        );
-        assert_eq!(VirtualizationType::from_str("pod"), VirtualizationType::Pod);
-        assert_eq!(VirtualizationType::from_str("k8s"), VirtualizationType::Pod);
-        assert_eq!(
-            VirtualizationType::from_str("kubernetes"),
+            VirtualizationType::parse("kubernetes"),
             VirtualizationType::Pod
         );
         assert_eq!(
-            VirtualizationType::from_str("physical"),
+            VirtualizationType::parse("physical"),
             VirtualizationType::Physical
         );
         assert_eq!(
-            VirtualizationType::from_str("baremetal"),
+            VirtualizationType::parse("baremetal"),
             VirtualizationType::Physical
         );
         assert_eq!(
-            VirtualizationType::from_str("unknown_type"),
+            VirtualizationType::parse("unknown_type"),
             VirtualizationType::Unknown
         );
     }

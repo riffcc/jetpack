@@ -70,7 +70,7 @@ impl Local {
     fn run(
         &self,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         check_rc: CheckRc,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         assert!(
@@ -100,8 +100,9 @@ impl Local {
                 .unwrap()
                 .run_command(&self.response, request, cmd, Forward::No);
 
-        if check_rc == CheckRc::Checked && result.is_ok() {
-            let ok_result = result.as_ref().unwrap();
+        if check_rc == CheckRc::Checked
+            && let Ok(ok_result) = &result
+        {
             let cmd_result = ok_result.command_result.as_ref().as_ref().unwrap();
             if cmd_result.rc != 0 {
                 return Err(self
@@ -126,7 +127,7 @@ impl Local {
     fn internal_sha512(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         let localhost = self.get_localhost();
         let os_type = localhost
@@ -167,8 +168,8 @@ impl Local {
             let task_id = ctx.get_task_count();
             let mut localhost2 = localhost.write().unwrap();
             let cached = localhost2.get_checksum_cache(task_id, &path2);
-            if cached.is_some() {
-                return Ok(cached.unwrap());
+            if let Some(cached) = cached {
+                return Ok(cached);
             }
         }
 

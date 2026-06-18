@@ -250,7 +250,7 @@ impl YumDnfAction {
 
     fn parse_local_package_details(
         &self,
-        out: &String,
+        out: &str,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         let mut name: Option<String> = None;
         let mut version: Option<String> = None;
@@ -261,9 +261,9 @@ impl YumDnfAction {
             let mut tokens = line.split(":");
             let key = tokens.nth(0);
             let value = tokens.nth(0);
-            if key.is_some() && value.is_some() {
-                let key2 = key.unwrap().trim();
-                let value2 = value.unwrap().trim();
+            if let (Some(k), Some(v)) = (key, value) {
+                let key2 = k.trim();
+                let value2 = v.trim();
                 if key2.eq("Name") {
                     name = Some(value2.to_string());
                 }
@@ -273,19 +273,15 @@ impl YumDnfAction {
                 }
             }
         }
-        if name.is_some() && version.is_some() {
-            Ok(Some(PackageDetails {
-                name: name.unwrap().clone(),
-                version: version.unwrap().clone(),
-            }))
-        } else {
-            Ok(None)
+        match (name, version) {
+            (Some(name), Some(version)) => Ok(Some(PackageDetails { name, version })),
+            _ => Ok(None),
         }
     }
 
     fn parse_remote_package_details(
         &self,
-        out: &String,
+        out: &str,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         // FYI: this command doesn't have useful return codes
         for line in out.lines() {

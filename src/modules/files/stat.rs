@@ -112,17 +112,16 @@ const DOESNT_EXIST: StatResult = StatResult {
 fn stat_file(
     handle: &Arc<TaskHandle>,
     request: &Arc<TaskRequest>,
-    path: &String,
+    path: &str,
 ) -> Result<StatResult, Arc<TaskResponse>> {
     let mode_option = handle.remote.get_mode(request, path)?;
     match mode_option {
         Some(mode) => {
             let is_dir = handle.remote.get_is_directory(request, path)?;
             let ownership = handle.remote.get_ownership(request, path)?;
-            if ownership.is_some() {
+            if let Some((owner, group)) = ownership {
                 // we can add other properties here, such as file+directory size, including contents, SELinux attributes, etc
                 // return None for the ones that are not supported
-                let (owner, group) = ownership.unwrap();
                 Ok(StatResult {
                     exists: true,
                     is_dir,
@@ -143,13 +142,13 @@ fn stat_file(
 fn save_results(
     handle: &Arc<TaskHandle>,
     _request: &Arc<TaskRequest>,
-    key: &String,
+    key: &str,
     stat: StatResult,
 ) -> Result<(), Arc<TaskResponse>> {
     let mut result = serde_yaml::Mapping::new();
     // the following statement really can't fail.
     let value = serde_yaml::to_value(stat).expect("internal error: failed to unwrap stat");
-    result.insert(serde_yaml::Value::String(key.clone()), value);
+    result.insert(serde_yaml::Value::String(key.to_string()), value);
     handle.host.write().unwrap().update_variables(result);
     Ok(())
 }
