@@ -166,9 +166,12 @@ pub struct SshConnection {
 }
 
 impl SshConnection {
+    // SshConnection bundles many independent transport options; grouping them into a
+    // builder/struct would be a larger refactor across factories and tests, so allow.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         host: Arc<RwLock<Host>>,
-        username: &String,
+        username: &str,
         port: i64,
         hostname: String,
         forward_agent: bool,
@@ -183,7 +186,7 @@ impl SshConnection {
             .expect("failed to create tokio runtime");
         Self {
             host: Arc::clone(&host),
-            username: username.clone(),
+            username: username.to_string(),
             port,
             hostname,
             connected: false,
@@ -394,7 +397,7 @@ impl Connection for SshConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let result = match forward {
@@ -404,12 +407,13 @@ impl Connection for SshConnection {
             },
             Forward::No => self.run_command_low_level(cmd),
         };
+        // (cmd passed to helpers unchanged)
 
         match result {
             Ok((rc, s)) => Ok(response.command_ok(
                 request,
                 &Arc::new(Some(CommandResult {
-                    cmd: cmd.clone(),
+                    cmd: cmd.to_string(),
                     out: s.clone(),
                     rc,
                 })),
@@ -417,7 +421,7 @@ impl Connection for SshConnection {
             Err((rc, s)) => Err(response.command_failed(
                 request,
                 &Arc::new(Some(CommandResult {
-                    cmd: cmd.clone(),
+                    cmd: cmd.to_string(),
                     out: s.clone(),
                     rc,
                 })),
@@ -429,11 +433,11 @@ impl Connection for SshConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        data: &String,
-        remote_path: &String,
+        data: &str,
+        remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         let handle = self.handle.as_ref().expect("session not established");
-        let remote_path = remote_path.clone();
+        let remote_path = remote_path.to_string();
         let data_bytes = data.as_bytes().to_vec();
 
         self.runtime.lock().unwrap().block_on(async {
@@ -466,10 +470,10 @@ impl Connection for SshConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
+        remote_path: &str,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         let handle = self.handle.as_ref().expect("session not established");
-        let remote_path = remote_path.clone();
+        let remote_path = remote_path.to_string();
 
         self.runtime.lock().unwrap().block_on(async {
             let channel = handle.channel_open_session().await.map_err(|e| {
@@ -501,7 +505,7 @@ impl Connection for SshConnection {
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
         src: &Path,
-        remote_path: &String,
+        remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         // Read source file into memory (fine for config files, templates, scripts)
         let src_data = std::fs::read(src).map_err(|e| {
@@ -509,7 +513,7 @@ impl Connection for SshConnection {
         })?;
 
         let handle = self.handle.as_ref().expect("session not established");
-        let remote_path = remote_path.clone();
+        let remote_path = remote_path.to_string();
 
         self.runtime.lock().unwrap().block_on(async {
             let channel = handle.channel_open_session().await.map_err(|e| {
@@ -547,7 +551,7 @@ impl SshConnection {
         }
     }
 
-    fn run_command_low_level(&self, cmd: &String) -> Result<(i32, String), (i32, String)> {
+    fn run_command_low_level(&self, cmd: &str) -> Result<(i32, String), (i32, String)> {
         let handle = self.handle.as_ref().unwrap();
         let actual_cmd = format!("LANG=C {} 2>&1", cmd);
 
@@ -588,7 +592,7 @@ impl SshConnection {
         })
     }
 
-    fn run_command_with_ssh_a(&self, cmd: &String) -> Result<(i32, String), (i32, String)> {
+    fn run_command_with_ssh_a(&self, cmd: &str) -> Result<(i32, String), (i32, String)> {
         // libssh2/russh agent forwarding is unreliable, so shell out to ssh -A
         let mut base = Command::new("ssh");
         let hostname = &self.host.read().unwrap().name;

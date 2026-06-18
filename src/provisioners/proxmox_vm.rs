@@ -60,7 +60,7 @@ impl ProxmoxVmProvisioner {
         vars: &serde_yaml::Mapping,
     ) -> Result<String, String> {
         if value.contains("{{") {
-            templar.render(&value.to_string(), vars.clone(), TemplateMode::Strict)
+            templar.render(value, vars.clone(), TemplateMode::Strict)
         } else {
             Ok(value.to_string())
         }

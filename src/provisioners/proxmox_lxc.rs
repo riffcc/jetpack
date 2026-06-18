@@ -114,7 +114,7 @@ impl ProxmoxLxcProvisioner {
     ) -> Result<String, String> {
         // Only template if the value contains {{ - optimization and prevents errors on plain strings
         if value.contains("{{") {
-            templar.render(&value.to_string(), vars.clone(), TemplateMode::Strict)
+            templar.render(value, vars.clone(), TemplateMode::Strict)
         } else {
             Ok(value.to_string())
         }

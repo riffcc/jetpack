@@ -94,14 +94,14 @@ impl Connection for NoConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         _forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         // all commands return junk output pretending they were successful
         Ok(response.command_ok(
             request,
             &Arc::new(Some(CommandResult {
-                cmd: cmd.clone(),
+                cmd: cmd.to_string(),
                 out: String::from("__simulated__"),
                 rc: 0,
             })),
@@ -112,8 +112,8 @@ impl Connection for NoConnection {
         &self,
         _response: &Arc<Response>,
         _request: &Arc<TaskRequest>,
-        _data: &String,
-        _remote_path: &String,
+        _data: &str,
+        _remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         // no data is transferred, we just pretend things were successful
         Ok(())
@@ -124,7 +124,7 @@ impl Connection for NoConnection {
         _response: &Arc<Response>,
         _request: &Arc<TaskRequest>,
         _src: &Path,
-        _dest: &String,
+        _dest: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         // no data is transferred, as per above
         Ok(())
@@ -134,7 +134,7 @@ impl Connection for NoConnection {
         &self,
         _response: &Arc<Response>,
         _request: &Arc<TaskRequest>,
-        _remote_path: &String,
+        _remote_path: &str,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         // simulation mode — return empty bytes
         Ok(Vec::new())

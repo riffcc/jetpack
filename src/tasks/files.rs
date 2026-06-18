@@ -48,8 +48,8 @@ pub enum Recurse {
 
 impl FileAttributesInput {
     // given an octal string (0o755, 0755, or bare 755), return whether it is valid
-    pub fn is_octal_string(mode: &String) -> bool {
-        let octal_part = Self::strip_octal_prefix(mode.as_str());
+    pub fn is_octal_string(mode: &str) -> bool {
+        let octal_part = Self::strip_octal_prefix(mode);
         match i32::from_str_radix(octal_part, 8) {
             Ok(_x) => true,
             Err(_y) => false,
@@ -108,8 +108,7 @@ impl FileAttributesInput {
         // that might read the file and encourage users to use YAML-spec required input here even though YAML isn't doing
         // the evaluation.
 
-        if input2.mode.is_some() {
-            let mode_input = input2.mode.as_ref().unwrap();
+        if let Some(mode_input) = &input2.mode {
             let templated_mode_string =
                 handle
                     .template
@@ -118,9 +117,9 @@ impl FileAttributesInput {
             // Accept both 0o755 (Rust-style) and 0755 (traditional Unix octal prefix).
             // Plain digits like "755" are NOT accepted — an explicit prefix is required to
             // prevent accidentally passing decimal values (e.g. "755" decimal ≠ 0755 octal).
-            let octal_no_prefix = if templated_mode_string.starts_with("0o") {
+            let octal_no_prefix = if let Some(stripped) = templated_mode_string.strip_prefix("0o") {
                 // Rust-style: 0o755 → "755"
-                templated_mode_string[2..].to_string()
+                stripped.to_string()
             } else if templated_mode_string.starts_with('0') && templated_mode_string.len() > 1 {
                 // Unix/C-style: 0755 → "755"
                 templated_mode_string[1..].to_string()

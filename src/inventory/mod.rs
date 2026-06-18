@@ -17,5 +17,7 @@
 pub mod dependencies;
 pub mod groups;
 pub mod hosts;
+// Renaming the `inventory` module would cascade through every importer; allow the name shadowing.
+#[allow(clippy::module_inception)]
 pub mod inventory;
 pub mod loading;

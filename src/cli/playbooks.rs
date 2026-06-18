@@ -26,7 +26,7 @@ use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::traversal::{RunState, playbook_traversal};
 use crate::playbooks::visitor::{CheckMode, PlaybookVisitor};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 // code behind *most* playbook related CLI commands, launched from main.rs
@@ -452,7 +452,7 @@ fn curl_download(url: &str, dest: &str) -> Result<(), String> {
 
 /// Search a directory for a playbook entry point.
 /// Returns the path to the playbook file, or the directory itself if no standard name found.
-fn find_playbook_in_dir(dir: &PathBuf) -> Result<PathBuf, String> {
+fn find_playbook_in_dir(dir: &Path) -> Result<PathBuf, String> {
     for candidate in &[
         "playbook.yml",
         "site.yml",
@@ -467,5 +467,5 @@ fn find_playbook_in_dir(dir: &PathBuf) -> Result<PathBuf, String> {
     }
     // No standard playbook found — return the directory
     // (implicit role/module discovery will still work)
-    Ok(dir.clone())
+    Ok(dir.to_path_buf())
 }

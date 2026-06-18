@@ -147,7 +147,7 @@ impl Connection for ChrootConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         _forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let mut base = Command::new("chroot");
@@ -162,7 +162,7 @@ impl Connection for ChrootConnection {
                     Ok(response.command_ok(
                         request,
                         &Arc::new(Some(CommandResult {
-                            cmd: cmd.clone(),
+                            cmd: cmd.to_string(),
                             out: out.clone(),
                             rc,
                         })),
@@ -171,7 +171,7 @@ impl Connection for ChrootConnection {
                 None => Err(response.command_failed(
                     request,
                     &Arc::new(Some(CommandResult {
-                        cmd: cmd.clone(),
+                        cmd: cmd.to_string(),
                         out: String::from(""),
                         rc: 418,
                     })),
@@ -180,7 +180,7 @@ impl Connection for ChrootConnection {
             Err(_x) => Err(response.command_failed(
                 request,
                 &Arc::new(Some(CommandResult {
-                    cmd: cmd.clone(),
+                    cmd: cmd.to_string(),
                     out: String::from(""),
                     rc: 404,
                 })),
@@ -192,7 +192,7 @@ impl Connection for ChrootConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
+        remote_path: &str,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         let actual_src = self.resolve_path(remote_path);
         std::fs::read(Path::new(&actual_src))
@@ -204,7 +204,7 @@ impl Connection for ChrootConnection {
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
         src: &Path,
-        remote_path: &String,
+        remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         let actual_dest = self.resolve_path(remote_path);
         let dest_path = Path::new(&actual_dest);
@@ -230,8 +230,8 @@ impl Connection for ChrootConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        data: &String,
-        remote_path: &String,
+        data: &str,
+        remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         let actual_path = self.resolve_path(remote_path);
         let path = Path::new(&actual_path);

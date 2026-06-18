@@ -90,7 +90,7 @@ impl Remote {
 
     pub fn make_temp_path(
         &self,
-        who: &String,
+        who: &str,
         request: &Arc<TaskRequest>,
     ) -> Result<(PathBuf, PathBuf), Arc<TaskResponse>> {
         let mut pb = PathBuf::new();
@@ -115,7 +115,7 @@ impl Remote {
     pub fn run(
         &self,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         check_rc: CheckRc,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         self.internal_run(
@@ -131,7 +131,7 @@ impl Remote {
     pub fn run_forwardable(
         &self,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         check_rc: CheckRc,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         self.internal_run(
@@ -147,7 +147,7 @@ impl Remote {
     pub fn run_no_sudo(
         &self,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         check_rc: CheckRc,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         self.internal_run(
@@ -166,7 +166,7 @@ impl Remote {
     pub fn run_unsafe(
         &self,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         check_rc: CheckRc,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         self.internal_run(
@@ -182,7 +182,7 @@ impl Remote {
     fn internal_run(
         &self,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         safe: Safety,
         check_rc: CheckRc,
         use_sudo: UseSudo,
@@ -217,7 +217,7 @@ impl Remote {
                     ));
                 }
             },
-            UseSudo::No => cmd.clone(),
+            UseSudo::No => cmd.to_string(),
         };
 
         self.response
@@ -234,8 +234,9 @@ impl Remote {
 
         // if requested, turn non-zero return codes into errors
 
-        if check_rc == CheckRc::Checked && result.is_ok() {
-            let ok_result = result.as_ref().unwrap();
+        if check_rc == CheckRc::Checked
+            && let Ok(ok_result) = &result
+        {
             let cmd_result = ok_result.command_result.as_ref().as_ref().unwrap();
             if cmd_result.rc != 0 {
                 return Err(self
@@ -284,14 +285,14 @@ impl Remote {
         &self,
         temp_dir: Option<PathBuf>,
         temp_path: Option<PathBuf>,
-        path: &String,
+        path: &str,
     ) -> String {
         match temp_dir.is_some() {
             true => {
                 let t = temp_path.as_ref().unwrap();
                 t.clone().into_os_string().into_string().unwrap()
             }
-            false => path.clone(),
+            false => path.to_string(),
         }
     }
 
@@ -302,7 +303,7 @@ impl Remote {
         request: &Arc<TaskRequest>,
         temp_dir: Option<PathBuf>,
         temp_path: Option<PathBuf>,
-        desired_path: &String,
+        desired_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         if temp_dir.is_some() {
             let move_to_correct_location = format!(
@@ -312,9 +313,9 @@ impl Remote {
             );
             let delete_tmp_location = format!("rm '{}'", temp_path.as_ref().unwrap().display());
             let result = self.run(request, &move_to_correct_location, CheckRc::Checked);
-            if result.is_err() {
+            if let Err(e) = result {
                 let _ = self.run(request, &delete_tmp_location, CheckRc::Unchecked);
-                return Err(result.unwrap_err());
+                return Err(e);
             }
         }
         Ok(())
@@ -325,8 +326,8 @@ impl Remote {
     pub fn write_data<G>(
         &self,
         request: &Arc<TaskRequest>,
-        data: &String,
-        path: &String,
+        data: &str,
+        path: &str,
         mut before_complete: G,
     ) -> Result<(), Arc<TaskResponse>>
     where
@@ -358,7 +359,7 @@ impl Remote {
     pub fn fetch_file(
         &self,
         request: &Arc<TaskRequest>,
-        remote_src: &String,
+        remote_src: &str,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         let content =
             self.connection
@@ -369,7 +370,7 @@ impl Remote {
             .fetched_files
             .lock()
             .unwrap()
-            .insert(remote_src.clone(), content.clone());
+            .insert(remote_src.to_string(), content.clone());
         Ok(content)
     }
 
@@ -379,7 +380,7 @@ impl Remote {
         &self,
         request: &Arc<TaskRequest>,
         src: &Path,
-        dest: &String,
+        dest: &str,
         mut before_complete: G,
     ) -> Result<(), Arc<TaskResponse>>
     where
@@ -410,7 +411,7 @@ impl Remote {
     pub fn get_mode(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         let get_cmd_result = crate::tasks::cmd_library::get_mode_command(self.get_os_type(), path);
         let cmd = self.unwrap_string_result(request, &get_cmd_result)?;
@@ -429,7 +430,7 @@ impl Remote {
     pub fn get_is_file(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
         match self.get_is_directory(request, path) {
             Ok(true) => Ok(false),
@@ -443,7 +444,7 @@ impl Remote {
     pub fn get_is_directory(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
         let get_cmd_result =
             crate::tasks::cmd_library::get_is_directory_command(self.get_os_type(), path);
@@ -468,7 +469,7 @@ impl Remote {
     pub fn touch_file(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result = crate::tasks::cmd_library::get_touch_command(self.get_os_type(), path);
         let cmd = self.unwrap_string_result(request, &get_cmd_result)?;
@@ -478,7 +479,7 @@ impl Remote {
     pub fn create_directory(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result =
             crate::tasks::cmd_library::get_create_directory_command(self.get_os_type(), path);
@@ -489,7 +490,7 @@ impl Remote {
     pub fn delete_file(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result =
             crate::tasks::cmd_library::get_delete_file_command(self.get_os_type(), path);
@@ -500,7 +501,7 @@ impl Remote {
     pub fn delete_directory(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
         recurse: Recurse,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result = crate::tasks::cmd_library::get_delete_directory_command(
@@ -521,8 +522,8 @@ impl Remote {
     pub fn rename(
         &self,
         request: &Arc<TaskRequest>,
-        src: &String,
-        dest: &String,
+        src: &str,
+        dest: &str,
         force: bool,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result =
@@ -534,7 +535,7 @@ impl Remote {
     pub fn file_exists(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
         let get_cmd_result =
             crate::tasks::cmd_library::get_file_exists_command(self.get_os_type(), path);
@@ -550,7 +551,7 @@ impl Remote {
     pub fn get_ownership(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<Option<(String, String)>, Arc<TaskResponse>> {
         let get_cmd_result =
             crate::tasks::cmd_library::get_ownership_command(self.get_os_type(), path);
@@ -592,8 +593,8 @@ impl Remote {
     pub fn set_owner(
         &self,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
-        owner: &String,
+        remote_path: &str,
+        owner: &str,
         recurse: Recurse,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result = crate::tasks::cmd_library::set_owner_command(
@@ -609,8 +610,8 @@ impl Remote {
     pub fn set_group(
         &self,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
-        group: &String,
+        remote_path: &str,
+        group: &str,
         recurse: Recurse,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result = crate::tasks::cmd_library::set_group_command(
@@ -626,8 +627,8 @@ impl Remote {
     pub fn set_mode(
         &self,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
-        mode: &String,
+        remote_path: &str,
+        mode: &str,
         recurse: Recurse,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let get_cmd_result = crate::tasks::cmd_library::set_mode_command(
@@ -643,7 +644,7 @@ impl Remote {
     pub fn get_sha512(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         self.internal_sha512(request, path)
     }
@@ -653,7 +654,7 @@ impl Remote {
     fn internal_sha512(
         &self,
         request: &Arc<TaskRequest>,
-        path: &String,
+        path: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         let os_type = self.get_os_type();
         let get_cmd_result = crate::tasks::cmd_library::get_sha512_command(os_type, path);
@@ -684,7 +685,7 @@ impl Remote {
     pub fn query_common_file_attributes(
         &self,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
+        remote_path: &str,
         attributes_in: &Option<FileAttributesEvaluated>,
         changes: &mut Vec<Field>,
         recurse: Recurse,
@@ -739,9 +740,9 @@ impl Remote {
     pub fn process_common_file_attributes(
         &self,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
+        remote_path: &str,
         attributes_in: &Option<FileAttributesEvaluated>,
-        changes: &Vec<Field>,
+        changes: &[Field],
         recurse: Recurse,
     ) -> Result<(), Arc<TaskResponse>> {
         if attributes_in.is_none() {
@@ -752,23 +753,13 @@ impl Remote {
         for change in changes.iter() {
             match change {
                 Field::Owner => {
-                    if attributes.owner.is_some() {
-                        self.set_owner(
-                            request,
-                            remote_path,
-                            attributes.owner.as_ref().unwrap(),
-                            recurse,
-                        )?;
+                    if let Some(owner) = &attributes.owner {
+                        self.set_owner(request, remote_path, owner, recurse)?;
                     }
                 }
                 Field::Group => {
-                    if attributes.group.is_some() {
-                        self.set_group(
-                            request,
-                            remote_path,
-                            attributes.group.as_ref().unwrap(),
-                            recurse,
-                        )?;
+                    if let Some(group) = &attributes.group {
+                        self.set_group(request, remote_path, group, recurse)?;
                     }
                 }
                 Field::Mode if attributes.mode.is_some() => {
@@ -790,7 +781,7 @@ impl Remote {
     pub fn process_all_common_file_attributes(
         &self,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
+        remote_path: &str,
         attributes_in: &Option<FileAttributesEvaluated>,
         recurse: Recurse,
     ) -> Result<(), Arc<TaskResponse>> {

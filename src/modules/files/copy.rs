@@ -222,9 +222,7 @@ impl CopyAction {
         remote_dir: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         // Ensure the remote directory exists.
-        handle
-            .remote
-            .create_directory(request, &remote_dir.to_string())?;
+        handle.remote.create_directory(request, remote_dir)?;
 
         let entries = std::fs::read_dir(local_dir).map_err(|e| {
             handle.response.is_failed(

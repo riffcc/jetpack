@@ -118,54 +118,44 @@ impl IsAction for CommandAction {
             TaskRequestType::Query => Ok(handle.response.needs_execution(request)),
 
             TaskRequestType::Execute => {
-                let task_result: Arc<TaskResponse>;
-                if self.unsafe_ {
-                    task_result =
-                        handle
-                            .remote
-                            .run_unsafe(request, &self.cmd.clone(), CheckRc::Unchecked)?;
+                let task_result: Arc<TaskResponse> = if self.unsafe_ {
+                    handle
+                        .remote
+                        .run_unsafe(request, &self.cmd.clone(), CheckRc::Unchecked)?
                 } else {
-                    task_result =
-                        handle
-                            .remote
-                            .run(request, &self.cmd.clone(), CheckRc::Unchecked)?;
-                }
+                    handle
+                        .remote
+                        .run(request, &self.cmd.clone(), CheckRc::Unchecked)?
+                };
                 let (rc, out) = cmd_info(&task_result);
                 let map_data = build_results_map(rc, &out);
 
-                let should_fail = match self.failed_when.is_none() {
-                    true => match rc {
-                        0 => false,
-                        _ => true,
-                    },
-                    false => {
-                        let condition = self.failed_when.as_ref().unwrap();
-                        handle.template.test_condition_with_extra_data(
-                            request,
-                            TemplateMode::Strict,
-                            condition,
-                            &handle.host,
-                            map_data.clone(),
-                        )?
-                    }
+                let should_fail = if let Some(condition) = &self.failed_when {
+                    handle.template.test_condition_with_extra_data(
+                        request,
+                        TemplateMode::Strict,
+                        condition,
+                        &handle.host,
+                        map_data.clone(),
+                    )?
+                } else {
+                    rc != 0
                 };
 
-                let should_mark_changed = match self.changed_when.is_none() {
-                    true => true,
-                    false => {
-                        let condition = self.changed_when.as_ref().unwrap();
-                        handle.template.test_condition_with_extra_data(
-                            request,
-                            TemplateMode::Strict,
-                            condition,
-                            &handle.host,
-                            map_data.clone(),
-                        )?
-                    }
+                let should_mark_changed = if let Some(condition) = &self.changed_when {
+                    handle.template.test_condition_with_extra_data(
+                        request,
+                        TemplateMode::Strict,
+                        condition,
+                        &handle.host,
+                        map_data.clone(),
+                    )?
+                } else {
+                    true
                 };
 
-                if self.save.is_some() {
-                    save_results(&handle.host, self.save.as_ref().unwrap(), map_data);
+                if let Some(save) = &self.save {
+                    save_results(&handle.host, save, map_data);
                 }
 
                 match should_fail {
@@ -184,7 +174,7 @@ impl IsAction for CommandAction {
     }
 }
 
-fn build_results_map(rc: i32, out: &String) -> serde_yaml::Mapping {
+fn build_results_map(rc: i32, out: &str) -> serde_yaml::Mapping {
     let mut result = serde_yaml::Mapping::new();
     let num: serde_yaml::Value = serde_yaml::from_str(&format!("{}", rc)).unwrap();
     result.insert(serde_yaml::Value::String(String::from("rc")), num);
@@ -192,15 +182,15 @@ fn build_results_map(rc: i32, out: &String) -> serde_yaml::Mapping {
 
     result.insert(
         serde_yaml::Value::String(String::from("out")),
-        serde_yaml::Value::String(out.clone()),
+        serde_yaml::Value::String(out.to_string()),
     );
     result
 }
 
-fn save_results(host: &Arc<RwLock<Host>>, key: &String, map_data: serde_yaml::Mapping) {
+fn save_results(host: &Arc<RwLock<Host>>, key: &str, map_data: serde_yaml::Mapping) {
     let mut result = serde_yaml::Mapping::new();
     result.insert(
-        serde_yaml::Value::String(key.clone()),
+        serde_yaml::Value::String(key.to_string()),
         serde_yaml::Value::Mapping(map_data.clone()),
     );
     host.write().unwrap().update_variables(result);

@@ -33,7 +33,7 @@ use crate::tasks::files::Recurse;
 // any argument that allows spaces (such as paths) should be the *last*
 // command in any command sequence.
 
-pub fn screen_path(path: &String) -> Result<String, String> {
+pub fn screen_path(path: &str) -> Result<String, String> {
     // NOTE: this only checks paths used in commands
     let path2 = path.trim().to_string();
     let path3 = screen_general_input_strict(&path2)?;
@@ -44,7 +44,7 @@ pub fn screen_path(path: &String) -> Result<String, String> {
 // but is automatically also applied to all template calls not marked _unsafe in the evaluate() stages
 // of modules. We run everything twice to prevent module coding errors.
 
-pub fn screen_general_input_strict(input: &String) -> Result<String, String> {
+pub fn screen_general_input_strict(input: &str) -> Result<String, String> {
     let input2 = input.trim();
     let bad = vec![
         ";", "{", "}", "(", ")", "<", ">", "&", "*", "|", "=", "?", "[", "]", "$", "%", "`",
@@ -67,7 +67,7 @@ pub fn screen_general_input_strict(input: &String) -> Result<String, String> {
 // (parameters) are already sufficiently screened for things that can break shell commands and arguments
 // are already quoted.
 
-pub fn screen_general_input_loose(input: &String) -> Result<String, String> {
+pub fn screen_general_input_loose(input: &str) -> Result<String, String> {
     let input2 = input.trim();
     let bad = vec![";", "<", ">", "&", "*", "?", "{", "}", "[", "]", "$", "`"];
     for invalid in bad.iter() {
@@ -83,15 +83,15 @@ pub fn screen_general_input_loose(input: &String) -> Result<String, String> {
 
 // require that octal inputs be ... octal
 
-pub fn screen_mode(mode: &String) -> Result<String, String> {
+pub fn screen_mode(mode: &str) -> Result<String, String> {
     if FileAttributesInput::is_octal_string(mode) {
-        Ok(mode.clone())
+        Ok(mode.to_string())
     } else {
         Err(format!("not an octal string: {}", mode))
     }
 }
 
-pub fn get_mode_command(os_type: HostOSType, untrusted_path: &String) -> Result<String, String> {
+pub fn get_mode_command(os_type: HostOSType, untrusted_path: &str) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     match os_type {
         HostOSType::Linux => Ok(format!("stat --format '%a' '{}'", path)),
@@ -99,7 +99,7 @@ pub fn get_mode_command(os_type: HostOSType, untrusted_path: &String) -> Result<
     }
 }
 
-pub fn get_sha512_command(os_type: HostOSType, untrusted_path: &String) -> Result<String, String> {
+pub fn get_sha512_command(os_type: HostOSType, untrusted_path: &str) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     match os_type {
         HostOSType::Linux => Ok(format!("sha512sum '{}'", path)),
@@ -107,30 +107,27 @@ pub fn get_sha512_command(os_type: HostOSType, untrusted_path: &String) -> Resul
     }
 }
 
-pub fn get_ownership_command(
-    _os_type: HostOSType,
-    untrusted_path: &String,
-) -> Result<String, String> {
+pub fn get_ownership_command(_os_type: HostOSType, untrusted_path: &str) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     Ok(format!("ls -ld '{}'", path))
 }
 
 pub fn get_is_directory_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
+    untrusted_path: &str,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     Ok(format!("ls -ld '{}'", path))
 }
 
-pub fn get_touch_command(_os_type: HostOSType, untrusted_path: &String) -> Result<String, String> {
+pub fn get_touch_command(_os_type: HostOSType, untrusted_path: &str) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     Ok(format!("touch '{}'", path))
 }
 
 pub fn get_create_directory_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
+    untrusted_path: &str,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     Ok(format!("mkdir -p '{}'", path))
@@ -138,7 +135,7 @@ pub fn get_create_directory_command(
 
 pub fn get_delete_file_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
+    untrusted_path: &str,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     Ok(format!("rm -f '{}'", path))
@@ -146,7 +143,7 @@ pub fn get_delete_file_command(
 
 pub fn get_delete_directory_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
+    untrusted_path: &str,
     recurse: Recurse,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
@@ -158,8 +155,8 @@ pub fn get_delete_directory_command(
 
 pub fn get_rename_command(
     _os_type: HostOSType,
-    untrusted_src: &String,
-    untrusted_dest: &String,
+    untrusted_src: &str,
+    untrusted_dest: &str,
     force: bool,
 ) -> Result<String, String> {
     let src = screen_path(untrusted_src)?;
@@ -172,7 +169,7 @@ pub fn get_rename_command(
 
 pub fn get_file_exists_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
+    untrusted_path: &str,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     Ok(format!("test -e '{}'", path))
@@ -180,8 +177,8 @@ pub fn get_file_exists_command(
 
 pub fn set_owner_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
-    untrusted_owner: &String,
+    untrusted_path: &str,
+    untrusted_owner: &str,
     recurse: Recurse,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
@@ -194,8 +191,8 @@ pub fn set_owner_command(
 
 pub fn set_group_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
-    untrusted_group: &String,
+    untrusted_path: &str,
+    untrusted_group: &str,
     recurse: Recurse,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
@@ -208,8 +205,8 @@ pub fn set_group_command(
 
 pub fn set_mode_command(
     _os_type: HostOSType,
-    untrusted_path: &String,
-    untrusted_mode: &String,
+    untrusted_path: &str,
+    untrusted_mode: &str,
     recurse: Recurse,
 ) -> Result<String, String> {
     // mode generally does not have to be screened but someone could call a command directly without going through FileAttributes

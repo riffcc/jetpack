@@ -100,10 +100,13 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
         // parse the playbook file
         let playbook_file = jet_file_open(playbook_path)?;
         let parsed: Result<Vec<Play>, serde_yaml::Error> = serde_yaml::from_reader(playbook_file);
-        if parsed.is_err() {
-            show_yaml_error_in_context(&parsed.unwrap_err(), playbook_path);
-            return Err("edit the file and try again?".to_string());
-        }
+        let plays: Vec<Play> = match parsed {
+            Ok(plays) => plays,
+            Err(e) => {
+                show_yaml_error_in_context(&e, playbook_path);
+                return Err("edit the file and try again?".to_string());
+            }
+        };
 
         // chdir in the playbook directory
         let p1 = env::current_dir().expect("could not get current directory");
@@ -114,9 +117,6 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
         } else {
             env::set_current_dir(pbdir).expect("could not chdir into playbook directory");
         }
-
-        // walk each play in the playbook
-        let plays: Vec<Play> = parsed.unwrap();
         for (play_index, play) in plays.iter().enumerate() {
             // Set the play index in context
             run_state.context.write().unwrap().play_index = play_index;
@@ -227,11 +227,11 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
 
         let mut ctx = run_state.context.write().unwrap();
         ctx.set_play(play);
-        if play.ssh_user.is_some() {
-            ctx.set_ssh_user(play.ssh_user.as_ref().unwrap());
+        if let Some(user) = play.ssh_user.as_ref() {
+            ctx.set_ssh_user(user);
         }
-        if play.ssh_port.is_some() {
-            ctx.set_ssh_port(play.ssh_port.unwrap());
+        if let Some(port) = play.ssh_port {
+            ctx.set_ssh_port(port);
         }
         ctx.unset_role();
     }
@@ -628,8 +628,7 @@ fn handle_batch(
     // Default mode: task-parallel execution (all hosts per task, then next task)
 
     // handle role tasks
-    if play.roles.is_some() {
-        let roles = play.roles.as_ref().unwrap();
+    if let Some(roles) = play.roles.as_ref() {
         for invocation in roles.iter() {
             process_role(run_state, play, invocation, HandlerMode::NormalTasks)?;
         }
@@ -640,16 +639,14 @@ fn handle_batch(
     }
 
     // handle loose play tasks
-    if play.tasks.is_some() {
-        let tasks = play.tasks.as_ref().unwrap();
+    if let Some(tasks) = play.tasks.as_ref() {
         for task in tasks.iter() {
             process_task(run_state, play, task, HandlerMode::NormalTasks, None)?;
         }
     }
 
     // handle role handlers
-    if play.roles.is_some() {
-        let roles = play.roles.as_ref().unwrap();
+    if let Some(roles) = play.roles.as_ref() {
         for invocation in roles.iter() {
             process_role(run_state, play, invocation, HandlerMode::Handlers)?;
         }
@@ -660,8 +657,7 @@ fn handle_batch(
     }
 
     // handle loose play handlers
-    if play.handlers.is_some() {
-        let handlers = play.handlers.as_ref().unwrap();
+    if let Some(handlers) = play.handlers.as_ref() {
         for handler in handlers {
             process_task(run_state, play, handler, HandlerMode::Handlers, None)?;
         }
@@ -945,35 +941,27 @@ fn check_tags(
     match &run_state.tags {
         Some(cli_tags) => {
             // CLI tags were specified
-            match task.get_with() {
-                // a with section was present
-                Some(task_with) => match task_with.tags {
-                    // tags are applied to the task
-                    Some(task_tags) => {
-                        for x in task_tags.iter() {
-                            if cli_tags.contains(x) {
-                                return true;
-                            }
-                        }
-                    }
-                    // no tags
-                    None => {}
-                },
-                None => {}
-            };
-            match role_invocation {
-                // the role invocation has tags applied
-                Some(role_invoke) => {
-                    if let Some(role_tags) = &role_invoke.tags {
-                        for x in role_tags.iter() {
-                            if cli_tags.contains(x) {
-                                return true;
-                            }
+            // a with section was present
+            if let Some(task_with) = task.get_with() {
+                // tags are applied to the task
+                if let Some(task_tags) = task_with.tags {
+                    for x in task_tags.iter() {
+                        if cli_tags.contains(x) {
+                            return true;
                         }
                     }
                 }
-                None => {}
-            };
+            }
+            // the role invocation has tags applied
+            if let Some(role_invoke) = role_invocation
+                && let Some(role_tags) = &role_invoke.tags
+            {
+                for x in role_tags.iter() {
+                    if cli_tags.contains(x) {
+                        return true;
+                    }
+                }
+            }
         }
         // no CLI tags so run the task
         None => {
@@ -1069,8 +1057,8 @@ fn process_role(
     let (role, role_path) = find_role(run_state, play, role_name.clone())?;
 
     // process dependencies first
-    if role.dependencies.is_some() {
-        for dep_name in role.dependencies.as_ref().unwrap().iter() {
+    if let Some(dependencies) = role.dependencies.as_ref() {
+        for dep_name in dependencies.iter() {
             // create a synthetic invocation for the dependency
             let dep_invocation = RoleInvocation {
                 role: dep_name.clone(),
@@ -1108,7 +1096,7 @@ fn process_role(
 
     // the file sections are optional...
 
-    if files.is_some() {
+    if let Some(files) = files {
         // prepare to chdir into the role, this makes operating on template and file paths easier
 
         let p1 = env::current_dir().expect("could not get current directory");
@@ -1125,7 +1113,7 @@ fn process_role(
 
         // for each task file path that is mentioned
 
-        for task_file in files.unwrap().iter() {
+        for task_file in files.iter() {
             // find the likely path location, which is organized into subdirectories for relative paths
 
             let task_buf = match task_file.starts_with("/") {
@@ -1150,11 +1138,13 @@ fn process_role(
 
             let task_fh = jet_file_open(task_buf.as_path())?;
             let parsed: Result<Vec<Task>, serde_yaml::Error> = serde_yaml::from_reader(task_fh);
-            if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), task_buf.as_path());
-                return Err("edit the file and try again?".to_string());
-            }
-            let tasks = parsed.unwrap();
+            let tasks = match parsed {
+                Ok(tasks) => tasks,
+                Err(e) => {
+                    show_yaml_error_in_context(&e, task_buf.as_path());
+                    return Err("edit the file and try again?".to_string());
+                }
+            };
             for task in tasks.iter() {
                 // process all tasks in the YAML file, this is the same function used
                 // for processing loose tasks outside of roles
@@ -1195,6 +1185,8 @@ fn process_role(
     Ok(())
 }
 
+// Factored types would require restructuring shared closures across the module
+#[allow(clippy::type_complexity)]
 fn get_host_batches(
     run_state: &Arc<RunState>,
     play: &Play,
@@ -1245,8 +1237,8 @@ fn get_host_batches(
         let mut batch: Vec<Arc<RwLock<Host>>> = Vec::new();
         for _host_ct in 0..batch_size {
             let host = hosts_list.pop();
-            if host.is_some() {
-                batch.push(host.unwrap());
+            if let Some(host) = host {
+                batch.push(host);
             } else {
                 break;
             }
@@ -1278,14 +1270,8 @@ fn get_play_hosts(run_state: &Arc<RunState>, play: &Play) -> Vec<Arc<RwLock<Host
     };
     let mut results: HashMap<String, Arc<RwLock<Host>>> = HashMap::new();
 
-    let has_group_limits = match run_state.limit_groups.len() {
-        0 => false,
-        _ => true,
-    };
-    let has_host_limits = match run_state.limit_hosts.len() {
-        0 => false,
-        _ => true,
-    };
+    let has_group_limits = !matches!(run_state.limit_groups.len(), 0);
+    let has_host_limits = !matches!(run_state.limit_hosts.len(), 0);
 
     for group in groups.iter() {
         // for each mentioned group get all the hosts in that group and any subgroups
@@ -1744,7 +1730,7 @@ fn validate_groups(run_state: &Arc<RunState>, play: &Play) -> Result<(), String>
 fn validate_hosts(
     _run_state: &Arc<RunState>,
     _play: &Play,
-    hosts: &Vec<Arc<RwLock<Host>>>,
+    hosts: &[Arc<RwLock<Host>>],
 ) -> Result<(), String> {
     // once hosts are selected we need to select more than one host, if the groups were all
     // empty, don't try to run the playbook
@@ -1765,37 +1751,34 @@ fn load_vars_into_context(run_state: &Arc<RunState>, play: &Play) -> Result<(), 
     let mut ctx_vars_storage = serde_yaml::Value::from(serde_yaml::Mapping::new());
     let mut ctx_defaults_storage = serde_yaml::Value::from(serde_yaml::Mapping::new());
 
-    if play.vars.is_some() {
+    if let Some(vars) = play.vars.as_ref() {
         // vars are inline variables that are loaded at maximum precedence
-        let vars = play.vars.as_ref().unwrap();
         blend_variables(
             &mut ctx_vars_storage,
             serde_yaml::Value::Mapping(vars.clone()),
         );
     }
 
-    if play.vars_files.is_some() {
+    if let Some(vars_files) = play.vars_files.as_ref() {
         // vars_files are paths to YAML files that are loaded at maximum precedence
-        let vars_files = play.vars_files.as_ref().unwrap();
         for pathname in vars_files {
             let path = Path::new(&pathname);
             let vars_file = jet_file_open(path)?;
             let parsed: Result<serde_yaml::Mapping, serde_yaml::Error> =
                 serde_yaml::from_reader(vars_file);
-            if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), path);
-                return Err("edit the file and try again?".to_string());
-            }
-            blend_variables(
-                &mut ctx_vars_storage,
-                serde_yaml::Value::Mapping(parsed.unwrap()),
-            );
+            let mapping = match parsed {
+                Ok(mapping) => mapping,
+                Err(e) => {
+                    show_yaml_error_in_context(&e, path);
+                    return Err("edit the file and try again?".to_string());
+                }
+            };
+            blend_variables(&mut ctx_vars_storage, serde_yaml::Value::Mapping(mapping));
         }
     }
 
-    if play.defaults.is_some() {
+    if let Some(defaults) = play.defaults.as_ref() {
         // defaults works like 'vars' but has the lowest precedence
-        let defaults = play.defaults.as_ref().unwrap();
         blend_variables(
             &mut ctx_defaults_storage,
             serde_yaml::Value::Mapping(defaults.clone()),
@@ -1838,11 +1821,13 @@ fn find_role(
             // deserialize the role file and make sure it is valid before returning
 
             let parsed: Result<Role, serde_yaml::Error> = serde_yaml::from_reader(role_file);
-            if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), path);
-                return Err("edit the file and try again?".to_string());
-            }
-            let role = parsed.unwrap();
+            let role = match parsed {
+                Ok(role) => role,
+                Err(e) => {
+                    show_yaml_error_in_context(&e, path);
+                    return Err("edit the file and try again?".to_string());
+                }
+            };
 
             return Ok((role, pb));
         }

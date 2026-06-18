@@ -126,12 +126,9 @@ impl Connection for LocalConnection {
 
     fn connect(&mut self) -> Result<(), String> {
         // upon connection make sure the localhost detection routine runs
-        let result = detect_os(&self.host);
-        if result.is_ok() {
-            Ok(())
-        } else {
-            let (_rc, out) = result.unwrap_err();
-            Err(out)
+        match detect_os(&self.host) {
+            Ok(()) => Ok(()),
+            Err((_rc, out)) => Err(out),
         }
     }
 
@@ -139,7 +136,7 @@ impl Connection for LocalConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        cmd: &String,
+        cmd: &str,
         _forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let mut base = Command::new("sh");
@@ -153,7 +150,7 @@ impl Connection for LocalConnection {
                     Ok(response.command_ok(
                         request,
                         &Arc::new(Some(CommandResult {
-                            cmd: cmd.clone(),
+                            cmd: cmd.to_string(),
                             out: out.clone(),
                             rc,
                         })),
@@ -162,7 +159,7 @@ impl Connection for LocalConnection {
                 None => Err(response.command_failed(
                     request,
                     &Arc::new(Some(CommandResult {
-                        cmd: cmd.clone(),
+                        cmd: cmd.to_string(),
                         out: String::from(""),
                         rc: 418,
                     })),
@@ -171,7 +168,7 @@ impl Connection for LocalConnection {
             Err(_x) => Err(response.command_failed(
                 request,
                 &Arc::new(Some(CommandResult {
-                    cmd: cmd.clone(),
+                    cmd: cmd.to_string(),
                     out: String::from(""),
                     rc: 404,
                 })),
@@ -183,7 +180,7 @@ impl Connection for LocalConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        remote_path: &String,
+        remote_path: &str,
     ) -> Result<Vec<u8>, Arc<TaskResponse>> {
         std::fs::read(Path::new(remote_path))
             .map_err(|e| response.is_failed(request, &format!("fetch failed: {:?}", e)))
@@ -194,7 +191,7 @@ impl Connection for LocalConnection {
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
         src: &Path,
-        remote_path: &String,
+        remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         // FIXME: this (temporary) implementation currently loads the file contents into memory which we do not want
         // copy the files with system calls instead.
@@ -210,8 +207,8 @@ impl Connection for LocalConnection {
         &self,
         response: &Arc<Response>,
         request: &Arc<TaskRequest>,
-        data: &String,
-        remote_path: &String,
+        data: &str,
+        remote_path: &str,
     ) -> Result<(), Arc<TaskResponse>> {
         let path = Path::new(&remote_path);
         if path.exists() {
@@ -259,7 +256,7 @@ impl Connection for LocalConnection {
     }
 }
 
-pub fn convert_out(output: &Vec<u8>, err: &Vec<u8>) -> String {
+pub fn convert_out(output: &[u8], err: &[u8]) -> String {
     // output from the Rust command class can contain junk bytes, here we mostly don't try to solve this yet
     // and will basically fail if output contains junk. This may be dealt with later.
     let mut base = match std::str::from_utf8(output) {

@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Renaming the `handle` module would cascade through every importer; allow the name shadowing.
+#[allow(clippy::module_inception)]
 pub mod handle;
 pub mod local;
 pub mod remote;

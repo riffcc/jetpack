@@ -21,7 +21,7 @@ use std::sync::RwLock;
 
 // cli support for the show-inventory subcommand
 
-fn string_slice(values: &Vec<String>) -> String {
+fn string_slice(values: &[String]) -> String {
     // if there are too many values the output of various group/host lists in the tables
     // stops being useful. we may want to have some flag where we don't show the
     // nice tables for this, though right now they really don't exist
@@ -68,11 +68,7 @@ pub fn show_inventory_host(
         (String::from("Direct Groups"), parents_string),
     ];
 
-    two_column_table(
-        &String::from("Host Report:"),
-        &String::from(""),
-        &host_elements,
-    );
+    two_column_table("Host Report:", "", &host_elements);
     println!();
 
     captioned_display(&String::from("Variables"), &blended_variables);
@@ -144,18 +140,10 @@ pub fn show_inventory_group(
         ),
     ];
 
-    two_column_table(
-        &String::from("Group Report:"),
-        &String::from(""),
-        &group_elements,
-    );
+    two_column_table("Group Report:", "", &group_elements);
     println!();
 
-    two_column_table(
-        &String::from("Host Report:"),
-        &String::from(""),
-        &host_elements,
-    );
+    two_column_table("Host Report:", "", &host_elements);
     println!();
     captioned_display(&String::from("Variables"), &blended_variables);
     println!();

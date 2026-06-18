@@ -81,8 +81,10 @@ pub struct ProvisionConfig {
     pub ostemplate: Option<String>,
 
     /// Fetch template before creating container.
+    ///
     /// - "true" or "1": download the exact template specified in ostemplate
     /// - "latest": query Proxmox for available templates, find latest matching version, download it
+    ///
     /// Not set: assume template already exists
     pub fetch: Option<String>,
 
@@ -166,7 +168,7 @@ pub enum WaitStrategy {
 }
 
 impl WaitStrategy {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "simple" => WaitStrategy::Simple,
             _ => WaitStrategy::Backoff,
@@ -211,7 +213,7 @@ pub fn wait_for_ssh(
     let strategy = config
         .wait_strategy
         .as_ref()
-        .map(|s| WaitStrategy::from_str(s))
+        .map(|s| WaitStrategy::parse(s))
         .unwrap_or(WaitStrategy::Backoff);
 
     let start = Instant::now();
@@ -404,8 +406,8 @@ pub fn ensure_host_provisioned(
             serde_yaml::Value::String(confirmed_ip),
         );
         let inv = inventory.read().unwrap();
-        if inv.has_host(&inventory_name.to_string()) {
-            inv.get_host(&inventory_name.to_string())
+        if inv.has_host(inventory_name) {
+            inv.get_host(inventory_name)
                 .write()
                 .unwrap()
                 .update_variables(mapping);
@@ -624,13 +626,10 @@ mp0: "local-lvm:50,mp=/mnt/extra"
 
     #[test]
     fn test_wait_strategy_from_str() {
-        assert_eq!(WaitStrategy::from_str("simple"), WaitStrategy::Simple);
-        assert_eq!(WaitStrategy::from_str("Simple"), WaitStrategy::Simple);
-        assert_eq!(WaitStrategy::from_str("SIMPLE"), WaitStrategy::Simple);
-        assert_eq!(WaitStrategy::from_str("backoff"), WaitStrategy::Backoff);
-        assert_eq!(
-            WaitStrategy::from_str("anything_else"),
-            WaitStrategy::Backoff
-        );
+        assert_eq!(WaitStrategy::parse("simple"), WaitStrategy::Simple);
+        assert_eq!(WaitStrategy::parse("Simple"), WaitStrategy::Simple);
+        assert_eq!(WaitStrategy::parse("SIMPLE"), WaitStrategy::Simple);
+        assert_eq!(WaitStrategy::parse("backoff"), WaitStrategy::Backoff);
+        assert_eq!(WaitStrategy::parse("anything_else"), WaitStrategy::Backoff);
     }
 }

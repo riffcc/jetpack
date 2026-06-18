@@ -77,12 +77,12 @@ pub trait PackageManagementModule {
 
         let package_details = self.get_local_version(handle, request)?;
 
-        if package_details.is_some() {
+        if let Some(package_details) = package_details {
             // package is installed
             if self.is_remove() {
                 return Ok(handle.response.needs_removal(request));
             }
-            let pkg = package_details.unwrap();
+            let pkg = package_details;
             let version = self.get_version();
 
             if self.is_update() {

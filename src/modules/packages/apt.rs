@@ -354,14 +354,14 @@ impl AptAction {
     pub fn parse_local_package_details_with_name(
         &self,
         _handle: &Arc<TaskHandle>,
-        pkg_name: &String,
-        out: &String,
+        pkg_name: &str,
+        out: &str,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         let mut tokens = out.split("\t");
         let version = tokens.nth(1);
         match version {
             Some(v) => Ok(Some(PackageDetails {
-                name: pkg_name.clone(),
+                name: pkg_name.to_string(),
                 version: v.trim().to_string(),
             })),
             None => Ok(None),
@@ -371,7 +371,7 @@ impl AptAction {
     pub fn parse_remote_package_details(
         &self,
         _handle: &Arc<TaskHandle>,
-        out: &String,
+        out: &str,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         Ok(Some(PackageDetails {
             name: self.package.clone(),

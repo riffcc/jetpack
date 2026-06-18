@@ -96,8 +96,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        _field: &String,
-        template: &String,
+        _field: &str,
+        template: &str,
         blend_target: BlendTarget,
     ) -> Result<String, Arc<TaskResponse>> {
         let result = self.run_state.context.read().unwrap().render_template(
@@ -106,13 +106,12 @@ impl Template {
             blend_target,
             tm,
         );
-        if result.is_ok() {
-            let result_ok = result.as_ref().unwrap();
-            if result_ok.is_empty() {
-                return Err(self
-                    .response
-                    .is_failed(request, &"evaluated to empty string".to_string()));
-            }
+        if let Ok(result_ok) = &result
+            && result_ok.is_empty()
+        {
+            return Err(self
+                .response
+                .is_failed(request, "evaluated to empty string"));
         }
         let result2 = self.unwrap_string_result(request, &result)?;
         Ok(result2)
@@ -122,8 +121,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        template: &String,
+        field: &str,
+        template: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         // this is the version of templating that gives access to secret variables, we don't allow them elsewhere as they would be easy to leak to CI/CD/build output/logs
         // and the contents to templates are not shown to anything
@@ -134,8 +133,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        template: &String,
+        field: &str,
+        template: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         // indicates templating a string that will not without further processing, be passed to a shell command
         self.template_unsafe_internal(request, tm, field, template, BlendTarget::NotTemplateModule)
@@ -147,7 +146,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         // templates a string that is not allowed to be used in shell commands and may contain special characters
@@ -168,7 +167,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         // indicates templating a string that will not without further processing, be passed to a shell command
@@ -188,8 +187,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        template: &String,
+        field: &str,
+        template: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         // templates a required string parameter - the simplest of argument processing, this requires no casting to other types
         let result = self.string_unsafe_for_shell(request, tm, field, template);
@@ -208,8 +207,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        template: &String,
+        field: &str,
+        template: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         // same as self.string above, this version also does not allow spaces in the resulting string
         let value = self.string(request, tm, field, template)?;
@@ -226,19 +225,18 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         // this is a version of string_no_spaces that allows the value to be optional
         let prelim = self.string_option(request, tm, field, template)?;
-        if prelim.is_some() {
-            let value = prelim.as_ref().unwrap();
-            if self.has_spaces(value) {
-                return Err(self.response.is_failed(
-                    request,
-                    &format!("field ({}): spaces are not allowed", field),
-                ));
-            }
+        if let Some(value) = &prelim
+            && self.has_spaces(value)
+        {
+            return Err(self.response.is_failed(
+                request,
+                &format!("field ({}): spaces are not allowed", field),
+            ));
         }
         Ok(prelim.clone())
     }
@@ -247,15 +245,15 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
-        default: &String,
+        default: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         // this is a version of string_no_spaces that allows the value to be optional
         let prelim = self.string_option(request, tm, field, template)?;
         match prelim {
             Some(x) => Ok(x.clone()),
-            None => Ok(default.clone()),
+            None => Ok(default.to_string()),
         }
     }
 
@@ -263,14 +261,14 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         // for processing parameters that take optional strings, but make sure to remove any extra surrounding whitespace
         // YAML should do this anyway so it's mostly overkill but may prevent some rare errors from inventory variable sources
         let prelim = self.string_option(request, tm, field, template)?;
-        if prelim.is_some() {
-            return Ok(Some(prelim.unwrap().trim().to_string()));
+        if let Some(value) = prelim {
+            return Ok(Some(value.trim().to_string()));
         }
         Ok(None)
     }
@@ -288,8 +286,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        template: &String,
+        field: &str,
+        template: &str,
     ) -> Result<String, Arc<TaskResponse>> {
         // templates a string and makes sure the output looks like a valid path
         let result = self.run_state.context.read().unwrap().render_template(
@@ -311,7 +309,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         // templates an optional string
@@ -335,8 +333,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        template: &String,
+        field: &str,
+        template: &str,
     ) -> Result<u64, Arc<TaskResponse>> {
         // templates a required value that must resolve to an integer
         if tm == TemplateMode::Off {
@@ -358,7 +356,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
         default: Option<u64>,
     ) -> Result<Option<u64>, Arc<TaskResponse>> {
@@ -385,7 +383,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
         default: u64,
     ) -> Result<u64, Arc<TaskResponse>> {
@@ -413,8 +411,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        template: &String,
+        field: &str,
+        template: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
         // templates a required value that must resolve to a boolean
         // where possible, consider using boolean_option_default_true/false instead
@@ -438,7 +436,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<bool, Arc<TaskResponse>> {
         // templates an optional value that resolves to a boolean, if omitted, assume the answer is true
@@ -449,7 +447,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<bool, Arc<TaskResponse>> {
         // templates an optional value that resolves to a boolean, if omitted, assume the answer is false
@@ -460,7 +458,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
         default: bool,
     ) -> Result<bool, Arc<TaskResponse>> {
@@ -486,7 +484,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
+        field: &str,
         template: &Option<String>,
     ) -> Result<Option<bool>, Arc<TaskResponse>> {
         // supports an optional boolean value that does not default to true or false - effectively making the option a trinary value where None is "no preference"
@@ -511,7 +509,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        expr: &String,
+        expr: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
         // used to evaluate in-language conditionals throughout the program.
         if tm == TemplateMode::Off {
@@ -532,7 +530,7 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        expr: &String,
+        expr: &str,
         _host: &Arc<RwLock<Host>>,
         vars_input: serde_yaml::Mapping,
     ) -> Result<bool, Arc<TaskResponse>> {
@@ -555,8 +553,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        str_path: &String,
+        field: &str,
+        str_path: &str,
     ) -> Result<PathBuf, Arc<TaskResponse>> {
         // templates a string and then looks for the resulting file in the logical templates/ locations (if not an absolute path)
         // raises errors if the source files are not found
@@ -567,13 +565,13 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         _tm: TemplateMode,
-        _field: &String,
-        str_path: &String,
+        _field: &str,
+        str_path: &str,
     ) -> Result<PathBuf, Arc<TaskResponse>> {
         // when we need to find a module we look for it in the configured module paths
         for path_buf in self.run_state.module_paths.read().unwrap().iter() {
             let mut pb = path_buf.clone();
-            pb.push(str_path.clone());
+            pb.push(str_path);
 
             if pb.exists() {
                 return Ok(pb);
@@ -589,8 +587,8 @@ impl Template {
         &self,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        str_path: &String,
+        field: &str,
+        str_path: &str,
     ) -> Result<PathBuf, Arc<TaskResponse>> {
         // simialr to find_template_path, this one assumes a 'files/' directory for relative paths.
         self.find_sub_path(&String::from("files"), request, tm, field, str_path)
@@ -598,11 +596,11 @@ impl Template {
 
     fn find_sub_path(
         &self,
-        prefix: &String,
+        prefix: &str,
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
-        field: &String,
-        str_path: &String,
+        field: &str,
+        str_path: &str,
     ) -> Result<PathBuf, Arc<TaskResponse>> {
         // supporting code for find_template_path and find_file_path
         if tm == TemplateMode::Off {
@@ -642,7 +640,7 @@ impl Template {
         }
     }
 
-    fn has_spaces(&self, input: &String) -> bool {
+    fn has_spaces(&self, input: &str) -> bool {
         let found = input.find(' ');
         found.is_some()
     }

@@ -99,12 +99,12 @@ struct JetpackLocalConfig {
     inventory: Option<String>,
 }
 
-fn is_cli_mode_valid(value: &String) -> bool {
+fn is_cli_mode_valid(value: &str) -> bool {
     cli_mode_from_string(value).is_ok()
 }
 
-fn cli_mode_from_string(s: &String) -> Result<u32, String> {
-    match s.as_str() {
+fn cli_mode_from_string(s: &str) -> Result<u32, String> {
+    match s {
         "local" => Ok(CLI_MODE_LOCAL),
         "check-local" => Ok(CLI_MODE_CHECK_LOCAL),
         "ssh" => Ok(CLI_MODE_SSH),
@@ -518,10 +518,11 @@ impl CliParser {
                             Arguments::ARGUMENT_VERBOSEST => self.increase_verbosity(3),
                             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => self.store_login_password(),
                             Arguments::ARGUMENT_ASYNC => self.store_async_mode(),
-                            _ => Ok({
+                            _ => {
                                 standalone_arg_found = false;
                                 next_is_value = true;
-                            }),
+                                Ok(())
+                            }
                         };
 
                         if !standalone_arg_found {
@@ -637,7 +638,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_mode(&mut self, value: &String) -> Result<(), String> {
+    fn store_mode(&mut self, value: &str) -> Result<(), String> {
         if is_cli_mode_valid(value) {
             self.mode = cli_mode_from_string(value).unwrap();
             return Ok(());
@@ -645,7 +646,7 @@ impl CliParser {
         Err(format!("jetp mode ({}) is not valid, see --help", value))
     }
 
-    fn append_playbook(&mut self, value: &String) -> Result<(), String> {
+    fn append_playbook(&mut self, value: &str) -> Result<(), String> {
         self.playbook_set = true;
         match parse_paths(&String::from("-p/--playbook"), value) {
             Ok(paths) => {
@@ -672,7 +673,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn append_roles(&mut self, value: &String) -> Result<(), String> {
+    fn append_roles(&mut self, value: &str) -> Result<(), String> {
         match parse_paths(&String::from("-r/--roles"), value) {
             Ok(paths) => {
                 for p in paths.iter() {
@@ -695,7 +696,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn append_modules(&mut self, value: &String) -> Result<(), String> {
+    fn append_modules(&mut self, value: &str) -> Result<(), String> {
         match parse_paths(&String::from("-m/--modules"), value) {
             Ok(paths) => {
                 for p in paths.iter() {
@@ -718,7 +719,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn append_inventory(&mut self, value: &String) -> Result<(), String> {
+    fn append_inventory(&mut self, value: &str) -> Result<(), String> {
         self.inventory_set = true;
         // Allow inventory for local modes - useful for getting group_vars/host_vars
 
@@ -739,7 +740,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_show_groups(&mut self, value: &String) -> Result<(), String> {
+    fn store_show_groups(&mut self, value: &str) -> Result<(), String> {
         match split_string(value) {
             Ok(values) => {
                 self.show_groups = values;
@@ -755,7 +756,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_show_hosts(&mut self, value: &String) -> Result<(), String> {
+    fn store_show_hosts(&mut self, value: &str) -> Result<(), String> {
         match split_string(value) {
             Ok(values) => {
                 self.show_hosts = values;
@@ -771,7 +772,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_limit_groups(&mut self, value: &String) -> Result<(), String> {
+    fn store_limit_groups(&mut self, value: &str) -> Result<(), String> {
         match split_string(value) {
             Ok(values) => {
                 self.limit_groups = values;
@@ -787,7 +788,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_limit_hosts(&mut self, value: &String) -> Result<(), String> {
+    fn store_limit_hosts(&mut self, value: &str) -> Result<(), String> {
         match split_string(value) {
             Ok(values) => {
                 self.limit_hosts = values;
@@ -803,7 +804,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_tags(&mut self, value: &String) -> Result<(), String> {
+    fn store_tags(&mut self, value: &str) -> Result<(), String> {
         match split_string(value) {
             Ok(values) => {
                 self.tags = Some(values);
@@ -819,17 +820,17 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_sudo(&mut self, value: &String) -> Result<(), String> {
-        self.sudo = Some(value.clone());
+    fn store_sudo(&mut self, value: &str) -> Result<(), String> {
+        self.sudo = Some(value.to_string());
         Ok(())
     }
 
-    fn store_default_user(&mut self, value: &String) -> Result<(), String> {
-        self.default_user = value.clone();
+    fn store_default_user(&mut self, value: &str) -> Result<(), String> {
+        self.default_user = value.to_string();
         Ok(())
     }
 
-    fn store_batch_size(&mut self, value: &String) -> Result<(), String> {
+    fn store_batch_size(&mut self, value: &str) -> Result<(), String> {
         if self.batch_size.is_some() {
             return Err(format!(
                 "{} has been specified already",
@@ -848,7 +849,7 @@ impl CliParser {
         }
     }
 
-    fn store_threads(&mut self, value: &String) -> Result<(), String> {
+    fn store_threads(&mut self, value: &str) -> Result<(), String> {
         match value.parse::<usize>() {
             Ok(n) => {
                 self.threads = n;
@@ -861,7 +862,7 @@ impl CliParser {
         }
     }
 
-    fn store_port(&mut self, value: &String) -> Result<(), String> {
+    fn store_port(&mut self, value: &str) -> Result<(), String> {
         match value.parse::<i64>() {
             Ok(n) => {
                 self.default_port = n;
@@ -1057,8 +1058,8 @@ impl CliParser {
 
     fn add_role_paths_from_environment(&mut self) -> Result<(), String> {
         let env_roles_path = env::var("JET_ROLES_PATH");
-        if env_roles_path.is_ok() {
-            match parse_paths(&String::from("$JET_ROLES_PATH"), &env_roles_path.unwrap()) {
+        if let Ok(env_roles_path) = env_roles_path {
+            match parse_paths("$JET_ROLES_PATH", &env_roles_path) {
                 Ok(paths) => {
                     for p in paths.iter() {
                         if p.is_dir() {
@@ -1075,11 +1076,8 @@ impl CliParser {
 
     fn add_module_paths_from_environment(&mut self) -> Result<(), String> {
         let env_modules_path = env::var("JET_MODULES_PATH");
-        if env_modules_path.is_ok() {
-            match parse_paths(
-                &String::from("$JET_MODULES_PATH"),
-                &env_modules_path.unwrap(),
-            ) {
+        if let Ok(env_modules_path) = env_modules_path {
+            match parse_paths("$JET_MODULES_PATH", &env_modules_path) {
                 Ok(paths) => {
                     for p in paths.iter() {
                         if p.is_dir() {
@@ -1094,7 +1092,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_extra_vars(&mut self, value: &String) -> Result<(), String> {
+    fn store_extra_vars(&mut self, value: &str) -> Result<(), String> {
         if value.starts_with("@") {
             // input is a filename where the data is YAML
 
@@ -1109,14 +1107,14 @@ impl CliParser {
             let extra_file = jet_file_open(path)?;
             let parsed: Result<serde_yaml::Mapping, serde_yaml::Error> =
                 serde_yaml::from_reader(extra_file);
-            if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), path);
-                return Err("edit the file and try again?".to_string());
-            }
-            blend_variables(
-                &mut self.extra_vars,
-                serde_yaml::Value::Mapping(parsed.unwrap()),
-            );
+            let parsed = match parsed {
+                Ok(p) => p,
+                Err(e) => {
+                    show_yaml_error_in_context(&e, path);
+                    return Err("edit the file and try again?".to_string());
+                }
+            };
+            blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(parsed));
         } else {
             // input is inline JSON (as YAML wouldn't make sense with the newlines)
 
@@ -1149,7 +1147,7 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_groups(&mut self, value: &String) -> Result<(), String> {
+    fn store_groups(&mut self, value: &str) -> Result<(), String> {
         match split_string(value) {
             Ok(values) => {
                 self.play_groups = Some(values);
@@ -1170,17 +1168,17 @@ impl CliParser {
         Ok(())
     }
 
-    fn store_url(&mut self, value: &String) -> Result<(), String> {
-        self.pull_url = Some(value.clone());
+    fn store_url(&mut self, value: &str) -> Result<(), String> {
+        self.pull_url = Some(value.to_string());
         Ok(())
     }
 
-    fn store_chroot(&mut self, value: &String) -> Result<(), String> {
+    fn store_chroot(&mut self, value: &str) -> Result<(), String> {
         let path = Path::new(value);
         if !path.is_dir() {
             return Err(format!("--chroot path does not exist: {}", value));
         }
-        self.chroot_path = Some(value.clone());
+        self.chroot_path = Some(value.to_string());
         Ok(())
     }
 }
@@ -1604,12 +1602,12 @@ mod tests {
     // which is complex. In production, this would be tested via integration tests.
 }
 
-fn split_string(value: &String) -> Result<Vec<String>, String> {
+fn split_string(value: &str) -> Result<Vec<String>, String> {
     Ok(value.split(":").map(String::from).collect())
 }
 
 // accept paths eliminated by ":" and return a list of paths, provided they exist
-fn parse_paths(from: &String, value: &String) -> Result<Vec<PathBuf>, String> {
+fn parse_paths(from: &str, value: &str) -> Result<Vec<PathBuf>, String> {
     let string_paths = value.split(":");
     let mut results = Vec::new();
     for string_path in string_paths {

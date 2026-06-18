@@ -220,7 +220,7 @@ impl HomebrewAction {
     pub fn parse_local_package_details(
         &self,
         _handle: &Arc<TaskHandle>,
-        out: &String,
+        out: &str,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         let mut version: Option<String> = None;
 
@@ -250,7 +250,7 @@ impl HomebrewAction {
     pub fn parse_remote_package_details(
         &self,
         _handle: &Arc<TaskHandle>,
-        out: &String,
+        out: &str,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         Ok(Some(PackageDetails {
             name: self.package.clone(),

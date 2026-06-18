@@ -52,9 +52,9 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn new(name: &String) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
-            name: name.clone(),
+            name: name.to_string(),
             variables: serde_yaml::Mapping::new(),
             groups: HashMap::new(),
             os_type: None,
@@ -83,26 +83,25 @@ impl Host {
         self.provision.is_some()
     }
 
-    pub fn notify(&mut self, play_number: usize, signal: &String) {
+    pub fn notify(&mut self, play_number: usize, signal: &str) {
         self.notified_handlers.entry(play_number).or_default();
         let entry = self.notified_handlers.get_mut(&play_number).unwrap();
-        entry.insert(signal.clone());
+        entry.insert(signal.to_string());
     }
 
-    pub fn is_notified(&self, play_number: usize, signal: &String) -> bool {
-        let entry = self.notified_handlers.get(&play_number);
-        if entry.is_none() {
-            false
-        } else {
-            entry.unwrap().contains(&signal.clone())
+    pub fn is_notified(&self, play_number: usize, signal: &str) -> bool {
+        match self.notified_handlers.get(&play_number) {
+            Some(entry) => entry.contains(&signal.to_string()),
+            None => false,
         }
     }
 
-    pub fn set_checksum_cache(&mut self, path: &String, checksum: &String) {
-        self.checksum_cache.insert(path.clone(), checksum.clone());
+    pub fn set_checksum_cache(&mut self, path: &str, checksum: &str) {
+        self.checksum_cache
+            .insert(path.to_string(), checksum.to_string());
     }
 
-    pub fn get_checksum_cache(&mut self, task_id: usize, path: &String) -> Option<String> {
+    pub fn get_checksum_cache(&mut self, task_id: usize, path: &str) -> Option<String> {
         if task_id > self.checksum_cache_task_id {
             self.checksum_cache_task_id = task_id;
             self.checksum_cache.clear();
@@ -171,8 +170,8 @@ impl Host {
         self.get_groups().keys().cloned().collect()
     }
 
-    pub fn add_group(&mut self, name: &String, group: Arc<RwLock<Group>>) {
-        self.groups.insert(name.clone(), Arc::clone(&group));
+    pub fn add_group(&mut self, name: &str, group: Arc<RwLock<Group>>) {
+        self.groups.insert(name.to_string(), Arc::clone(&group));
     }
 
     pub fn get_ancestor_groups(&self, depth_limit: usize) -> HashMap<String, Arc<RwLock<Group>>> {
