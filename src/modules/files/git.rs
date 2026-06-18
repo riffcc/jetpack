@@ -67,51 +67,48 @@ impl IsTask for GitTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(GitAction {
                 repo: handle
                     .template
-                    .string(&request, tm, &String::from("repo"), &self.repo)?,
+                    .string(request, tm, &String::from("repo"), &self.repo)?,
                 path: handle
                     .template
-                    .path(&request, tm, &String::from("path"), &self.path)?,
+                    .path(request, tm, &String::from("path"), &self.path)?,
                 branch: handle.template.string_option_default(
-                    &request,
+                    request,
                     tm,
                     &String::from("branch"),
                     &self.branch,
                     &String::from("main"),
                 )?,
                 accept_keys: handle.template.boolean_option_default_true(
-                    &request,
+                    request,
                     tm,
                     &String::from("accept_keys"),
                     &self.accept_keys,
                 )?,
                 update: handle.template.boolean_option_default_true(
-                    &request,
+                    request,
                     tm,
                     &String::from("update"),
                     &self.update,
                 )?,
-                attributes: FileAttributesInput::template(&handle, &request, tm, &self.attributes)?,
+                attributes: FileAttributesInput::template(handle, request, tm, &self.attributes)?,
                 ssh_options: {
                     let mut options: Vec<String> = Vec::new();
-                    match &self.ssh_options {
-                        Some(input_options) => {
-                            for (k, v) in input_options.iter() {
-                                options.push(format!("-o {}={}", k, v))
-                            }
+                    if let Some(input_options) = &self.ssh_options {
+                        for (k, v) in input_options.iter() {
+                            options.push(format!("-o {}={}", k, v))
                         }
-                        _ => {}
                     };
                     options.push(String::from("-o BatchMode=Yes"));
                     options
                 },
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -170,7 +167,7 @@ impl IsAction for GitAction {
                                     }
                                 }
 
-                                if changes.len() > 0 {
+                                if !changes.is_empty() {
                                     Ok(handle.response.needs_modification(request, &changes))
                                 } else {
                                     Ok(handle.response.is_matched(request))
@@ -191,7 +188,7 @@ impl IsAction for GitAction {
                 )?;
                 self.clone(handle, request)?;
                 self.switch_branch(handle, request)?;
-                return Ok(handle.response.is_created(request));
+                Ok(handle.response.is_created(request))
             }
 
             TaskRequestType::Modify => {
@@ -210,15 +207,13 @@ impl IsAction for GitAction {
                 if request.changes.contains(&Field::Branch) {
                     self.switch_branch(handle, request)?;
                 }
-                return Ok(handle
+                Ok(handle
                     .response
-                    .is_modified(request, request.changes.clone()));
+                    .is_modified(request, request.changes.clone()))
             }
 
             // no passive or execute leg
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -231,24 +226,23 @@ impl GitAction {
     }
 
     fn is_ssh_repo(&self) -> bool {
-        let result = self.repo.find("@").is_some() || self.repo.find("ssh://").is_some();
-        return result;
+        self.repo.find("@").is_some() || self.repo.find("ssh://").is_some()
     }
 
     fn get_ssh_options_string(&self) -> String {
         let options = self.ssh_options.join(" ");
         if self.repo.starts_with("http://") || self.repo.starts_with("https://") {
             // http or https:// passwords are intentionally not supported, use a key instead, see docs
-            return String::from("GIT_TERMINAL_PROMPT=0");
+            String::from("GIT_TERMINAL_PROMPT=0")
         } else {
             let accept_keys = match self.accept_keys {
                 true => String::from(" -o StrictHostKeyChecking=accept-new"),
                 false => String::from(""),
             };
-            return format!(
+            format!(
                 "GIT_SSH_COMMAND=\"ssh {}{}\" GIT_TERMINAL_PROMPT=0",
                 options, accept_keys
-            );
+            )
         }
     }
 
@@ -263,9 +257,9 @@ impl GitAction {
             .run_unsafe(request, &cmd, CheckRc::Unchecked)?;
         let (rc, out) = cmd_info(&result);
         if rc == 0 {
-            return Ok(Some(out.replace("\n", "")));
+            Ok(Some(out.replace("\n", "")))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
@@ -283,10 +277,10 @@ impl GitAction {
             true => handle
                 .remote
                 .run_forwardable(request, &cmd, CheckRc::Checked)?,
-            false => handle.remote.run_unsafe(&request, &cmd, CheckRc::Checked)?,
+            false => handle.remote.run_unsafe(request, &cmd, CheckRc::Checked)?,
         };
         let (_rc, out) = cmd_info(&result);
-        return Ok(out);
+        Ok(out)
     }
 
     fn pull(
@@ -304,9 +298,9 @@ impl GitAction {
             true => handle
                 .remote
                 .run_forwardable(request, &cmd, CheckRc::Checked)?,
-            false => handle.remote.run_unsafe(&request, &cmd, CheckRc::Checked)?,
+            false => handle.remote.run_unsafe(request, &cmd, CheckRc::Checked)?,
         };
-        return Ok(());
+        Ok(())
     }
 
     fn get_local_branch(
@@ -320,7 +314,7 @@ impl GitAction {
         );
         let result = handle.remote.run_unsafe(request, &cmd, CheckRc::Checked)?;
         let (_rc, out) = cmd_info(&result);
-        return Ok(out);
+        Ok(out)
     }
 
     fn clone(
@@ -340,9 +334,9 @@ impl GitAction {
             true => handle
                 .remote
                 .run_forwardable(request, &cmd, CheckRc::Checked)?,
-            false => handle.remote.run_unsafe(&request, &cmd, CheckRc::Checked)?,
+            false => handle.remote.run_unsafe(request, &cmd, CheckRc::Checked)?,
         };
-        return Ok(());
+        Ok(())
     }
 
     fn switch_branch(
@@ -356,7 +350,7 @@ impl GitAction {
             Self::shell_quote(&self.branch)
         );
         handle.remote.run_unsafe(request, &cmd, CheckRc::Checked)?;
-        return Ok(());
+        Ok(())
     }
 }
 // TODO: agent forwarding flag used by SSH connections

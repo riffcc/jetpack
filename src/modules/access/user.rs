@@ -86,7 +86,7 @@ impl IsTask for UserTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(UserAction {
                 user: handle.template.string_no_spaces(
                     request,
@@ -102,7 +102,7 @@ impl IsTask for UserTask {
                     None,
                 )?,
                 system: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("system"),
                     &self.system,
@@ -128,19 +128,19 @@ impl IsTask for UserTask {
                     }
                 },
                 append: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("append"),
                     &self.append,
                 )?,
                 create_home: handle.template.boolean_option_default_true(
-                    &request,
+                    request,
                     tm,
                     &String::from("create_home"),
                     &self.create_home,
                 )?,
                 create_user_group: handle.template.boolean_option_default_true(
-                    &request,
+                    request,
                     tm,
                     &String::from("create_user_group"),
                     &self.create_user_group,
@@ -158,21 +158,21 @@ impl IsTask for UserTask {
                     &self.shell,
                 )?,
                 remove: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("remove"),
                     &self.remove,
                 )?,
                 cleanup: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("cleanup"),
                     &self.cleanup,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -195,9 +195,9 @@ impl IsAction for UserAction {
                 let actual: UserDetails = self.get_user_details(handle, request)?;
 
                 match (actual.exists, self.remove) {
-                    (false, true) => return Ok(handle.response.is_matched(request)),
-                    (false, false) => return Ok(handle.response.needs_creation(request)),
-                    (true, true) => return Ok(handle.response.needs_removal(request)),
+                    (false, true) => Ok(handle.response.is_matched(request)),
+                    (false, false) => Ok(handle.response.needs_creation(request)),
+                    (true, true) => Ok(handle.response.needs_removal(request)),
                     (true, false) => {
                         let mut changes: Vec<Field> = Vec::new();
                         if UserAction::u64_wants_change(&self.uid, &actual.uid) {
@@ -217,8 +217,8 @@ impl IsAction for UserAction {
                         }
 
                         match changes.len() {
-                            0 => return Ok(handle.response.is_matched(request)),
-                            _ => return Ok(handle.response.needs_modification(request, &changes)),
+                            0 => Ok(handle.response.is_matched(request)),
+                            _ => Ok(handle.response.needs_modification(request, &changes)),
                         }
                     }
                 }
@@ -227,28 +227,26 @@ impl IsAction for UserAction {
             TaskRequestType::Create => {
                 let cmd = self.create_user_command();
                 handle.remote.run(request, &cmd, CheckRc::Checked)?;
-                return Ok(handle.response.is_created(request));
+                Ok(handle.response.is_created(request))
             }
 
             TaskRequestType::Modify => {
                 let actual: UserDetails = self.get_user_details(handle, request)?;
                 let cmd = self.modify_user_command(&actual);
                 handle.remote.run(request, &cmd, CheckRc::Checked)?;
-                return Ok(handle
+                Ok(handle
                     .response
-                    .is_modified(request, request.changes.clone()));
+                    .is_modified(request, request.changes.clone()))
             }
 
             TaskRequestType::Remove => {
                 let cmd = self.delete_user_command();
                 handle.remote.run(request, &cmd, CheckRc::Checked)?;
-                return Ok(handle.response.is_removed(request));
+                Ok(handle.response.is_removed(request))
             }
 
             // no passive or execute leg
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -262,7 +260,7 @@ impl UserAction {
         let cmd = self.get_user_gid_command();
         let result = handle.remote.run(request, &cmd, CheckRc::Checked)?;
         let (_, out) = cmd_info(&result);
-        return Ok(out);
+        Ok(out)
     }
 
     fn get_groups(
@@ -275,7 +273,7 @@ impl UserAction {
         let (_, out) = cmd_info(&result);
         let str_vec: Vec<&str> = out.split_whitespace().collect();
         let groups: HashSet<String> = str_vec.iter().map(|&s| s.to_string()).collect();
-        return Ok(groups);
+        Ok(groups)
     }
 
     fn get_user_details(
@@ -289,35 +287,31 @@ impl UserAction {
 
         match rc {
             // return early if user does not exist (rc = 2)
-            2 => {
-                return Ok(UserDetails {
-                    exists: false,
-                    uid: None,
-                    gid: None,
-                    groups: None,
-                    gecos: None,
-                    shell: None,
-                });
-            }
+            2 => Ok(UserDetails {
+                exists: false,
+                uid: None,
+                gid: None,
+                groups: None,
+                gecos: None,
+                shell: None,
+            }),
             0 => {
                 let items: Vec<&str> = out.split(":").collect();
                 let gid = Some(self.get_gid(handle, request)?);
                 let groups = Some(self.get_groups(handle, request)?);
-                return Ok(UserDetails {
+                Ok(UserDetails {
                     exists: true,
                     uid: Some(items[2].parse().unwrap()),
-                    gid: gid,
-                    groups: groups,
+                    gid,
+                    groups,
                     gecos: Some(items[4].to_string()),
                     shell: Some(items[6].to_string()),
-                });
+                })
             }
-            x => {
-                return Err(handle.response.is_failed(
-                    request,
-                    &format!("failure getting user details, rc: '{}'", x),
-                ));
-            }
+            x => Err(handle.response.is_failed(
+                request,
+                &format!("failure getting user details, rc: '{}'", x),
+            )),
         }
     }
 
@@ -326,7 +320,7 @@ impl UserAction {
         // user:pwd:UID:GID:Gecos:Homedir:Shell
         // F.e.: alice:x:1000:1000:alice:/home/alice:/bin/bash
         // Of course: the pwd field does just contain an 'x' in modern Unix/Linux because of /etc/shadow
-        return format!("getent passwd '{}'", self.user);
+        format!("getent passwd '{}'", self.user)
     }
 
     fn create_user_command(&self) -> String {
@@ -363,7 +357,7 @@ impl UserAction {
         }
 
         cmd.push_str(&format!(" '{}'", self.user));
-        return cmd;
+        cmd
     }
 
     fn modify_user_command(&self, actual: &UserDetails) -> String {
@@ -413,24 +407,24 @@ impl UserAction {
         }
         cmd.push_str(&format!(" '{}'", self.user));
 
-        return cmd;
+        cmd
     }
 
     fn delete_user_command(&self) -> String {
         match self.cleanup {
-            false => return format!("userdel '{}'", self.user),
-            true => return format!("userdel -r '{}'", self.user),
+            false => format!("userdel '{}'", self.user),
+            true => format!("userdel -r '{}'", self.user),
         }
     }
 
     fn get_user_gid_command(&self) -> String {
         // returns a string containing the primary group name.
-        return format!("id -gn '{}'", self.user);
+        format!("id -gn '{}'", self.user)
     }
 
     fn get_user_groups_command(&self) -> String {
         // returns a string containing a space separated list of group names.
-        return format!("id -Gn '{}'", self.user);
+        format!("id -Gn '{}'", self.user)
     }
 
     fn string_wants_change(our: &Option<String>, actual: &Option<String>) -> bool {
@@ -442,7 +436,7 @@ impl UserAction {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     fn u64_wants_change(our: &Option<u64>, actual: &Option<u64>) -> bool {
@@ -454,7 +448,7 @@ impl UserAction {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     fn groups_wants_change(&self, actual: &UserDetails) -> bool {
@@ -473,9 +467,9 @@ impl UserAction {
 
         desired_groups.insert(actual_gid.to_string());
         if self.append {
-            return !desired_groups.is_subset(&actual_groups);
+            !desired_groups.is_subset(actual_groups)
         } else {
-            return desired_groups != *actual_groups;
+            desired_groups != *actual_groups
         }
     }
 }

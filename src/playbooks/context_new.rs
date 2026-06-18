@@ -123,7 +123,7 @@ impl PlaybookContext {
             configured_sudo_template: None,
             ssh_user: default_user,
             ssh_port: default_port,
-            sudo: sudo,
+            sudo,
             sudo_template: None,
             run_id: GUID::rand().to_string(),
             fact_storage: RwLock::new(HashMap::new()),
@@ -169,27 +169,27 @@ impl PlaybookContext {
 
     pub fn is_host_failed(&self, host: &Arc<RwLock<Host>>) -> bool {
         let hg = host.read().unwrap();
-        return self.failed_hosts.contains_key(&hg.name);
+        self.failed_hosts.contains_key(&hg.name)
     }
 
     pub fn add_seen_host(&mut self, host: &Arc<RwLock<Host>>) {
         let hg = host.read().unwrap();
-        self.seen_hosts.insert(hg.name.clone(), Arc::clone(&host));
+        self.seen_hosts.insert(hg.name.clone(), Arc::clone(host));
     }
 
     pub fn add_targetted_host(&mut self, host: &Arc<RwLock<Host>>) {
         let hg = host.read().unwrap();
         self.targetted_hosts
-            .insert(hg.name.clone(), Arc::clone(&host));
+            .insert(hg.name.clone(), Arc::clone(host));
     }
 
     pub fn add_failed_host(&mut self, host: &Arc<RwLock<Host>>) {
         let hg = host.read().unwrap();
-        self.failed_hosts.insert(hg.name.clone(), Arc::clone(&host));
+        self.failed_hosts.insert(hg.name.clone(), Arc::clone(host));
     }
 
     pub fn get_failed_host_count(&self) -> usize {
-        return self.failed_hosts.len();
+        self.failed_hosts.len()
     }
 
     pub fn increment_attempted_for_host(&mut self, host: &Arc<RwLock<Host>>) {
@@ -285,7 +285,7 @@ impl PlaybookContext {
     pub fn get_attempted_count_for_host(&self, host: &Arc<RwLock<Host>>) -> usize {
         let hg = host.read().unwrap();
         match self.attempted_count_for_host.get(&hg.name) {
-            Some(x) => x.clone(),
+            Some(x) => *x,
             None => 0,
         }
     }
@@ -303,9 +303,9 @@ impl PlaybookContext {
 
     pub fn set_ssh_port(&mut self, port: &Option<i64>) {
         self.ssh_port = match port {
-            Some(x) => x.clone(),
+            Some(x) => *x,
             None => match self.configured_ssh_port {
-                Some(x) => x.clone(),
+                Some(x) => x,
                 None => self.ssh_port,
             },
         };
@@ -330,25 +330,22 @@ impl PlaybookContext {
     pub fn get_host_facts(&self, host: &Arc<RwLock<Host>>) -> Option<serde_yaml::Mapping> {
         let hg = host.read().unwrap();
         let storage = self.fact_storage.read().unwrap();
-        match storage.get(&hg.name) {
-            Some(x) => Some(x.clone()),
-            None => None,
-        }
+        storage.get(&hg.name).cloned()
     }
 
     pub fn host_context(&self) -> String {
         match self.play.as_ref() {
             Some(p) => format!("{:?}", p),
-            None => format!(""),
+            None => String::new(),
         }
     }
 
     pub fn get_hosts_failed_count(&self) -> usize {
-        return self.failed_count_for_host.keys().len();
+        self.failed_count_for_host.keys().len()
     }
 
     pub fn get_hosts_adjusted_count(&self) -> usize {
-        return self.adjusted_count_for_host.keys().len();
+        self.adjusted_count_for_host.keys().len()
     }
 
     pub fn set_task(&mut self, task: &crate::registry::list::Task) {

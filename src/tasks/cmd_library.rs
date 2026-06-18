@@ -37,7 +37,7 @@ pub fn screen_path(path: &String) -> Result<String, String> {
     // NOTE: this only checks paths used in commands
     let path2 = path.trim().to_string();
     let path3 = screen_general_input_strict(&path2)?;
-    return Ok(path3.to_string());
+    Ok(path3.to_string())
 }
 
 // this filtering is applied to all shell arguments in the command library below (if not, it's an error)
@@ -54,12 +54,11 @@ pub fn screen_general_input_strict(input: &String) -> Result<String, String> {
         if input2.find(invalid).is_some() {
             return Err(format!(
                 "illegal characters found: {} ('{}')",
-                input2,
-                invalid.to_string()
+                input2, invalid
             ));
         }
     }
-    return Ok(input2.to_string());
+    Ok(input2.to_string())
 }
 
 // a slightly lighter version of checking, that allows = signs and such
@@ -75,38 +74,37 @@ pub fn screen_general_input_loose(input: &String) -> Result<String, String> {
         if input2.find(invalid).is_some() {
             return Err(format!(
                 "illegal characters detected: {} ('{}')",
-                input2,
-                invalid.to_string()
+                input2, invalid
             ));
         }
     }
-    return Ok(input2.to_string());
+    Ok(input2.to_string())
 }
 
 // require that octal inputs be ... octal
 
 pub fn screen_mode(mode: &String) -> Result<String, String> {
-    if FileAttributesInput::is_octal_string(&mode) {
-        return Ok(mode.clone());
+    if FileAttributesInput::is_octal_string(mode) {
+        Ok(mode.clone())
     } else {
-        return Err(format!("not an octal string: {}", mode));
+        Err(format!("not an octal string: {}", mode))
     }
 }
 
 pub fn get_mode_command(os_type: HostOSType, untrusted_path: &String) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return match os_type {
+    match os_type {
         HostOSType::Linux => Ok(format!("stat --format '%a' '{}'", path)),
         HostOSType::MacOS => Ok(format!("stat -f '%A' '{}'", path)),
-    };
+    }
 }
 
 pub fn get_sha512_command(os_type: HostOSType, untrusted_path: &String) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return match os_type {
+    match os_type {
         HostOSType::Linux => Ok(format!("sha512sum '{}'", path)),
         HostOSType::MacOS => Ok(format!("shasum -b -a 512 '{}'", path)),
-    };
+    }
 }
 
 pub fn get_ownership_command(
@@ -114,7 +112,7 @@ pub fn get_ownership_command(
     untrusted_path: &String,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return Ok(format!("ls -ld '{}'", path));
+    Ok(format!("ls -ld '{}'", path))
 }
 
 pub fn get_is_directory_command(
@@ -122,12 +120,12 @@ pub fn get_is_directory_command(
     untrusted_path: &String,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return Ok(format!("ls -ld '{}'", path));
+    Ok(format!("ls -ld '{}'", path))
 }
 
 pub fn get_touch_command(_os_type: HostOSType, untrusted_path: &String) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return Ok(format!("touch '{}'", path));
+    Ok(format!("touch '{}'", path))
 }
 
 pub fn get_create_directory_command(
@@ -135,7 +133,7 @@ pub fn get_create_directory_command(
     untrusted_path: &String,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return Ok(format!("mkdir -p '{}'", path));
+    Ok(format!("mkdir -p '{}'", path))
 }
 
 pub fn get_delete_file_command(
@@ -143,7 +141,7 @@ pub fn get_delete_file_command(
     untrusted_path: &String,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return Ok(format!("rm -f '{}'", path));
+    Ok(format!("rm -f '{}'", path))
 }
 
 pub fn get_delete_directory_command(
@@ -153,12 +151,8 @@ pub fn get_delete_directory_command(
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
     match recurse {
-        Recurse::No => {
-            return Ok(format!("rmdir '{}'", path));
-        }
-        Recurse::Yes => {
-            return Ok(format!("rm -rf '{}'", path));
-        }
+        Recurse::No => Ok(format!("rmdir '{}'", path)),
+        Recurse::Yes => Ok(format!("rm -rf '{}'", path)),
     }
 }
 
@@ -171,12 +165,8 @@ pub fn get_rename_command(
     let src = screen_path(untrusted_src)?;
     let dest = screen_path(untrusted_dest)?;
     match force {
-        true => {
-            return Ok(format!("mv -f '{}' '{}'", src, dest));
-        }
-        false => {
-            return Ok(format!("mv '{}' '{}'", src, dest));
-        }
+        true => Ok(format!("mv -f '{}' '{}'", src, dest)),
+        false => Ok(format!("mv '{}' '{}'", src, dest)),
     }
 }
 
@@ -185,7 +175,7 @@ pub fn get_file_exists_command(
     untrusted_path: &String,
 ) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    return Ok(format!("test -e '{}'", path));
+    Ok(format!("test -e '{}'", path))
 }
 
 pub fn set_owner_command(
@@ -197,12 +187,8 @@ pub fn set_owner_command(
     let path = screen_path(untrusted_path)?;
     let owner = screen_general_input_strict(untrusted_owner)?;
     match recurse {
-        Recurse::No => {
-            return Ok(format!("chown '{}' '{}'", owner, path));
-        }
-        Recurse::Yes => {
-            return Ok(format!("chown -R '{}' '{}'", owner, path));
-        }
+        Recurse::No => Ok(format!("chown '{}' '{}'", owner, path)),
+        Recurse::Yes => Ok(format!("chown -R '{}' '{}'", owner, path)),
     }
 }
 
@@ -215,12 +201,8 @@ pub fn set_group_command(
     let path = screen_path(untrusted_path)?;
     let group = screen_general_input_strict(untrusted_group)?;
     match recurse {
-        Recurse::No => {
-            return Ok(format!("chgrp '{}' '{}'", group, path));
-        }
-        Recurse::Yes => {
-            return Ok(format!("chgrp -R '{}' '{}'", group, path));
-        }
+        Recurse::No => Ok(format!("chgrp '{}' '{}'", group, path)),
+        Recurse::Yes => Ok(format!("chgrp -R '{}' '{}'", group, path)),
     }
 }
 
@@ -235,17 +217,11 @@ pub fn set_mode_command(
     let path = screen_path(untrusted_path)?;
     let mode = screen_mode(untrusted_mode)?;
     match recurse {
-        Recurse::No => {
-            return Ok(format!("chmod '{}' '{}'", mode, path));
-        }
-        Recurse::Yes => {
-            return Ok(format!("chmod -R '{}' '{}'", mode, path));
-        }
+        Recurse::No => Ok(format!("chmod '{}' '{}'", mode, path)),
+        Recurse::Yes => Ok(format!("chmod -R '{}' '{}'", mode, path)),
     }
 }
 
-pub fn get_arch_command(os_type: HostOSType) -> Result<String, String> {
-    match os_type {
-        _ => return Ok(String::from("uname -m")),
-    }
+pub fn get_arch_command(_os_type: HostOSType) -> Result<String, String> {
+    Ok(String::from("uname -m"))
 }

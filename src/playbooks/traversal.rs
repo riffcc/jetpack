@@ -98,11 +98,11 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
             .on_playbook_start(&run_state.context);
 
         // parse the playbook file
-        let playbook_file = jet_file_open(&playbook_path)?;
+        let playbook_file = jet_file_open(playbook_path)?;
         let parsed: Result<Vec<Play>, serde_yaml::Error> = serde_yaml::from_reader(playbook_file);
         if parsed.is_err() {
-            show_yaml_error_in_context(&parsed.unwrap_err(), &playbook_path);
-            return Err(format!("edit the file and try again?"));
+            show_yaml_error_in_context(&parsed.unwrap_err(), playbook_path);
+            return Err("edit the file and try again?".to_string());
         }
 
         // chdir in the playbook directory
@@ -112,7 +112,7 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
         let pbdir = Path::new(&pbdirname);
         if pbdirname.eq(&String::from("")) {
         } else {
-            env::set_current_dir(&pbdir).expect("could not chdir into playbook directory");
+            env::set_current_dir(pbdir).expect("could not chdir into playbook directory");
         }
 
         // walk each play in the playbook
@@ -121,7 +121,7 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
             // Set the play index in context
             run_state.context.write().unwrap().play_index = play_index;
 
-            match handle_play(&run_state, play) {
+            match handle_play(run_state, play) {
                 Ok(_) => {}
                 Err(s) => {
                     return Err(s);
@@ -148,7 +148,7 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
             .clear();
 
         // switch back to the original directory
-        env::set_current_dir(&previous).expect("could not restore previous directory");
+        env::set_current_dir(previous).expect("could not restore previous directory");
     }
 
     // Process inline playbook contents (from API's playbook_content())
@@ -176,7 +176,7 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
         for (play_index, play) in plays.iter().enumerate() {
             run_state.context.write().unwrap().play_index = play_index;
 
-            match handle_play(&run_state, play) {
+            match handle_play(run_state, play) {
                 Ok(_) => {}
                 Err(s) => {
                     return Err(s);
@@ -215,7 +215,7 @@ pub fn playbook_traversal(run_state: &Arc<RunState>) -> Result<(), String> {
         .read()
         .unwrap()
         .on_exit(&run_state.context);
-    return Ok(());
+    Ok(())
 }
 
 fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
@@ -228,7 +228,7 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
         let mut ctx = run_state.context.write().unwrap();
         ctx.set_play(play);
         if play.ssh_user.is_some() {
-            ctx.set_ssh_user(&play.ssh_user.as_ref().unwrap());
+            ctx.set_ssh_user(play.ssh_user.as_ref().unwrap());
         }
         if play.ssh_port.is_some() {
             ctx.set_ssh_port(play.ssh_port.unwrap());
@@ -328,9 +328,9 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
         .on_play_stop(&run_state.context, failed);
 
     if failed {
-        return Err(failure_message.clone());
+        Err(failure_message.clone())
     } else {
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -417,7 +417,7 @@ fn handle_batch(
     // assign the batch
     {
         let mut ctx = run_state.context.write().unwrap();
-        ctx.set_targetted_hosts(&hosts);
+        ctx.set_targetted_hosts(hosts);
     }
 
     // clear role dependency tracking for this batch
@@ -477,29 +477,28 @@ fn handle_batch(
                         })
                         .or_else(|| {
                             host_vars
-                                .get(&serde_yaml::Value::String("jet_ssh_hostname".to_string()))
+                                .get(serde_yaml::Value::String("jet_ssh_hostname".to_string()))
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string())
                         });
 
-                    if let Some(inv_ip) = inventory_ip {
-                        if inv_ip != zone_ip {
-                            // Drift detected - update zone file
-                            if check_mode {
-                                eprintln!(
-                                    "  → DNS: would update {} {} → {} (check mode)",
+                    if let Some(inv_ip) = inventory_ip
+                        && inv_ip != zone_ip
+                    {
+                        // Drift detected - update zone file
+                        if check_mode {
+                            eprintln!(
+                                "  → DNS: would update {} {} → {} (check mode)",
+                                host_name, zone_ip, inv_ip
+                            );
+                        } else {
+                            match crate::dns::add_host_record(&dns_config, &host_name, &inv_ip) {
+                                Ok(true) => eprintln!(
+                                    "  → DNS: updated {} {} → {}",
                                     host_name, zone_ip, inv_ip
-                                );
-                            } else {
-                                match crate::dns::add_host_record(&dns_config, &host_name, &inv_ip)
-                                {
-                                    Ok(true) => eprintln!(
-                                        "  → DNS: updated {} {} → {}",
-                                        host_name, zone_ip, inv_ip
-                                    ),
-                                    Ok(false) => {}
-                                    Err(e) => eprintln!("  → DNS: warning: {}", e),
-                                }
+                                ),
+                                Ok(false) => {}
+                                Err(e) => eprintln!("  → DNS: warning: {}", e),
                             }
                         }
                     }
@@ -551,78 +550,76 @@ fn handle_batch(
             )
         };
 
-        if needs_provision {
-            if let Some(ref config) = provision_config {
-                // Dry-run: never create/update/destroy infrastructure in check mode.
-                if check_mode {
-                    eprintln!(
-                        "  ~ {} => would provision ({}) — skipped (check mode)",
-                        host_name, config.provision_type
+        if needs_provision && let Some(ref config) = provision_config {
+            // Dry-run: never create/update/destroy infrastructure in check mode.
+            if check_mode {
+                eprintln!(
+                    "  ~ {} => would provision ({}) — skipped (check mode)",
+                    host_name, config.provision_type
+                );
+                continue;
+            }
+            let dns_key = serde_yaml::Value::String("dns".to_string());
+            let dns_config = host_vars
+                .get(&dns_key)
+                .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
+
+            match ensure_host_provisioned(
+                config,
+                &host_name,
+                &run_state.inventory,
+                dns_config.as_ref(),
+                run_state.output_handler.as_ref(),
+            ) {
+                Ok(crate::provisioners::ProvisionResult::Destroyed) => {
+                    run_state.visitor.read().unwrap().on_host_provisioned(
+                        &run_state.context,
+                        &host_name,
+                        &crate::provisioners::ProvisionResult::Destroyed,
                     );
                     continue;
                 }
-                let dns_key = serde_yaml::Value::String("dns".to_string());
-                let dns_config = host_vars
-                    .get(&dns_key)
-                    .and_then(|v| serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok());
+                Ok(result) => {
+                    run_state.visitor.read().unwrap().on_host_provisioned(
+                        &run_state.context,
+                        &host_name,
+                        &result,
+                    );
 
-                match ensure_host_provisioned(
-                    config,
-                    &host_name,
-                    &run_state.inventory,
-                    dns_config.as_ref(),
-                    run_state.output_handler.as_ref(),
-                ) {
-                    Ok(crate::provisioners::ProvisionResult::Destroyed) => {
-                        run_state.visitor.read().unwrap().on_host_provisioned(
-                            &run_state.context,
-                            &host_name,
-                            &crate::provisioners::ProvisionResult::Destroyed,
-                        );
-                        continue;
-                    }
-                    Ok(result) => {
-                        run_state.visitor.read().unwrap().on_host_provisioned(
-                            &run_state.context,
-                            &host_name,
-                            &result,
-                        );
+                    let ip = crate::provisioners::get_provisioner(&config.provision_type)
+                        .ok()
+                        .and_then(|p| {
+                            p.get_ip(config, &host_name, &run_state.inventory)
+                                .ok()
+                                .flatten()
+                        });
 
-                        let ip = crate::provisioners::get_provisioner(&config.provision_type)
-                            .ok()
-                            .and_then(|p| {
-                                p.get_ip(config, &host_name, &run_state.inventory)
-                                    .ok()
-                                    .flatten()
-                            });
+                    let mut host = host_arc.write().unwrap();
+                    let mut vars = host.get_variables();
+                    let mut changed = false;
 
-                        let mut host = host_arc.write().unwrap();
-                        let mut vars = host.get_variables();
-                        let mut changed = false;
-
-                        if let Some(ref ip_addr) = ip {
-                            let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                            if !vars.contains_key(&key) {
-                                vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
-                                changed = true;
-                            }
-                        }
-
-                        if let Some(ref ssh_user) = config.ssh_user {
-                            let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                            if !vars.contains_key(&key) {
-                                vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
-                                changed = true;
-                            }
-                        }
-
-                        if changed {
-                            host.set_variables(vars);
+                    if let Some(ref ip_addr) = ip {
+                        let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
+                        if !vars.contains_key(&key) {
+                            vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
+                            changed = true;
                         }
                     }
-                    Err(e) => {
-                        return Err(format!("Failed to provision host '{}': {}", host_name, e));
+
+                    if let Some(ref ssh_user) = config.ssh_user {
+                        let key = serde_yaml::Value::String("jet_ssh_user".to_string());
+                        if !vars.contains_key(&key) {
+                            vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
+                            changed = true;
+                        }
                     }
+
+                    if changed {
+                        host.set_variables(vars);
+                    }
+                }
+                Err(e) => {
+                    return Err(format!("Failed to provision host '{}': {}", host_name, e));
                 }
             }
         }
@@ -634,7 +631,7 @@ fn handle_batch(
     if play.roles.is_some() {
         let roles = play.roles.as_ref().unwrap();
         for invocation in roles.iter() {
-            process_role(run_state, &play, &invocation, HandlerMode::NormalTasks)?;
+            process_role(run_state, play, invocation, HandlerMode::NormalTasks)?;
         }
     }
     {
@@ -646,7 +643,7 @@ fn handle_batch(
     if play.tasks.is_some() {
         let tasks = play.tasks.as_ref().unwrap();
         for task in tasks.iter() {
-            process_task(run_state, &play, &task, HandlerMode::NormalTasks, None)?;
+            process_task(run_state, play, task, HandlerMode::NormalTasks, None)?;
         }
     }
 
@@ -654,7 +651,7 @@ fn handle_batch(
     if play.roles.is_some() {
         let roles = play.roles.as_ref().unwrap();
         for invocation in roles.iter() {
-            process_role(run_state, &play, &invocation, HandlerMode::Handlers)?;
+            process_role(run_state, play, invocation, HandlerMode::Handlers)?;
         }
     }
     {
@@ -666,10 +663,10 @@ fn handle_batch(
     if play.handlers.is_some() {
         let handlers = play.handlers.as_ref().unwrap();
         for handler in handlers {
-            process_task(run_state, &play, &handler, HandlerMode::Handlers, None)?;
+            process_task(run_state, play, handler, HandlerMode::Handlers, None)?;
         }
     }
-    return Ok(());
+    Ok(())
 }
 
 /// Host-parallel async execution.
@@ -743,95 +740,79 @@ fn async_handle_batch(
                     )
                 };
 
-                if needs_provision {
-                    if let Some(ref config) = provision_config {
-                        let dns_key = serde_yaml::Value::String("dns".to_string());
-                        let dns_config = host_vars.get(&dns_key).and_then(|v| {
-                            serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok()
-                        });
+                if needs_provision && let Some(ref config) = provision_config {
+                    let dns_key = serde_yaml::Value::String("dns".to_string());
+                    let dns_config = host_vars.get(&dns_key).and_then(|v| {
+                        serde_yaml::from_value::<crate::dns::DnsConfig>(v.clone()).ok()
+                    });
 
-                        match ensure_host_provisioned(
-                            config,
-                            &host_name,
-                            &run_state.inventory,
-                            dns_config.as_ref(),
-                            run_state.output_handler.as_ref(),
-                        ) {
-                            Ok(crate::provisioners::ProvisionResult::Destroyed) => {
-                                run_state.visitor.read().unwrap().on_host_provisioned(
-                                    &run_state.context,
-                                    &host_name,
-                                    &crate::provisioners::ProvisionResult::Destroyed,
-                                );
-                                async_ctx.withdraw_from(0);
-                                let _ = host_tx.send(HostEvent::HostFailed {
-                                    host_idx,
-                                    error: format!(
-                                        "host '{}' was destroyed by provisioner",
-                                        host_name
-                                    ),
-                                });
-                                return 1;
-                            }
-                            Ok(result) => {
-                                run_state.visitor.read().unwrap().on_host_provisioned(
-                                    &run_state.context,
-                                    &host_name,
-                                    &result,
-                                );
+                    match ensure_host_provisioned(
+                        config,
+                        &host_name,
+                        &run_state.inventory,
+                        dns_config.as_ref(),
+                        run_state.output_handler.as_ref(),
+                    ) {
+                        Ok(crate::provisioners::ProvisionResult::Destroyed) => {
+                            run_state.visitor.read().unwrap().on_host_provisioned(
+                                &run_state.context,
+                                &host_name,
+                                &crate::provisioners::ProvisionResult::Destroyed,
+                            );
+                            async_ctx.withdraw_from(0);
+                            let _ = host_tx.send(HostEvent::HostFailed {
+                                host_idx,
+                                error: format!("host '{}' was destroyed by provisioner", host_name),
+                            });
+                            return 1;
+                        }
+                        Ok(result) => {
+                            run_state.visitor.read().unwrap().on_host_provisioned(
+                                &run_state.context,
+                                &host_name,
+                                &result,
+                            );
 
-                                let ip =
-                                    crate::provisioners::get_provisioner(&config.provision_type)
+                            let ip = crate::provisioners::get_provisioner(&config.provision_type)
+                                .ok()
+                                .and_then(|p| {
+                                    p.get_ip(config, &host_name, &run_state.inventory)
                                         .ok()
-                                        .and_then(|p| {
-                                            p.get_ip(config, &host_name, &run_state.inventory)
-                                                .ok()
-                                                .flatten()
-                                        });
-
-                                let mut h = host.write().unwrap();
-                                let mut vars = h.get_variables();
-                                let mut changed = false;
-
-                                if let Some(ref ip_addr) = ip {
-                                    let key =
-                                        serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                                    if !vars.contains_key(&key) {
-                                        vars.insert(
-                                            key,
-                                            serde_yaml::Value::String(ip_addr.clone()),
-                                        );
-                                        changed = true;
-                                    }
-                                }
-
-                                if let Some(ref ssh_user) = config.ssh_user {
-                                    let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                                    if !vars.contains_key(&key) {
-                                        vars.insert(
-                                            key,
-                                            serde_yaml::Value::String(ssh_user.clone()),
-                                        );
-                                        changed = true;
-                                    }
-                                }
-
-                                if changed {
-                                    h.set_variables(vars);
-                                }
-                            }
-                            Err(e) => {
-                                async_ctx.withdraw_from(0);
-                                run_state.context.write().unwrap().fail_host(host);
-                                let _ = host_tx.send(HostEvent::HostFailed {
-                                    host_idx,
-                                    error: format!(
-                                        "Failed to provision host '{}': {}",
-                                        host_name, e
-                                    ),
+                                        .flatten()
                                 });
-                                return 1;
+
+                            let mut h = host.write().unwrap();
+                            let mut vars = h.get_variables();
+                            let mut changed = false;
+
+                            if let Some(ref ip_addr) = ip {
+                                let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
+                                if !vars.contains_key(&key) {
+                                    vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
+                                    changed = true;
+                                }
                             }
+
+                            if let Some(ref ssh_user) = config.ssh_user {
+                                let key = serde_yaml::Value::String("jet_ssh_user".to_string());
+                                if !vars.contains_key(&key) {
+                                    vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
+                                    changed = true;
+                                }
+                            }
+
+                            if changed {
+                                h.set_variables(vars);
+                            }
+                        }
+                        Err(e) => {
+                            async_ctx.withdraw_from(0);
+                            run_state.context.write().unwrap().fail_host(host);
+                            let _ = host_tx.send(HostEvent::HostFailed {
+                                host_idx,
+                                error: format!("Failed to provision host '{}': {}", host_name, e),
+                            });
+                            return 1;
                         }
                     }
                 }
@@ -970,7 +951,7 @@ fn check_tags(
                     // tags are applied to the task
                     Some(task_tags) => {
                         for x in task_tags.iter() {
-                            if cli_tags.contains(&x) {
+                            if cli_tags.contains(x) {
                                 return true;
                             }
                         }
@@ -982,16 +963,15 @@ fn check_tags(
             };
             match role_invocation {
                 // the role invocation has tags applied
-                Some(role_invoke) => match &role_invoke.tags {
-                    Some(role_tags) => {
+                Some(role_invoke) => {
+                    if let Some(role_tags) = &role_invoke.tags {
                         for x in role_tags.iter() {
-                            if cli_tags.contains(&x) {
+                            if cli_tags.contains(x) {
                                 return true;
                             }
                         }
                     }
-                    None => {}
-                },
+                }
                 None => {}
             };
         }
@@ -1001,7 +981,7 @@ fn check_tags(
         }
     }
     // we didn't match any tags, so don't run the task
-    return false;
+    false
 }
 
 fn process_task(
@@ -1022,14 +1002,14 @@ fn process_task(
 
     let hosts: HashMap<String, Arc<RwLock<Host>>> =
         run_state.context.read().unwrap().get_remaining_hosts();
-    if hosts.len() == 0 {
+    if hosts.is_empty() {
         return Err(String::from("no hosts remaining"));
     }
 
     // we will run tasks with the FSM only if not skipped by tags
     let should_run = check_tags(run_state, task, role_invocation);
     if should_run {
-        run_state.context.write().unwrap().set_task(&task);
+        run_state.context.write().unwrap().set_task(task);
         run_state
             .visitor
             .read()
@@ -1039,7 +1019,7 @@ fn process_task(
         fsm_run_task(run_state, play, task, are_handlers)?;
     }
 
-    return Ok(());
+    Ok(())
 }
 
 fn process_role(
@@ -1086,7 +1066,7 @@ fn process_role(
         .push(role_name.clone());
 
     // can we find a role directory in the configured role paths?
-    let (role, role_path) = find_role(run_state, &play, role_name.clone())?;
+    let (role, role_path) = find_role(run_state, play, role_name.clone())?;
 
     // process dependencies first
     if role.dependencies.is_some() {
@@ -1168,24 +1148,24 @@ fn process_role(
 
             // parse the YAML file
 
-            let task_fh = jet_file_open(&task_buf.as_path())?;
+            let task_fh = jet_file_open(task_buf.as_path())?;
             let parsed: Result<Vec<Task>, serde_yaml::Error> = serde_yaml::from_reader(task_fh);
             if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), &task_buf.as_path());
-                return Err(format!("edit the file and try again?"));
+                show_yaml_error_in_context(&parsed.unwrap_err(), task_buf.as_path());
+                return Err("edit the file and try again?".to_string());
             }
             let tasks = parsed.unwrap();
             for task in tasks.iter() {
                 // process all tasks in the YAML file, this is the same function used
                 // for processing loose tasks outside of roles
 
-                process_task(run_state, &play, &task, are_handlers, Some(invocation))?;
+                process_task(run_state, play, task, are_handlers, Some(invocation))?;
             }
         }
 
         // we're done with the role so flip back to the previous directory
 
-        match env::set_current_dir(&previous) {
+        match env::set_current_dir(previous) {
             Ok(_) => {}
             Err(s) => {
                 return Err(format!(
@@ -1212,7 +1192,7 @@ fn process_role(
         processed.insert(role_name);
     }
 
-    return Ok(());
+    Ok(())
 }
 
 fn get_host_batches(
@@ -1241,7 +1221,7 @@ fn get_host_batches(
             let mut count = host_count / batch_size;
             let remainder = host_count % batch_size;
             if remainder > 0 {
-                count = count + 1
+                count += 1
             }
             count
         }
@@ -1249,7 +1229,7 @@ fn get_host_batches(
 
     // sort the hosts so the batches seem consistent when doing successive playbook executions
 
-    let mut hosts_list: Vec<Arc<RwLock<Host>>> = hosts.iter().map(|v| Arc::clone(&v)).collect();
+    let mut hosts_list: Vec<Arc<RwLock<Host>>> = hosts.iter().map(Arc::clone).collect();
     hosts_list.sort_by(|b, a| {
         a.read()
             .unwrap()
@@ -1274,7 +1254,7 @@ fn get_host_batches(
         results.insert(batch_num, batch);
     }
 
-    return (batch_size, batch_count, results);
+    (batch_size, batch_count, results)
 }
 
 fn get_play_hosts(run_state: &Arc<RunState>, play: &Play) -> Vec<Arc<RwLock<Host>>> {
@@ -1334,15 +1314,15 @@ fn get_play_hosts(run_state: &Arc<RunState>, play: &Play) -> Vec<Arc<RwLock<Host
                     }
                 }
                 if ok {
-                    results.insert(k.clone(), Arc::clone(&v));
+                    results.insert(k.clone(), Arc::clone(v));
                 }
             } else {
-                results.insert(k.clone(), Arc::clone(&v));
+                results.insert(k.clone(), Arc::clone(v));
             }
         }
     }
 
-    return results.iter().map(|(_k, v)| Arc::clone(&v)).collect();
+    results.values().map(Arc::clone).collect()
 }
 
 /// Report what an instantiate block *would* create, without any side effects.
@@ -1561,14 +1541,13 @@ fn handle_instantiate(
         );
 
         // Merge with existing if present (LWW)
-        if host_file.exists() {
-            if let Ok(existing) = fs::read_to_string(&host_file) {
-                if let Ok(existing_doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&existing) {
-                    for (key, value) in existing_doc {
-                        if key.as_str() != Some("provision") {
-                            host_vars.insert(key, value);
-                        }
-                    }
+        if host_file.exists()
+            && let Ok(existing) = fs::read_to_string(&host_file)
+            && let Ok(existing_doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&existing)
+        {
+            for (key, value) in existing_doc {
+                if key.as_str() != Some("provision") {
+                    host_vars.insert(key, value);
                 }
             }
         }
@@ -1613,7 +1592,7 @@ fn handle_instantiate(
             if let Ok(content) = fs::read_to_string(&group_file) {
                 if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content) {
                     if let Some(serde_yaml::Value::Sequence(seq)) =
-                        doc.get(&serde_yaml::Value::String("hosts".to_string()))
+                        doc.get(serde_yaml::Value::String("hosts".to_string()))
                     {
                         seq.iter()
                             .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -1663,36 +1642,36 @@ fn handle_instantiate(
 
 /// Expand pattern like "fleet-{01..10}.domain" to list of hostnames
 fn expand_instantiate_pattern(pattern: &str) -> Result<Vec<String>, String> {
-    if let Some(start_brace) = pattern.find('{') {
-        if let Some(end_brace) = pattern.find('}') {
-            let prefix = &pattern[..start_brace];
-            let suffix = &pattern[end_brace + 1..];
-            let range_part = &pattern[start_brace + 1..end_brace];
+    if let Some(start_brace) = pattern.find('{')
+        && let Some(end_brace) = pattern.find('}')
+    {
+        let prefix = &pattern[..start_brace];
+        let suffix = &pattern[end_brace + 1..];
+        let range_part = &pattern[start_brace + 1..end_brace];
 
-            if range_part.contains("..") {
-                let parts: Vec<&str> = range_part.split("..").collect();
-                if parts.len() != 2 {
-                    return Err(format!("Invalid range pattern: {}", range_part));
-                }
-                let start: u64 = parts[0]
-                    .parse()
-                    .map_err(|_| format!("Invalid range start: {}", parts[0]))?;
-                let end: u64 = parts[1]
-                    .parse()
-                    .map_err(|_| format!("Invalid range end: {}", parts[1]))?;
-                let width = parts[0].len();
-
-                return Ok((start..=end)
-                    .map(|i| format!("{}{:0width$}{}", prefix, i, suffix, width = width))
-                    .collect());
+        if range_part.contains("..") {
+            let parts: Vec<&str> = range_part.split("..").collect();
+            if parts.len() != 2 {
+                return Err(format!("Invalid range pattern: {}", range_part));
             }
+            let start: u64 = parts[0]
+                .parse()
+                .map_err(|_| format!("Invalid range start: {}", parts[0]))?;
+            let end: u64 = parts[1]
+                .parse()
+                .map_err(|_| format!("Invalid range end: {}", parts[1]))?;
+            let width = parts[0].len();
 
-            if range_part.contains(',') {
-                return Ok(range_part
-                    .split(',')
-                    .map(|item| format!("{}{}{}", prefix, item.trim(), suffix))
-                    .collect());
-            }
+            return Ok((start..=end)
+                .map(|i| format!("{}{:0width$}{}", prefix, i, suffix, width = width))
+                .collect());
+        }
+
+        if range_part.contains(',') {
+            return Ok(range_part
+                .split(',')
+                .map(|item| format!("{}{}{}", prefix, item.trim(), suffix))
+                .collect());
         }
     }
     Ok(vec![pattern.to_string()])
@@ -1711,7 +1690,7 @@ fn validate_limit_groups(run_state: &Arc<RunState>, _play: &Play) -> Result<(), 
             ));
         }
     }
-    return Ok(());
+    Ok(())
 }
 
 fn validate_limit_hosts(run_state: &Arc<RunState>, _play: &Play) -> Result<(), String> {
@@ -1727,7 +1706,7 @@ fn validate_limit_hosts(run_state: &Arc<RunState>, _play: &Play) -> Result<(), S
             ));
         }
     }
-    return Ok(());
+    Ok(())
 }
 
 fn validate_groups(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
@@ -1759,7 +1738,7 @@ fn validate_groups(run_state: &Arc<RunState>, play: &Play) -> Result<(), String>
             ));
         }
     }
-    return Ok(());
+    Ok(())
 }
 
 fn validate_hosts(
@@ -1773,7 +1752,7 @@ fn validate_hosts(
     if hosts.is_empty() {
         return Err(String::from("no hosts selected by groups in play"));
     }
-    return Ok(());
+    Ok(())
 }
 
 fn load_vars_into_context(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
@@ -1800,12 +1779,12 @@ fn load_vars_into_context(run_state: &Arc<RunState>, play: &Play) -> Result<(), 
         let vars_files = play.vars_files.as_ref().unwrap();
         for pathname in vars_files {
             let path = Path::new(&pathname);
-            let vars_file = jet_file_open(&path)?;
+            let vars_file = jet_file_open(path)?;
             let parsed: Result<serde_yaml::Mapping, serde_yaml::Error> =
                 serde_yaml::from_reader(vars_file);
             if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), &path);
-                return Err(format!("edit the file and try again?"));
+                show_yaml_error_in_context(&parsed.unwrap_err(), path);
+                return Err("edit the file and try again?".to_string());
             }
             blend_variables(
                 &mut ctx_vars_storage,
@@ -1833,7 +1812,7 @@ fn load_vars_into_context(run_state: &Arc<RunState>, play: &Play) -> Result<(), 
         _ => panic!("unexpected, get_blended_variables produced a non-mapping (1)"),
     }
 
-    return Ok(());
+    Ok(())
 }
 
 fn find_role(
@@ -1854,19 +1833,19 @@ fn find_role(
 
         if pb2.exists() {
             let path = pb2.as_path();
-            let role_file = jet_file_open(&path)?;
+            let role_file = jet_file_open(path)?;
 
             // deserialize the role file and make sure it is valid before returning
 
             let parsed: Result<Role, serde_yaml::Error> = serde_yaml::from_reader(role_file);
             if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), &path);
-                return Err(format!("edit the file and try again?"));
+                show_yaml_error_in_context(&parsed.unwrap_err(), path);
+                return Err("edit the file and try again?".to_string());
             }
             let role = parsed.unwrap();
 
             return Ok((role, pb));
         }
     }
-    return Err(format!("role not found: {}", role_name));
+    Err(format!("role not found: {}", role_name))
 }

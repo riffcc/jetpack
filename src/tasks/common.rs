@@ -40,10 +40,10 @@ pub trait IsTask: Send + Sync {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>>;
 
     fn get_display_name(&self) -> String {
-        return match self.get_name() {
+        match self.get_name() {
             Some(x) => x,
             _ => self.get_module(),
-        };
+        }
     }
 }
 

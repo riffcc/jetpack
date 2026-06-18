@@ -68,15 +68,11 @@ impl Group {
                 }
             }
         }
-        return results;
+        results
     }
 
     pub fn get_ancestor_group_names(&self) -> Vec<String> {
-        return self
-            .get_ancestor_groups(10usize)
-            .iter()
-            .map(|(k, _v)| k.clone())
-            .collect();
+        self.get_ancestor_groups(10usize).keys().cloned().collect()
     }
 
     pub fn get_descendant_groups(&self, depth_limit: usize) -> HashMap<String, Arc<RwLock<Group>>> {
@@ -92,68 +88,55 @@ impl Group {
                     .get_descendant_groups(depth_limit - 1)
                     .iter()
                 {
-                    results.insert(k2.clone(), Arc::clone(&v2));
+                    results.insert(k2.clone(), Arc::clone(v2));
                 }
             }
-            results.insert(k.clone(), Arc::clone(&v));
+            results.insert(k.clone(), Arc::clone(v));
         }
-        return results;
+        results
     }
 
     pub fn get_descendant_group_names(&self) -> Vec<String> {
-        return self
-            .get_descendant_groups(10usize)
-            .iter()
-            .map(|(k, _v)| k.clone())
-            .collect();
+        self.get_descendant_groups(10usize)
+            .keys()
+            .cloned()
+            .collect()
     }
 
     pub fn get_parent_groups(&self) -> HashMap<String, Arc<RwLock<Group>>> {
         let mut results: HashMap<String, Arc<RwLock<Group>>> = HashMap::new();
         for (k, v) in self.parents.iter() {
-            results.insert(k.clone(), Arc::clone(&v));
+            results.insert(k.clone(), Arc::clone(v));
         }
-        return results;
+        results
     }
 
     pub fn get_parent_group_names(&self) -> Vec<String> {
-        return self
-            .get_parent_groups()
-            .iter()
-            .map(|(k, _v)| k.clone())
-            .collect();
+        self.get_parent_groups().keys().cloned().collect()
     }
 
     pub fn get_subgroups(&self) -> HashMap<String, Arc<RwLock<Group>>> {
         let mut results: HashMap<String, Arc<RwLock<Group>>> = HashMap::new();
         for (k, v) in self.subgroups.iter() {
-            results.insert(k.clone(), Arc::clone(&v));
+            results.insert(k.clone(), Arc::clone(v));
         }
-        return results;
+        results
     }
 
     pub fn get_subgroup_names(&self) -> Vec<String> {
-        return self
-            .get_subgroups()
-            .iter()
-            .map(|(k, _v)| k.clone())
-            .collect();
+        self.get_subgroups().keys().cloned().collect()
     }
 
     pub fn get_direct_hosts(&self) -> HashMap<String, Arc<RwLock<Host>>> {
         let mut results: HashMap<String, Arc<RwLock<Host>>> = HashMap::new();
         for (k, v) in self.hosts.iter() {
-            results.insert(k.clone(), Arc::clone(&v));
+            results.insert(k.clone(), Arc::clone(v));
         }
-        return results;
+        results
     }
 
     pub fn get_direct_host_names(&self) -> Vec<String> {
-        return self
-            .get_direct_hosts()
-            .iter()
-            .map(|(k, _v)| k.clone())
-            .collect();
+        self.get_direct_hosts().keys().cloned().collect()
     }
 
     pub fn get_descendant_hosts(&self) -> HashMap<String, Arc<RwLock<Host>>> {
@@ -166,22 +149,18 @@ impl Group {
         for (_k, v) in groups.iter() {
             let hosts = v.read().unwrap().get_direct_hosts();
             for (k2, v2) in hosts.iter() {
-                results.insert(k2.clone(), Arc::clone(&v2));
+                results.insert(k2.clone(), Arc::clone(v2));
             }
         }
-        return results;
+        results
     }
 
     pub fn get_descendant_host_names(&self) -> Vec<String> {
-        return self
-            .get_descendant_hosts()
-            .iter()
-            .map(|(k, _v)| k.clone())
-            .collect();
+        self.get_descendant_hosts().keys().cloned().collect()
     }
 
     pub fn get_variables(&self) -> serde_yaml::Mapping {
-        return self.variables.clone();
+        self.variables.clone()
     }
 
     pub fn set_variables(&mut self, variables: serde_yaml::Mapping) {
@@ -204,26 +183,26 @@ impl Group {
         }
         let mine = serde_yaml::Value::from(self.get_variables());
         blend_variables(&mut blended, mine);
-        return match blended {
+        match blended {
             serde_yaml::Value::Mapping(x) => x,
             _ => panic!("get_blended_variables produced a non-mapping (1)"),
-        };
+        }
     }
 
     pub fn get_variables_yaml(&self) -> Result<String, String> {
         let result = serde_yaml::to_string(&self.get_variables());
-        return match result {
+        match result {
             Ok(x) => Ok(x),
             Err(_y) => Err(String::from("error loading variables")),
-        };
+        }
     }
 
     pub fn get_blended_variables_yaml(&self) -> Result<String, String> {
         let result = serde_yaml::to_string(&self.get_blended_variables());
-        return match result {
+        match result {
             Ok(x) => Ok(x),
             Err(_y) => Err(String::from("error loading blended variables")),
-        };
+        }
     }
 }
 

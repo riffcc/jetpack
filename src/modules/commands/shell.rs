@@ -60,35 +60,35 @@ impl IsTask for ShellTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(ShellAction {
                 cmd: handle.template.string_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("cmd"),
                     &self.cmd,
                 )?,
                 save: handle.template.string_option_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("save"),
                     &self.save,
                 )?,
                 failed_when: handle.template.string_option_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("failed_when"),
                     &self.failed_when,
                 )?,
                 changed_when: handle.template.string_option_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("changed_when"),
                     &self.changed_when,
                 )?,
                 shell: match &self.shell {
                     Some(s) => handle.template.string_unsafe_for_shell(
-                        &request,
+                        request,
                         tm,
                         &String::from("shell"),
                         s,
@@ -96,9 +96,9 @@ impl IsTask for ShellTask {
                     None => String::from("/bin/bash"),
                 },
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -109,9 +109,7 @@ impl IsAction for ShellAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_execution(&request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_execution(request)),
 
             TaskRequestType::Execute => {
                 // Unlike the command module, shell module runs commands through an actual shell
@@ -123,7 +121,7 @@ impl IsAction for ShellAction {
                 let task_result =
                     handle
                         .remote
-                        .run_unsafe(&request, &shell_cmd, CheckRc::Unchecked)?;
+                        .run_unsafe(request, &shell_cmd, CheckRc::Unchecked)?;
                 let (rc, out) = cmd_info(&task_result);
                 let map_data = build_results_map(rc, &out);
 
@@ -162,7 +160,7 @@ impl IsAction for ShellAction {
                     save_results(&handle.host, self.save.as_ref().unwrap(), map_data);
                 }
 
-                return match should_fail {
+                match should_fail {
                     true => Err(handle
                         .response
                         .command_failed(request, &Arc::clone(&task_result.command_result))),
@@ -170,13 +168,11 @@ impl IsAction for ShellAction {
                         true => Ok(task_result),
                         false => Ok(handle.response.is_passive(request)),
                     },
-                };
+                }
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
-        };
+            _ => Err(handle.response.not_supported(request)),
+        }
     }
 }
 
@@ -192,7 +188,7 @@ fn build_results_map(rc: i32, out: &String) -> serde_yaml::Mapping {
         serde_yaml::Value::String(String::from("stdout")),
         serde_yaml::Value::String(out.clone()),
     );
-    return result;
+    result
 }
 
 fn save_results(host: &Arc<RwLock<Host>>, key: &String, map_data: serde_yaml::Mapping) {

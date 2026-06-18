@@ -153,10 +153,8 @@ pub fn add_host_record(config: &DnsConfig, inventory_name: &str, ip: &str) -> Re
     // Sync to provider if auto_sync enabled
     if changed && config.auto_sync {
         sync(config, &zone)?;
-        if ptr_changed {
-            if let Some(ref reverse_zone) = config.reverse_zone {
-                sync(config, reverse_zone)?;
-            }
+        if ptr_changed && let Some(ref reverse_zone) = config.reverse_zone {
+            sync(config, reverse_zone)?;
         }
     }
 

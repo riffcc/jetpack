@@ -30,7 +30,7 @@ static HANDLEBARS: Lazy<Handlebars> = Lazy::new(|| {
     hb.register_escape_fn(handlebars::no_escape);
     hb.set_strict_mode(true);
     register_helpers(&mut hb);
-    return hb;
+    hb
 });
 
 // 'off' mode is used in a bit of a weird traversal/engine
@@ -46,9 +46,15 @@ pub enum TemplateMode {
 
 pub struct Templar {}
 
+impl Default for Templar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Templar {
     pub fn new() -> Self {
-        return Self {};
+        Self {}
     }
 
     // evaluate a string
@@ -95,22 +101,22 @@ impl Templar {
         match result {
             Ok(x) => {
                 if x.as_str().eq("true") {
-                    return Ok(true);
+                    Ok(true)
                 } else {
-                    return Ok(false);
+                    Ok(false)
                 }
             }
             Err(y) => {
                 if y.find("Couldn't read parameter").is_some() {
-                    return Err(format!(
+                    Err(format!(
                         "failed to parse conditional: {}: one or more parameters may be undefined",
                         expr
-                    ));
+                    ))
                 } else {
-                    return Err(format!("failed to parse conditional: {}: {}", expr, y));
+                    Err(format!("failed to parse conditional: {}: {}", expr, y))
                 }
             }
-        };
+        }
     }
 }
 

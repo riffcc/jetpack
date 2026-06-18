@@ -84,9 +84,7 @@ impl Host {
     }
 
     pub fn notify(&mut self, play_number: usize, signal: &String) {
-        if !self.notified_handlers.contains_key(&play_number) {
-            self.notified_handlers.insert(play_number, HashSet::new());
-        }
+        self.notified_handlers.entry(play_number).or_default();
         let entry = self.notified_handlers.get_mut(&play_number).unwrap();
         entry.insert(signal.clone());
     }
@@ -94,9 +92,9 @@ impl Host {
     pub fn is_notified(&self, play_number: usize, signal: &String) -> bool {
         let entry = self.notified_handlers.get(&play_number);
         if entry.is_none() {
-            return false;
+            false
         } else {
-            return entry.unwrap().contains(&signal.clone());
+            entry.unwrap().contains(&signal.clone())
         }
     }
 
@@ -111,9 +109,9 @@ impl Host {
         }
         if self.checksum_cache.contains_key(path) {
             let result = self.checksum_cache.get(path).unwrap();
-            return Some(result.clone());
+            Some(result.clone())
         } else {
-            return None;
+            None
         }
     }
 
@@ -129,7 +127,7 @@ impl Host {
                 uname_output
             ));
         }
-        return Ok(());
+        Ok(())
     }
 
     // ==============================================================================================================
@@ -139,9 +137,9 @@ impl Host {
     pub fn get_groups(&self) -> HashMap<String, Arc<RwLock<Group>>> {
         let mut results: HashMap<String, Arc<RwLock<Group>>> = HashMap::new();
         for (k, v) in self.groups.iter() {
-            results.insert(k.clone(), Arc::clone(&v));
+            results.insert(k.clone(), Arc::clone(v));
         }
-        return results;
+        results
     }
 
     pub fn has_group(&self, group_name: &String) -> bool {
@@ -150,7 +148,7 @@ impl Host {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     // get_ancestor_groups(&self, depth_limit: usize) -> HashMap<String, Arc<RwLock<Group>>>
@@ -166,11 +164,11 @@ impl Host {
                 }
             }
         }
-        return false;
+        false
     }
 
     pub fn get_group_names(&self) -> Vec<String> {
-        return self.get_groups().iter().map(|(k, _v)| k.clone()).collect();
+        self.get_groups().keys().cloned().collect()
     }
 
     pub fn add_group(&mut self, name: &String, group: Arc<RwLock<Group>>) {
@@ -190,19 +188,15 @@ impl Host {
                 results.insert(k2, Arc::clone(&v2));
             }
         }
-        return results;
+        results
     }
 
     pub fn get_ancestor_group_names(&self) -> Vec<String> {
-        return self
-            .get_ancestor_groups(20usize)
-            .iter()
-            .map(|(k, _v)| k.clone())
-            .collect();
+        self.get_ancestor_groups(20usize).keys().cloned().collect()
     }
 
     pub fn get_variables(&self) -> serde_yaml::Mapping {
-        return self.variables.clone();
+        self.variables.clone()
     }
 
     pub fn set_variables(&mut self, variables: serde_yaml::Mapping) {
@@ -248,7 +242,7 @@ impl Host {
             serde_yaml::Value::String("jet_hostname_short".to_string()),
             serde_yaml::Value::String(short_name),
         );
-        return result;
+        result
     }
 
     pub fn update_facts(&mut self, mapping: &Arc<RwLock<serde_yaml::Mapping>>) {
@@ -262,18 +256,18 @@ impl Host {
 
     pub fn get_variables_yaml(&self) -> Result<String, String> {
         let result = serde_yaml::to_string(&self.get_variables());
-        return match result {
+        match result {
             Ok(x) => Ok(x),
             Err(_y) => Err(String::from("error loading variables")),
-        };
+        }
     }
 
     pub fn get_blended_variables_yaml(&self) -> Result<String, String> {
         let result = serde_yaml::to_string(&self.get_blended_variables());
-        return match result {
+        match result {
             Ok(x) => Ok(x),
             Err(_y) => Err(String::from("error loading blended variables")),
-        };
+        }
     }
 
     // ==============================================================================================================

@@ -58,7 +58,7 @@ impl IsTask for HomebrewTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(HomebrewAction {
                 package: handle.template.string_no_spaces(
                     request,
@@ -67,27 +67,27 @@ impl IsTask for HomebrewTask {
                     &self.package,
                 )?,
                 version: handle.template.string_option_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("version"),
                     &self.version,
                 )?,
                 update: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("update"),
                     &self.update,
                 )?,
                 remove: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("remove"),
                     &self.remove,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -97,7 +97,7 @@ impl IsAction for HomebrewAction {
         handle: &Arc<TaskHandle>,
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        return self.common_dispatch(handle, request);
+        self.common_dispatch(handle, request)
     }
 }
 
@@ -108,19 +108,19 @@ impl PackageManagementModule for HomebrewAction {
         _request: &Arc<TaskRequest>,
     ) -> Result<(), Arc<TaskResponse>> {
         // nothing to do here, see how this was used in yum_dnf.rs
-        return Ok(());
+        Ok(())
     }
 
     fn is_update(&self) -> bool {
-        return self.update;
+        self.update
     }
 
     fn is_remove(&self) -> bool {
-        return self.remove;
+        self.remove
     }
 
     fn get_version(&self) -> Option<String> {
-        return self.version.clone();
+        self.version.clone()
     }
 
     fn get_remote_version(
@@ -138,15 +138,12 @@ impl PackageManagementModule for HomebrewAction {
             Ok(r) => {
                 let (rc, out) = cmd_info(&r);
                 if rc == 0 {
-                    let details = self.parse_remote_package_details(handle, &out.clone());
-                    return details;
+                    self.parse_remote_package_details(handle, &out.clone())
                 } else {
-                    return Ok(None);
+                    Ok(None)
                 }
             }
-            Err(e) => {
-                return Err(e);
-            }
+            Err(e) => Err(e),
         }
     }
 
@@ -162,12 +159,12 @@ impl PackageManagementModule for HomebrewAction {
                 let (rc, out) = cmd_info(&r);
                 if rc == 0 {
                     let details = self.parse_local_package_details(handle, &out.clone())?;
-                    return Ok(details);
+                    Ok(details)
                 } else {
-                    return Ok(None);
+                    Ok(None)
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
         }
     }
 
@@ -185,7 +182,7 @@ impl PackageManagementModule for HomebrewAction {
                 self.version.as_ref().unwrap()
             ),
         };
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn update_package(
@@ -202,7 +199,7 @@ impl PackageManagementModule for HomebrewAction {
                 self.version.as_ref().unwrap()
             ),
         };
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn remove_package(
@@ -211,7 +208,7 @@ impl PackageManagementModule for HomebrewAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("{} uninstall '{}'", self.brew_cmd(), self.package);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 }
 
@@ -241,13 +238,13 @@ impl HomebrewAction {
                 break;
             }
         }
-        return match version {
+        match version {
             Some(v) => Ok(Some(PackageDetails {
                 name: self.package.clone(),
                 version: v.trim().to_string(),
             })),
             None => Ok(None),
-        };
+        }
     }
 
     pub fn parse_remote_package_details(
@@ -255,9 +252,9 @@ impl HomebrewAction {
         _handle: &Arc<TaskHandle>,
         out: &String,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
-        return Ok(Some(PackageDetails {
+        Ok(Some(PackageDetails {
             name: self.package.clone(),
             version: out.trim().to_string(),
-        }));
+        }))
     }
 }

@@ -93,7 +93,7 @@ impl IsTask for AptTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(AptAction {
                 package: handle.template.string_no_spaces(
                     request,
@@ -102,33 +102,33 @@ impl IsTask for AptTask {
                     &self.package,
                 )?,
                 version: handle.template.string_option_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("version"),
                     &self.version,
                 )?,
                 update: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("update"),
                     &self.update,
                 )?,
                 upgrade: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("upgrade"),
                     &self.upgrade,
                 )?,
                 remove: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("remove"),
                     &self.remove,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -138,7 +138,7 @@ impl IsAction for AptAction {
         handle: &Arc<TaskHandle>,
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        return self.common_dispatch(handle, request);
+        self.common_dispatch(handle, request)
     }
 }
 
@@ -165,7 +165,7 @@ impl PackageManagementModule for AptAction {
             .read()
             .unwrap()
             .get_blended_variables()
-            .get(&serde_yaml::Value::String("apt_cache_lifetime".to_string()))
+            .get(serde_yaml::Value::String("apt_cache_lifetime".to_string()))
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse().ok())
             .unwrap_or(3600);
@@ -192,19 +192,19 @@ impl PackageManagementModule for AptAction {
             }
         }
 
-        return Ok(());
+        Ok(())
     }
 
     fn is_update(&self) -> bool {
-        return self.upgrade;
+        self.upgrade
     }
 
     fn is_remove(&self) -> bool {
-        return self.remove;
+        self.remove
     }
 
     fn get_version(&self) -> Option<String> {
-        return self.version.clone();
+        self.version.clone()
     }
 
     fn get_remote_version(
@@ -236,15 +236,12 @@ impl PackageManagementModule for AptAction {
                     return Ok(None);
                 }
                 if rc == 0 {
-                    let details = self.parse_remote_package_details(handle, &out.clone());
-                    return details;
+                    self.parse_remote_package_details(handle, &out.clone())
                 } else {
-                    return Ok(None);
+                    Ok(None)
                 }
             }
-            Err(e) => {
-                return Err(e);
-            }
+            Err(e) => Err(e),
         }
     }
 
@@ -283,12 +280,12 @@ impl PackageManagementModule for AptAction {
                         &pkg_name,
                         &out.clone(),
                     )?;
-                    return Ok(details);
+                    Ok(details)
                 } else {
-                    return Ok(None);
+                    Ok(None)
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
         }
     }
 
@@ -318,7 +315,7 @@ impl PackageManagementModule for AptAction {
                 self.version.as_ref().unwrap()
             ),
         };
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn update_package(
@@ -337,7 +334,7 @@ impl PackageManagementModule for AptAction {
                 self.version.as_ref().unwrap()
             ),
         };
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn remove_package(
@@ -349,7 +346,7 @@ impl PackageManagementModule for AptAction {
             "DEBIAN_FRONTEND=noninteractive apt-get remove '{}' -qq",
             self.package
         );
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 }
 
@@ -362,13 +359,13 @@ impl AptAction {
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         let mut tokens = out.split("\t");
         let version = tokens.nth(1);
-        return match version {
+        match version {
             Some(v) => Ok(Some(PackageDetails {
                 name: pkg_name.clone(),
                 version: v.trim().to_string(),
             })),
             None => Ok(None),
-        };
+        }
     }
 
     pub fn parse_remote_package_details(
@@ -376,9 +373,9 @@ impl AptAction {
         _handle: &Arc<TaskHandle>,
         out: &String,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
-        return Ok(Some(PackageDetails {
+        Ok(Some(PackageDetails {
             name: self.package.clone(),
             version: out.trim().to_string(),
-        }));
+        }))
     }
 }

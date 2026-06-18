@@ -86,9 +86,7 @@ impl ConnectionFactory for SshFactory {
         &self,
         context: &Arc<RwLock<PlaybookContext>>,
     ) -> Result<Arc<Mutex<dyn Connection>>, String> {
-        return Ok(self
-            .local_factory
-            .get_connection(context, &self.localhost)?);
+        self.local_factory.get_connection(context, &self.localhost)
     }
 
     fn get_connection(
@@ -135,7 +133,7 @@ impl ConnectionFactory for SshFactory {
             passphrase,
             key_comment,
         );
-        return match conn.connect() {
+        match conn.connect() {
             Ok(_) => {
                 let conn2: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(conn));
                 ctx.connection_cache
@@ -145,7 +143,7 @@ impl ConnectionFactory for SshFactory {
                 Ok(conn2)
             }
             Err(x) => Err(x),
-        };
+        }
     }
 }
 
@@ -202,7 +200,7 @@ impl SshConnection {
 
 impl Connection for SshConnection {
     fn whoami(&self) -> Result<String, String> {
-        return Ok(self.username.clone());
+        Ok(self.username.clone())
     }
 
     fn connect(&mut self) -> Result<(), String> {
@@ -296,7 +294,7 @@ impl Connection for SshConnection {
             } else if let Some(ref comment) = key_comment {
                 // Use specific key from SSH agent by comment
                 let ssh_auth_sock = std::env::var("SSH_AUTH_SOCK")
-                    .map_err(|_| format!("SSH cannot connect to agent: SSH_AUTH_SOCK not set"))?;
+                    .map_err(|_| "SSH cannot connect to agent: SSH_AUTH_SOCK not set".to_string())?;
                 let stream = tokio::net::UnixStream::connect(&ssh_auth_sock)
                     .await
                     .map_err(|e| format!("SSH cannot connect to agent: {}", e))?;
@@ -335,7 +333,7 @@ impl Connection for SshConnection {
             } else {
                 // Use any key from SSH agent
                 let ssh_auth_sock = std::env::var("SSH_AUTH_SOCK")
-                    .map_err(|_| format!("SSH cannot connect to agent: SSH_AUTH_SOCK not set"))?;
+                    .map_err(|_| "SSH cannot connect to agent: SSH_AUTH_SOCK not set".to_string())?;
                 let stream = tokio::net::UnixStream::connect(&ssh_auth_sock)
                     .await
                     .map_err(|e| format!("SSH cannot connect to agent: {}", e))?;
@@ -382,14 +380,14 @@ impl Connection for SshConnection {
         match uname_result {
             Ok((_rc, out)) => match self.host.write().unwrap().set_os_info(&out.clone()) {
                 Ok(_x) => {}
-                Err(_y) => return Err(format!("failed to set OS info")),
+                Err(_y) => return Err("failed to set OS info".to_string()),
             },
             Err((rc, out)) => {
                 return Err(format!("uname -a command failed: rc={}, out={}", rc, out));
             }
         }
 
-        return Ok(());
+        Ok(())
     }
 
     fn run_command(
@@ -408,26 +406,22 @@ impl Connection for SshConnection {
         };
 
         match result {
-            Ok((rc, s)) => {
-                return Ok(response.command_ok(
-                    request,
-                    &Arc::new(Some(CommandResult {
-                        cmd: cmd.clone(),
-                        out: s.clone(),
-                        rc: rc,
-                    })),
-                ));
-            }
-            Err((rc, s)) => {
-                return Err(response.command_failed(
-                    request,
-                    &Arc::new(Some(CommandResult {
-                        cmd: cmd.clone(),
-                        out: s.clone(),
-                        rc: rc,
-                    })),
-                ));
-            }
+            Ok((rc, s)) => Ok(response.command_ok(
+                request,
+                &Arc::new(Some(CommandResult {
+                    cmd: cmd.clone(),
+                    out: s.clone(),
+                    rc,
+                })),
+            )),
+            Err((rc, s)) => Err(response.command_failed(
+                request,
+                &Arc::new(Some(CommandResult {
+                    cmd: cmd.clone(),
+                    out: s.clone(),
+                    rc,
+                })),
+            )),
         }
     }
 
@@ -613,15 +607,11 @@ impl SshConnection {
                 Some(rc) => {
                     let mut out = convert_out(&x.stdout, &x.stderr);
                     self.trim_newlines(&mut out);
-                    return Ok((rc, out.clone()));
+                    Ok((rc, out.clone()))
                 }
-                None => {
-                    return Ok((418, String::from("")));
-                }
+                None => Ok((418, String::from(""))),
             },
-            Err(_x) => {
-                return Err((404, String::from("")));
-            }
-        };
+            Err(_x) => Err((404, String::from(""))),
+        }
     }
 }

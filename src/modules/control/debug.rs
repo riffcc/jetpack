@@ -54,14 +54,14 @@ impl IsTask for DebugTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(DebugAction {
                 name: self.name.clone().unwrap_or(String::from(MODULE)),
                 vars: self.vars.clone(),
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-        });
+        })
     }
 }
 
@@ -72,9 +72,7 @@ impl IsAction for DebugAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_passive(request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
 
             TaskRequestType::Passive => {
                 let mut map: serde_yaml::Mapping = serde_yaml::Mapping::new();
@@ -92,21 +90,19 @@ impl IsAction for DebugAction {
                             panic!("invalid key in mapping");
                         }
                     };
-                    if no_vars || self.vars.as_ref().unwrap().contains(&k2) {
-                        if !k2.eq(&String::from("item")) {
-                            map.insert(k.clone(), v.clone());
-                        }
+                    if (no_vars || self.vars.as_ref().unwrap().contains(&k2))
+                        && !k2.eq(&String::from("item"))
+                    {
+                        map.insert(k.clone(), v.clone());
                     }
                 }
                 let msg = serde_yaml::to_string(&map).unwrap();
                 let msg2 = format!("\n{}\n", msg);
                 handle.debug(request, &msg2);
-                return Ok(handle.response.is_passive(request));
+                Ok(handle.response.is_passive(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

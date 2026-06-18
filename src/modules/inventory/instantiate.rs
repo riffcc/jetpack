@@ -159,49 +159,49 @@ struct InstantiateAction {
 /// Expand a pattern like "fleet-{01..10}.domain" into hostnames
 fn expand_pattern(pattern: &str) -> Result<Vec<String>, String> {
     // Check for range pattern: {01..10}
-    if let Some(start_brace) = pattern.find("{") {
-        if let Some(end_brace) = pattern.find("}") {
-            let prefix = &pattern[..start_brace];
-            let suffix = &pattern[end_brace + 1..];
-            let range_part = &pattern[start_brace + 1..end_brace];
+    if let Some(start_brace) = pattern.find("{")
+        && let Some(end_brace) = pattern.find("}")
+    {
+        let prefix = &pattern[..start_brace];
+        let suffix = &pattern[end_brace + 1..];
+        let range_part = &pattern[start_brace + 1..end_brace];
 
-            // Check for range: 01..10
-            if range_part.contains("..") {
-                let parts: Vec<&str> = range_part.split("..").collect();
-                if parts.len() != 2 {
-                    return Err(format!("Invalid range pattern: {}", range_part));
-                }
-
-                let start_str = parts[0];
-                let end_str = parts[1];
-
-                let start: u64 = start_str
-                    .parse()
-                    .map_err(|_| format!("Invalid range start: {}", start_str))?;
-                let end: u64 = end_str
-                    .parse()
-                    .map_err(|_| format!("Invalid range end: {}", end_str))?;
-
-                // Determine padding width from the original string
-                let width = start_str.len();
-
-                let mut hostnames = Vec::new();
-                for i in start..=end {
-                    let num = format!("{:0width$}", i, width = width);
-                    hostnames.push(format!("{}{}{}", prefix, num, suffix));
-                }
-                return Ok(hostnames);
+        // Check for range: 01..10
+        if range_part.contains("..") {
+            let parts: Vec<&str> = range_part.split("..").collect();
+            if parts.len() != 2 {
+                return Err(format!("Invalid range pattern: {}", range_part));
             }
 
-            // Check for comma-separated: a,b,c
-            if range_part.contains(",") {
-                let items: Vec<&str> = range_part.split(",").collect();
-                let mut hostnames = Vec::new();
-                for item in items {
-                    hostnames.push(format!("{}{}{}", prefix, item.trim(), suffix));
-                }
-                return Ok(hostnames);
+            let start_str = parts[0];
+            let end_str = parts[1];
+
+            let start: u64 = start_str
+                .parse()
+                .map_err(|_| format!("Invalid range start: {}", start_str))?;
+            let end: u64 = end_str
+                .parse()
+                .map_err(|_| format!("Invalid range end: {}", end_str))?;
+
+            // Determine padding width from the original string
+            let width = start_str.len();
+
+            let mut hostnames = Vec::new();
+            for i in start..=end {
+                let num = format!("{:0width$}", i, width = width);
+                hostnames.push(format!("{}{}{}", prefix, num, suffix));
             }
+            return Ok(hostnames);
+        }
+
+        // Check for comma-separated: a,b,c
+        if range_part.contains(",") {
+            let items: Vec<&str> = range_part.split(",").collect();
+            let mut hostnames = Vec::new();
+            for item in items {
+                hostnames.push(format!("{}{}{}", prefix, item.trim(), suffix));
+            }
+            return Ok(hostnames);
         }
     }
 
@@ -547,19 +547,17 @@ impl InstantiateAction {
             );
 
             // If file exists, merge with LWW semantics
-            if host_file.exists() {
-                if let Ok(existing_content) = fs::read_to_string(&host_file) {
-                    if let Ok(existing_doc) =
-                        serde_yaml::from_str::<serde_yaml::Mapping>(&existing_content)
-                    {
-                        // Merge: new values win, but preserve keys not in new config
-                        for (key, value) in existing_doc {
-                            if key.as_str() != Some("provision") {
-                                host_vars.insert(key, value);
-                            }
-                            // provision block is always replaced with new config
-                        }
+            if host_file.exists()
+                && let Ok(existing_content) = fs::read_to_string(&host_file)
+                && let Ok(existing_doc) =
+                    serde_yaml::from_str::<serde_yaml::Mapping>(&existing_content)
+            {
+                // Merge: new values win, but preserve keys not in new config
+                for (key, value) in existing_doc {
+                    if key.as_str() != Some("provision") {
+                        host_vars.insert(key, value);
                     }
+                    // provision block is always replaced with new config
                 }
             }
 
@@ -594,7 +592,7 @@ impl InstantiateAction {
                 if let Ok(content) = fs::read_to_string(&group_file) {
                     if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content) {
                         if let Some(serde_yaml::Value::Sequence(seq)) =
-                            doc.get(&serde_yaml::Value::String("hosts".to_string()))
+                            doc.get(serde_yaml::Value::String("hosts".to_string()))
                         {
                             seq.iter()
                                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -671,26 +669,25 @@ impl InstantiateAction {
         // Remove from group files
         for group in &self.groups {
             let group_file = groups_dir.join(group);
-            if group_file.exists() {
-                if let Ok(content) = fs::read_to_string(&group_file) {
-                    if let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content) {
-                        if let Some(serde_yaml::Value::Sequence(seq)) =
-                            doc.get_mut(&serde_yaml::Value::String("hosts".to_string()))
-                        {
-                            seq.retain(|v| {
-                                if let Some(s) = v.as_str() {
-                                    !self.hostnames.contains(&s.to_string())
-                                } else {
-                                    true
-                                }
-                            });
+            if group_file.exists()
+                && let Ok(content) = fs::read_to_string(&group_file)
+                && let Ok(mut doc) = serde_yaml::from_str::<serde_yaml::Mapping>(&content)
+            {
+                if let Some(serde_yaml::Value::Sequence(seq)) =
+                    doc.get_mut(serde_yaml::Value::String("hosts".to_string()))
+                {
+                    seq.retain(|v| {
+                        if let Some(s) = v.as_str() {
+                            !self.hostnames.contains(&s.to_string())
+                        } else {
+                            true
                         }
-
-                        let yaml_str = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))
-                            .unwrap_or_default();
-                        let _ = fs::write(&group_file, yaml_str);
-                    }
+                    });
                 }
+
+                let yaml_str =
+                    serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap_or_default();
+                let _ = fs::write(&group_file, yaml_str);
             }
         }
 

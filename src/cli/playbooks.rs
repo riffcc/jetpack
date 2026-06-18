@@ -38,23 +38,23 @@ enum ConnectionMode {
 }
 
 pub fn playbook_ssh(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
-    return playbook(inventory, parser, CheckMode::No, ConnectionMode::Ssh);
+    playbook(inventory, parser, CheckMode::No, ConnectionMode::Ssh)
 }
 
 pub fn playbook_check_ssh(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
-    return playbook(inventory, parser, CheckMode::Yes, ConnectionMode::Ssh);
+    playbook(inventory, parser, CheckMode::Yes, ConnectionMode::Ssh)
 }
 
 pub fn playbook_local(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
-    return playbook(inventory, parser, CheckMode::No, ConnectionMode::Local);
+    playbook(inventory, parser, CheckMode::No, ConnectionMode::Local)
 }
 
 pub fn playbook_check_local(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
-    return playbook(inventory, parser, CheckMode::Yes, ConnectionMode::Local);
+    playbook(inventory, parser, CheckMode::Yes, ConnectionMode::Local)
 }
 
 pub fn playbook_simulate(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
-    return playbook(inventory, parser, CheckMode::No, ConnectionMode::Simulate);
+    playbook(inventory, parser, CheckMode::No, ConnectionMode::Simulate)
 }
 
 pub fn playbook_syntax_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
@@ -69,7 +69,7 @@ pub fn playbook_syntax_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliPar
         module_paths: Arc::clone(&parser.module_paths),
         limit_hosts: parser.limit_hosts.clone(),
         limit_groups: parser.limit_groups.clone(),
-        batch_size: parser.batch_size.clone(),
+        batch_size: parser.batch_size,
         context: Arc::new(RwLock::new(PlaybookContext::new(parser))),
         visitor: Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No))),
         connection_factory: Arc::new(RwLock::new(NoFactory::new())),
@@ -86,13 +86,13 @@ pub fn playbook_syntax_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliPar
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
-    return match playbook_traversal(&run_state) {
+    match playbook_traversal(&run_state) {
         Ok(_) => 0,
         Err(s) => {
             println!("{}", s);
             1
         }
-    };
+    }
 }
 
 pub fn inventory_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
@@ -103,7 +103,7 @@ pub fn inventory_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -
         println!("inventory-check requires --inventory");
         return 1;
     }
-    return match load_inventory(inventory, Arc::clone(&parser.inventory_paths)) {
+    match load_inventory(inventory, Arc::clone(&parser.inventory_paths)) {
         Ok(_) => {
             let count = inventory.read().expect("inventory read").hosts.len();
             println!("inventory OK ({} hosts)", count);
@@ -113,7 +113,7 @@ pub fn inventory_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -
             println!("{}", s);
             1
         }
-    };
+    }
 }
 
 pub fn full_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
@@ -127,11 +127,11 @@ pub fn full_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32
         println!("full-check: no --inventory provided, skipping inventory check");
         0
     };
-    return if syntax_rc != 0 || inventory_rc != 0 {
+    if syntax_rc != 0 || inventory_rc != 0 {
         1
     } else {
         0
-    };
+    }
 }
 
 pub fn playbook_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> i32 {
@@ -151,7 +151,7 @@ pub fn playbook_pull(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -> 
         None => None,
     };
 
-    return playbook_with_pull(inventory, parser, CheckMode::No, url_playbook_path.as_ref());
+    playbook_with_pull(inventory, parser, CheckMode::No, url_playbook_path.as_ref())
 }
 
 fn playbook(
@@ -168,7 +168,7 @@ fn playbook(
         module_paths: Arc::clone(&parser.module_paths),
         limit_hosts: parser.limit_hosts.clone(),
         limit_groups: parser.limit_groups.clone(),
-        batch_size: parser.batch_size.clone(),
+        batch_size: parser.batch_size,
         // the context is constructed with an instance of the parser instead of having a back-reference
         // to run-state.  Context should mostly *not* get parameters from the parser unless they
         // are going to appear in variables.
@@ -197,7 +197,7 @@ fn playbook(
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
-    return match playbook_traversal(&run_state) {
+    match playbook_traversal(&run_state) {
         Ok(_) => run_state
             .visitor
             .read()
@@ -207,7 +207,7 @@ fn playbook(
             println!("{}", s);
             1
         }
-    };
+    }
 }
 
 fn playbook_with_pull(
@@ -231,20 +231,20 @@ fn playbook_with_pull(
     // Discover roles/ and modules/ directories next to URL-fetched playbooks
     let role_paths = Arc::clone(&parser.role_paths);
     let module_paths = Arc::clone(&parser.module_paths);
-    if let Some(pb_path) = url_playbook {
-        if let Some(parent) = pb_path.parent() {
-            let roles_dir = parent.join("roles");
-            if roles_dir.is_dir() {
-                if let Ok(full) = std::fs::canonicalize(&roles_dir) {
-                    role_paths.write().unwrap().push(full);
-                }
-            }
-            let modules_dir = parent.join("modules");
-            if modules_dir.is_dir() {
-                if let Ok(full) = std::fs::canonicalize(&modules_dir) {
-                    module_paths.write().unwrap().push(full);
-                }
-            }
+    if let Some(pb_path) = url_playbook
+        && let Some(parent) = pb_path.parent()
+    {
+        let roles_dir = parent.join("roles");
+        if roles_dir.is_dir()
+            && let Ok(full) = std::fs::canonicalize(&roles_dir)
+        {
+            role_paths.write().unwrap().push(full);
+        }
+        let modules_dir = parent.join("modules");
+        if modules_dir.is_dir()
+            && let Ok(full) = std::fs::canonicalize(&modules_dir)
+        {
+            module_paths.write().unwrap().push(full);
         }
     }
 
@@ -266,7 +266,7 @@ fn playbook_with_pull(
         module_paths,
         limit_hosts: parser.limit_hosts.clone(),
         limit_groups: parser.limit_groups.clone(),
-        batch_size: parser.batch_size.clone(),
+        batch_size: parser.batch_size,
         context: Arc::new(RwLock::new(PlaybookContext::new(parser))),
         visitor: Arc::new(RwLock::new(PlaybookVisitor::new(check_mode))),
         connection_factory,
@@ -283,7 +283,7 @@ fn playbook_with_pull(
         role_processing_stack: Arc::new(RwLock::new(Vec::new())),
         fetched_files: Arc::new(Mutex::new(HashMap::new())),
     });
-    return match playbook_traversal(&run_state) {
+    match playbook_traversal(&run_state) {
         Ok(_) => run_state
             .visitor
             .read()
@@ -293,7 +293,7 @@ fn playbook_with_pull(
             println!("{}", s);
             1
         }
-    };
+    }
 }
 
 /// Fetch a playbook from a URL (HTTPS), tarball, or git repository.

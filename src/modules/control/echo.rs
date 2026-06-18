@@ -53,7 +53,7 @@ impl IsTask for EchoTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(EchoAction {
                 name: self.name.clone().unwrap_or(String::from(MODULE)),
                 msg: handle.template.string_unsafe_for_shell(
@@ -65,7 +65,7 @@ impl IsTask for EchoTask {
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-        });
+        })
     }
 }
 
@@ -76,18 +76,14 @@ impl IsAction for EchoAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_passive(request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
 
             TaskRequestType::Passive => {
-                handle.debug(&request, &self.msg);
-                return Ok(handle.response.is_passive(request));
+                handle.debug(request, &self.msg);
+                Ok(handle.response.is_passive(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }

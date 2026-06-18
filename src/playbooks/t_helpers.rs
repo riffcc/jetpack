@@ -35,20 +35,11 @@ impl HelperDef for IsDefined {
                 RenderErrorReason::Other("is_defined: requires one parameter".to_owned()).into(),
             );
         }
-        let result = h
-            .param(0)
-            .and_then(|x| {
-                if x.is_value_missing() {
-                    Some(false)
-                } else {
-                    Some(true)
-                }
-            })
-            .ok_or_else(|| {
-                RenderError::from(RenderErrorReason::Other(
-                    "is_defined: Couldn't read parameter".to_owned(),
-                ))
-            })?;
+        let result = h.param(0).map(|x| !x.is_value_missing()).ok_or_else(|| {
+            RenderError::from(RenderErrorReason::Other(
+                "is_defined: Couldn't read parameter".to_owned(),
+            ))
+        })?;
 
         Ok(ScopedJson::Derived(JsonValue::from(result)))
     }

@@ -39,5 +39,5 @@ pub fn cmd_info(info: &Arc<TaskResponse>) -> (i32, String) {
         "called cmd_info on a response that is not a command result"
     );
     let result = info.command_result.as_ref().as_ref().unwrap();
-    return (result.rc, result.out.clone());
+    (result.rc, result.out.clone())
 }

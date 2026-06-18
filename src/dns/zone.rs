@@ -101,12 +101,11 @@ pub fn get_a_record(
 
     if let Some(record_value) = records.get(hostname) {
         // Check if it's an A record
-        if let Some(record_type) = record_value.get("type") {
-            if record_type.as_str() == Some("A") {
-                if let Some(value) = record_value.get("value") {
-                    return Ok(value.as_str().map(|s| s.to_string()));
-                }
-            }
+        if let Some(record_type) = record_value.get("type")
+            && record_type.as_str() == Some("A")
+            && let Some(value) = record_value.get("value")
+        {
+            return Ok(value.as_str().map(|s| s.to_string()));
         }
     }
 
@@ -125,24 +124,23 @@ pub fn add_a_record(
     let mut records = read_zone_file(zones_path, zone)?;
 
     // Check if record already exists
-    if let Some(existing) = records.get(hostname) {
-        if let Some(record_type) = existing.get("type") {
-            if record_type.as_str() == Some("A") {
-                // Check single value
-                if let Some(value) = existing.get("value") {
-                    if value.as_str() == Some(ip) {
-                        return Ok(false); // Already exists
-                    }
-                }
-                // Check values array
-                if let Some(values) = existing.get("values") {
-                    if let Some(arr) = values.as_sequence() {
-                        for v in arr {
-                            if v.as_str() == Some(ip) {
-                                return Ok(false); // Already in values
-                            }
-                        }
-                    }
+    if let Some(existing) = records.get(hostname)
+        && let Some(record_type) = existing.get("type")
+        && record_type.as_str() == Some("A")
+    {
+        // Check single value
+        if let Some(value) = existing.get("value")
+            && value.as_str() == Some(ip)
+        {
+            return Ok(false); // Already exists
+        }
+        // Check values array
+        if let Some(values) = existing.get("values")
+            && let Some(arr) = values.as_sequence()
+        {
+            for v in arr {
+                if v.as_str() == Some(ip) {
+                    return Ok(false); // Already in values
                 }
             }
         }
@@ -177,29 +175,26 @@ pub fn set_a_records(
     let mut records = read_zone_file(zones_path, zone)?;
 
     // Check if already matches
-    if let Some(existing) = records.get(hostname) {
-        if let Some(record_type) = existing.get("type") {
-            if record_type.as_str() == Some("A") {
-                if let Some(values) = existing.get("values") {
-                    if let Some(arr) = values.as_sequence() {
-                        let existing_ips: Vec<&str> =
-                            arr.iter().filter_map(|v| v.as_str()).collect();
-                        if existing_ips.len() == ips.len()
-                            && ips.iter().all(|ip| existing_ips.contains(&ip.as_str()))
-                        {
-                            return Ok(false); // Already matches
-                        }
-                    }
-                }
-                // Check single value case
-                if ips.len() == 1 {
-                    if let Some(value) = existing.get("value") {
-                        if value.as_str() == Some(&ips[0]) {
-                            return Ok(false);
-                        }
-                    }
-                }
+    if let Some(existing) = records.get(hostname)
+        && let Some(record_type) = existing.get("type")
+        && record_type.as_str() == Some("A")
+    {
+        if let Some(values) = existing.get("values")
+            && let Some(arr) = values.as_sequence()
+        {
+            let existing_ips: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+            if existing_ips.len() == ips.len()
+                && ips.iter().all(|ip| existing_ips.contains(&ip.as_str()))
+            {
+                return Ok(false); // Already matches
             }
+        }
+        // Check single value case
+        if ips.len() == 1
+            && let Some(value) = existing.get("value")
+            && value.as_str() == Some(&ips[0])
+        {
+            return Ok(false);
         }
     }
 
@@ -245,16 +240,13 @@ pub fn add_cname_record(
     };
 
     // Check if record already exists with same value
-    if let Some(existing) = records.get(alias) {
-        if let Some(record_type) = existing.get("type") {
-            if record_type.as_str() == Some("CNAME") {
-                if let Some(value) = existing.get("value") {
-                    if value.as_str() == Some(&target_fqdn) {
-                        return Ok(false); // Already exists
-                    }
-                }
-            }
-        }
+    if let Some(existing) = records.get(alias)
+        && let Some(record_type) = existing.get("type")
+        && record_type.as_str() == Some("CNAME")
+        && let Some(value) = existing.get("value")
+        && value.as_str() == Some(&target_fqdn)
+    {
+        return Ok(false); // Already exists
     }
 
     // Create the CNAME record
@@ -294,16 +286,13 @@ pub fn add_ptr_record(
     };
 
     // Check if record already exists with same value
-    if let Some(existing) = records.get(ip_host) {
-        if let Some(record_type) = existing.get("type") {
-            if record_type.as_str() == Some("PTR") {
-                if let Some(value) = existing.get("value") {
-                    if value.as_str() == Some(&target_fqdn) {
-                        return Ok(false); // Already exists
-                    }
-                }
-            }
-        }
+    if let Some(existing) = records.get(ip_host)
+        && let Some(record_type) = existing.get("type")
+        && record_type.as_str() == Some("PTR")
+        && let Some(value) = existing.get("value")
+        && value.as_str() == Some(&target_fqdn)
+    {
+        return Ok(false); // Already exists
     }
 
     // Create the PTR record

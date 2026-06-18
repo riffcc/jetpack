@@ -210,15 +210,14 @@ impl Connection for ChrootConnection {
         let dest_path = Path::new(&actual_dest);
 
         // Ensure parent directory exists
-        if let Some(parent) = dest_path.parent() {
-            if !parent.exists() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    return Err(response.is_failed(
-                        request,
-                        &format!("mkdir failed for {}: {:?}", parent.display(), e),
-                    ));
-                }
-            }
+        if let Some(parent) = dest_path.parent()
+            && !parent.exists()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            return Err(response.is_failed(
+                request,
+                &format!("mkdir failed for {}: {:?}", parent.display(), e),
+            ));
         }
 
         match std::fs::copy(src, dest_path) {
@@ -238,15 +237,14 @@ impl Connection for ChrootConnection {
         let path = Path::new(&actual_path);
 
         // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    return Err(response.is_failed(
-                        request,
-                        &format!("mkdir failed for {}: {:?}", parent.display(), e),
-                    ));
-                }
-            }
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            return Err(response.is_failed(
+                request,
+                &format!("mkdir failed for {}: {:?}", parent.display(), e),
+            ));
         }
 
         let mut file = if path.exists() {

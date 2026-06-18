@@ -58,7 +58,7 @@ impl IsTask for PacmanTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(PacmanAction {
                 package: handle.template.string_no_spaces(
                     request,
@@ -67,27 +67,27 @@ impl IsTask for PacmanTask {
                     &self.package,
                 )?,
                 version: handle.template.string_option_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("version"),
                     &self.version,
                 )?,
                 update: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("update"),
                     &self.update,
                 )?,
                 remove: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("remove"),
                     &self.remove,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -97,21 +97,21 @@ impl IsAction for PacmanAction {
         handle: &Arc<TaskHandle>,
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        return self.common_dispatch(handle, request);
+        self.common_dispatch(handle, request)
     }
 }
 
 impl PackageManagementModule for PacmanAction {
     fn is_update(&self) -> bool {
-        return self.update;
+        self.update
     }
 
     fn is_remove(&self) -> bool {
-        return self.remove;
+        self.remove
     }
 
     fn get_version(&self) -> Option<String> {
-        return self.version.clone();
+        self.version.clone()
     }
 
     fn initial_setup(
@@ -119,7 +119,7 @@ impl PackageManagementModule for PacmanAction {
         _handle: &Arc<TaskHandle>,
         _request: &Arc<TaskRequest>,
     ) -> Result<(), Arc<TaskResponse>> {
-        return Ok(());
+        Ok(())
     }
 
     fn get_local_version(
@@ -144,7 +144,7 @@ impl PackageManagementModule for PacmanAction {
                 .is_failed(request, &String::from("pacman query failed")));
         }
         let details = self.parse_package_details(&out.clone());
-        return Ok(details);
+        Ok(details)
     }
 
     fn get_remote_version(
@@ -153,7 +153,7 @@ impl PackageManagementModule for PacmanAction {
         _request: &Arc<TaskRequest>,
     ) -> Result<Option<PackageDetails>, Arc<TaskResponse>> {
         // FIXME: (?) without this implemented this module will always return "Modified" with update: true
-        return Ok(None);
+        Ok(None)
     }
 
     fn install_package(
@@ -172,7 +172,7 @@ impl PackageManagementModule for PacmanAction {
                 self.version.as_ref().unwrap()
             ),
         };
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn update_package(
@@ -189,7 +189,7 @@ impl PackageManagementModule for PacmanAction {
                 self.version.as_ref().unwrap()
             ),
         };
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 
     fn remove_package(
@@ -199,7 +199,7 @@ impl PackageManagementModule for PacmanAction {
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let actual_package = self.get_actual_package();
         let cmd = format!("pacman -R '{}' --noconfirm --noprogressbar", actual_package);
-        return handle.remote.run(request, &cmd, CheckRc::Checked);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 }
 
@@ -212,7 +212,7 @@ impl PacmanAction {
                 None => self.package.clone(), // should be impossible, appease compiler
             }
         } else {
-            return self.package.clone();
+            self.package.clone()
         }
     }
 
@@ -240,12 +240,12 @@ impl PacmanAction {
             }
         }
         if name.is_some() && version.is_some() {
-            return Some(PackageDetails {
+            Some(PackageDetails {
                 name: name.unwrap().clone(),
                 version: version.unwrap().clone(),
-            });
+            })
         } else {
-            return None;
+            None
         }
     }
 }

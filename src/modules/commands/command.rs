@@ -61,7 +61,7 @@ impl IsTask for CommandTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(CommandAction {
                 unsafe_: {
                     if self.cmd.find("{{").is_none() {
@@ -70,7 +70,7 @@ impl IsTask for CommandTask {
                         true
                     } else {
                         handle.template.boolean_option_default_false(
-                            &request,
+                            request,
                             tm,
                             &String::from("unsafe"),
                             &self.unsafe_,
@@ -78,33 +78,33 @@ impl IsTask for CommandTask {
                     }
                 },
                 cmd: handle.template.string_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("cmd"),
                     &self.cmd,
                 )?,
                 save: handle.template.string_option_no_spaces(
-                    &request,
+                    request,
                     tm,
                     &String::from("save"),
                     &self.save,
                 )?,
                 failed_when: handle.template.string_option_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("failed_when"),
                     &self.failed_when,
                 )?,
                 changed_when: handle.template.string_option_unsafe_for_shell(
-                    &request,
+                    request,
                     tm,
                     &String::from("changed_when"),
                     &self.changed_when,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -115,23 +115,20 @@ impl IsAction for CommandAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_execution(&request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_execution(request)),
 
             TaskRequestType::Execute => {
                 let task_result: Arc<TaskResponse>;
                 if self.unsafe_ {
-                    task_result = handle.remote.run_unsafe(
-                        &request,
-                        &self.cmd.clone(),
-                        CheckRc::Unchecked,
-                    )?;
+                    task_result =
+                        handle
+                            .remote
+                            .run_unsafe(request, &self.cmd.clone(), CheckRc::Unchecked)?;
                 } else {
                     task_result =
                         handle
                             .remote
-                            .run(&request, &self.cmd.clone(), CheckRc::Unchecked)?;
+                            .run(request, &self.cmd.clone(), CheckRc::Unchecked)?;
                 }
                 let (rc, out) = cmd_info(&task_result);
                 let map_data = build_results_map(rc, &out);
@@ -171,7 +168,7 @@ impl IsAction for CommandAction {
                     save_results(&handle.host, self.save.as_ref().unwrap(), map_data);
                 }
 
-                return match should_fail {
+                match should_fail {
                     true => Err(handle
                         .response
                         .command_failed(request, &Arc::clone(&task_result.command_result))),
@@ -179,12 +176,10 @@ impl IsAction for CommandAction {
                         true => Ok(task_result),
                         false => Ok(handle.response.is_passive(request)),
                     },
-                };
+                }
             }
 
-            _ => {
-                return Err(handle.response.not_supported(&request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -199,7 +194,7 @@ fn build_results_map(rc: i32, out: &String) -> serde_yaml::Mapping {
         serde_yaml::Value::String(String::from("out")),
         serde_yaml::Value::String(out.clone()),
     );
-    return result;
+    result
 }
 
 fn save_results(host: &Arc<RwLock<Host>>, key: &String, map_data: serde_yaml::Mapping) {

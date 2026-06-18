@@ -78,7 +78,7 @@ impl Template {
     }
 
     pub fn get_context(&self) -> Arc<RwLock<PlaybookContext>> {
-        return Arc::clone(&self.run_state.context);
+        Arc::clone(&self.run_state.context)
     }
 
     fn unwrap_string_result(
@@ -86,12 +86,10 @@ impl Template {
         request: &Arc<TaskRequest>,
         str_result: &Result<String, String>,
     ) -> Result<String, Arc<TaskResponse>> {
-        return match str_result {
+        match str_result {
             Ok(x) => Ok(x.clone()),
-            Err(y) => {
-                return Err(self.response.is_failed(request, &y.clone()));
-            }
-        };
+            Err(y) => Err(self.response.is_failed(request, &y.clone())),
+        }
     }
 
     fn template_unsafe_internal(
@@ -110,14 +108,14 @@ impl Template {
         );
         if result.is_ok() {
             let result_ok = result.as_ref().unwrap();
-            if result_ok.eq("") {
+            if result_ok.is_empty() {
                 return Err(self
                     .response
-                    .is_failed(request, &format!("evaluated to empty string")));
+                    .is_failed(request, &"evaluated to empty string".to_string()));
             }
         }
         let result2 = self.unwrap_string_result(request, &result)?;
-        return Ok(result2);
+        Ok(result2)
     }
 
     pub fn string_for_template_module_use_only(
@@ -129,13 +127,7 @@ impl Template {
     ) -> Result<String, Arc<TaskResponse>> {
         // this is the version of templating that gives access to secret variables, we don't allow them elsewhere as they would be easy to leak to CI/CD/build output/logs
         // and the contents to templates are not shown to anything
-        return self.template_unsafe_internal(
-            request,
-            tm,
-            field,
-            template,
-            BlendTarget::TemplateModule,
-        );
+        self.template_unsafe_internal(request, tm, field, template, BlendTarget::TemplateModule)
     }
 
     pub fn string_unsafe_for_shell(
@@ -146,13 +138,7 @@ impl Template {
         template: &String,
     ) -> Result<String, Arc<TaskResponse>> {
         // indicates templating a string that will not without further processing, be passed to a shell command
-        return self.template_unsafe_internal(
-            request,
-            tm,
-            field,
-            template,
-            BlendTarget::NotTemplateModule,
-        );
+        self.template_unsafe_internal(request, tm, field, template, BlendTarget::NotTemplateModule)
     }
 
     // FIXME: this code is possibly a bit redundant - perhaps calling methods can use the public function and this can be eliminated
@@ -168,14 +154,14 @@ impl Template {
         if template.is_none() {
             return Ok(None);
         }
-        let result = self.string(request, tm, field, &template.as_ref().unwrap());
-        return match result {
+        let result = self.string(request, tm, field, template.as_ref().unwrap());
+        match result {
             Ok(x) => Ok(Some(x)),
             Err(y) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) template error: {:?}", field, y),
             )),
-        };
+        }
     }
 
     pub fn string_option_unsafe_for_shell(
@@ -186,16 +172,16 @@ impl Template {
         template: &Option<String>,
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         // indicates templating a string that will not without further processing, be passed to a shell command
-        return match template.is_none() {
+        match template.is_none() {
             true => Ok(None),
             false => Ok(Some(self.template_unsafe_internal(
                 request,
                 tm,
                 field,
-                &template.as_ref().unwrap(),
+                template.as_ref().unwrap(),
                 BlendTarget::NotTemplateModule,
             )?)),
-        };
+        }
     }
 
     pub fn string(
@@ -207,17 +193,15 @@ impl Template {
     ) -> Result<String, Arc<TaskResponse>> {
         // templates a required string parameter - the simplest of argument processing, this requires no casting to other types
         let result = self.string_unsafe_for_shell(request, tm, field, template);
-        return match result {
+        match result {
             Ok(x) => match screen_general_input_strict(&x) {
                 Ok(y) => Ok(y),
-                Err(z) => {
-                    return Err(self
-                        .response
-                        .is_failed(request, &format!("field {}, {}", field, z)));
-                }
+                Err(z) => Err(self
+                    .response
+                    .is_failed(request, &format!("field {}, {}", field, z))),
             },
             Err(y) => Err(y),
-        };
+        }
     }
 
     pub fn string_no_spaces(
@@ -235,7 +219,7 @@ impl Template {
                 &format!("field ({}): spaces are not allowed", field),
             ));
         }
-        return Ok(value.clone());
+        Ok(value.clone())
     }
 
     pub fn string_option_no_spaces(
@@ -249,14 +233,14 @@ impl Template {
         let prelim = self.string_option(request, tm, field, template)?;
         if prelim.is_some() {
             let value = prelim.as_ref().unwrap();
-            if self.has_spaces(&value) {
+            if self.has_spaces(value) {
                 return Err(self.response.is_failed(
                     request,
                     &format!("field ({}): spaces are not allowed", field),
                 ));
             }
         }
-        return Ok(prelim.clone());
+        Ok(prelim.clone())
     }
 
     pub fn string_option_default(
@@ -288,7 +272,7 @@ impl Template {
         if prelim.is_some() {
             return Ok(Some(prelim.unwrap().trim().to_string()));
         }
-        return Ok(None);
+        Ok(None)
     }
 
     pub fn no_template_string_option_trim(&self, input: &Option<String>) -> Option<String> {
@@ -297,7 +281,7 @@ impl Template {
             let value = input.as_ref().unwrap();
             return Some(value.trim().to_string());
         }
-        return None;
+        None
     }
 
     pub fn path(
@@ -315,14 +299,12 @@ impl Template {
             tm,
         );
         let result2 = self.unwrap_string_result(request, &result)?;
-        return match screen_path(&result2) {
+        match screen_path(&result2) {
             Ok(x) => Ok(x),
-            Err(y) => {
-                return Err(self
-                    .response
-                    .is_failed(request, &format!("{}, for field {}", y, field)));
-            }
-        };
+            Err(y) => Err(self
+                .response
+                .is_failed(request, &format!("{}, for field {}", y, field))),
+        }
     }
 
     pub fn string_option(
@@ -334,20 +316,18 @@ impl Template {
     ) -> Result<Option<String>, Arc<TaskResponse>> {
         // templates an optional string
         let result = self.string_option_unsafe(request, tm, field, template);
-        return match result {
+        match result {
             Ok(x1) => match x1 {
                 Some(x) => match screen_general_input_strict(&x) {
                     Ok(y) => Ok(Some(y)),
-                    Err(z) => {
-                        return Err(self
-                            .response
-                            .is_failed(request, &format!("field {}, {}", field, z)));
-                    }
+                    Err(z) => Err(self
+                        .response
+                        .is_failed(request, &format!("field {}, {}", field, z))),
                 },
                 None => Ok(None),
             },
             Err(y) => Err(y),
-        };
+        }
     }
 
     #[allow(dead_code)]
@@ -364,13 +344,13 @@ impl Template {
         }
         let st = self.string(request, tm, field, template)?;
         let num = st.parse::<u64>();
-        return match num {
+        match num {
             Ok(num) => Ok(num),
             Err(_err) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) value is not an integer: {}", field, st),
             )),
-        };
+        }
     }
 
     #[allow(dead_code)]
@@ -389,16 +369,16 @@ impl Template {
         if template.is_none() {
             return Ok(default);
         }
-        let st = self.string(request, tm, field, &template.as_ref().unwrap())?;
+        let st = self.string(request, tm, field, template.as_ref().unwrap())?;
         let num = st.parse::<u64>();
         // FIXME: these can use map_err
-        return match num {
+        match num {
             Ok(num) => Ok(Some(num)),
             Err(_err) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) value is not an integer: {}", field, st),
             )),
-        };
+        }
     }
 
     pub fn integer_option_to_integer(
@@ -416,16 +396,16 @@ impl Template {
         if template.is_none() {
             return Ok(default);
         }
-        let st = self.string(request, tm, field, &template.as_ref().unwrap())?;
+        let st = self.string(request, tm, field, template.as_ref().unwrap())?;
         let num = st.parse::<u64>();
         // FIXME: these can use map_err
-        return match num {
+        match num {
             Ok(num) => Ok(num),
             Err(_err) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) value is not an integer: {}", field, st),
             )),
-        };
+        }
     }
 
     #[allow(dead_code)]
@@ -444,13 +424,13 @@ impl Template {
         }
         let st = self.string(request, tm, field, template)?;
         let x = st.parse::<bool>();
-        return match x {
+        match x {
             Ok(x) => Ok(x),
             Err(_err) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) value is not a boolean: {}", field, st),
             )),
-        };
+        }
     }
 
     #[allow(dead_code)]
@@ -462,7 +442,7 @@ impl Template {
         template: &Option<String>,
     ) -> Result<bool, Arc<TaskResponse>> {
         // templates an optional value that resolves to a boolean, if omitted, assume the answer is true
-        return self.internal_boolean_option(request, tm, field, template, true);
+        self.internal_boolean_option(request, tm, field, template, true)
     }
 
     pub fn boolean_option_default_false(
@@ -473,7 +453,7 @@ impl Template {
         template: &Option<String>,
     ) -> Result<bool, Arc<TaskResponse>> {
         // templates an optional value that resolves to a boolean, if omitted, assume the answer is false
-        return self.internal_boolean_option(request, tm, field, template, false);
+        self.internal_boolean_option(request, tm, field, template, false)
     }
 
     fn internal_boolean_option(
@@ -491,15 +471,15 @@ impl Template {
         if template.is_none() {
             return Ok(default);
         }
-        let st = self.string(request, tm, field, &template.as_ref().unwrap())?;
+        let st = self.string(request, tm, field, template.as_ref().unwrap())?;
         let x = st.parse::<bool>();
-        return match x {
+        match x {
             Ok(x) => Ok(x),
             Err(_err) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) value is not a boolean: {}", field, st),
             )),
-        };
+        }
     }
 
     pub fn boolean_option_default_none(
@@ -516,15 +496,15 @@ impl Template {
         if template.is_none() {
             return Ok(None);
         }
-        let st = self.string(request, tm, field, &template.as_ref().unwrap())?;
+        let st = self.string(request, tm, field, template.as_ref().unwrap())?;
         let x = st.parse::<bool>();
-        return match x {
+        match x {
             Ok(x) => Ok(Some(x)),
             Err(_err) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) value is not a boolean: {}", field, st),
             )),
-        };
+        }
     }
 
     pub fn test_condition(
@@ -542,10 +522,10 @@ impl Template {
             .read()
             .unwrap()
             .test_condition(expr, &self.host, tm);
-        return match result {
+        match result {
             Ok(x) => Ok(x),
             Err(y) => Err(self.response.is_failed(request, &y)),
-        };
+        }
     }
 
     pub fn test_condition_with_extra_data(
@@ -565,10 +545,10 @@ impl Template {
             .read()
             .unwrap()
             .test_condition_with_extra_data(expr, &self.host, vars_input, tm);
-        return match result {
+        match result {
             Ok(x) => Ok(x),
             Err(y) => Err(self.response.is_failed(request, &y)),
-        };
+        }
     }
 
     pub fn find_template_path(
@@ -580,7 +560,7 @@ impl Template {
     ) -> Result<PathBuf, Arc<TaskResponse>> {
         // templates a string and then looks for the resulting file in the logical templates/ locations (if not an absolute path)
         // raises errors if the source files are not found
-        return self.find_sub_path(&String::from("templates"), request, tm, field, str_path);
+        self.find_sub_path(&String::from("templates"), request, tm, field, str_path)
     }
 
     pub fn find_module_path(
@@ -600,9 +580,9 @@ impl Template {
             }
         }
 
-        return Err(self
+        Err(self
             .response
-            .is_failed(request, &format!("module not found: {}", str_path)));
+            .is_failed(request, &format!("module not found: {}", str_path)))
     }
 
     pub fn find_file_path(
@@ -613,7 +593,7 @@ impl Template {
         str_path: &String,
     ) -> Result<PathBuf, Arc<TaskResponse>> {
         // simialr to find_template_path, this one assumes a 'files/' directory for relative paths.
-        return self.find_sub_path(&String::from("files"), request, tm, field, str_path);
+        self.find_sub_path(&String::from("files"), request, tm, field, str_path)
     }
 
     fn find_sub_path(
@@ -640,31 +620,31 @@ impl Template {
         path.push(prelim);
         if path.is_absolute() {
             if path.is_file() {
-                return Ok(path);
+                Ok(path)
             } else {
-                return Err(self.response.is_failed(
+                Err(self.response.is_failed(
                     request,
                     &format!("field ({}): no such file: {}", field, str_path),
-                ));
+                ))
             }
         } else {
             let mut path2 = PathBuf::new();
             path2.push(prefix);
             path2.push(str_path);
             if path2.is_file() {
-                return Ok(path2);
+                Ok(path2)
             } else {
-                return Err(self.response.is_failed(
+                Err(self.response.is_failed(
                     request,
                     &format!("field ({}): no such file: {}", field, str_path),
-                ));
+                ))
             }
         }
     }
 
     fn has_spaces(&self, input: &String) -> bool {
         let found = input.find(' ');
-        return found.is_some();
+        found.is_some()
     }
 
     pub fn add_sudo_details(&self, request: &TaskRequest, cmd: &str) -> Result<String, String> {
@@ -689,6 +669,6 @@ impl Template {
         let result = self
             .detached_templar
             .render(&sudo_template, data, TemplateMode::Strict)?;
-        return Ok(result);
+        Ok(result)
     }
 }

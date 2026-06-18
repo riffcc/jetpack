@@ -117,7 +117,7 @@ pub fn fsm_run_task(
                 .connection_factory
                 .read()
                 .unwrap()
-                .get_connection(&run_state.context, &host);
+                .get_connection(&run_state.context, host);
             match connection_result {
                 Ok(_) => {
                     let connection = connection_result.unwrap();
@@ -125,10 +125,10 @@ pub fn fsm_run_task(
                         .visitor
                         .read()
                         .unwrap()
-                        .on_host_task_start(&run_state.context, &host);
+                        .on_host_task_start(&run_state.context, host);
                     // the actual task is invoked here
                     let task_response =
-                        run_task_on_host(&run_state, connection, &host, play, task, are_handlers);
+                        run_task_on_host(run_state, connection, host, play, task, are_handlers);
 
                     match task_response {
                         Ok(x) => {
@@ -137,42 +137,42 @@ pub fn fsm_run_task(
                                 false => run_state.visitor.read().unwrap().on_host_task_ok(
                                     &run_state.context,
                                     &x,
-                                    &host,
+                                    host,
                                 ),
                                 true => run_state.visitor.read().unwrap().on_host_task_check_ok(
                                     &run_state.context,
                                     &x,
-                                    &host,
+                                    host,
                                 ),
                             }
                         }
                         Err(x) => {
                             // hosts with task failures are removed from the pool
-                            run_state.context.write().unwrap().fail_host(&host);
+                            run_state.context.write().unwrap().fail_host(host);
                             run_state.visitor.read().unwrap().on_host_task_failed(
                                 &run_state.context,
                                 &x,
-                                &host,
+                                host,
                             );
                         }
                     }
                 }
                 Err(x) => {
                     // hosts with connection failures are removed from the pool
-                    run_state.visitor.read().unwrap().debug_host(&host, &x);
-                    run_state.context.write().unwrap().fail_host(&host);
+                    run_state.visitor.read().unwrap().debug_host(host, &x);
+                    run_state.context.write().unwrap().fail_host(host);
                     run_state
                         .visitor
                         .read()
                         .unwrap()
-                        .on_host_connect_failed(&run_state.context, &host);
+                        .on_host_connect_failed(&run_state.context, host);
                 }
             }
             // rayon needs some math to add up, hence the 1. It seems to short-circuit without some work to do.
-            return 1;
+            1
         })
         .sum();
-    return Ok(());
+    Ok(())
 }
 
 fn get_actual_connection(
@@ -184,7 +184,7 @@ fn get_actual_connection(
     // usually the connection we already have is the one we will use, but this is not the case for using the delegate_to feature
     // this is a bit complex...
 
-    return match task.get_with() {
+    match task.get_with() {
         // if the task has a with section then the task might be delegated
         Some(task_with) => match task_with.delegate_to {
             // we have found the delegate_to keyword
@@ -209,7 +209,7 @@ fn get_actual_connection(
                 if delegate.eq(&hn.clone()) {
                     // delegating to the same host will deadlock since the connection is wrapped in a mutex,
                     // so just return the original connection if that is requested
-                    return Ok((None, input_connection));
+                    Ok((None, input_connection))
                 } else if delegate.eq(&String::from("localhost")) {
                     // localhost delegation has some security implications (see docs) so require a CLI flag for access
                     if run_state.allow_localhost_delegation {
@@ -222,9 +222,7 @@ fn get_actual_connection(
                                 .get_local_connection(&run_state.context)?,
                         ));
                     } else {
-                        return Err(format!(
-                            "localhost delegation has potential security implementations, pass --allow-localhost-delegation to sign off"
-                        ));
+                        Err("localhost delegation has potential security implementations, pass --allow-localhost-delegation to sign off".to_string())
                     }
                 } else {
                     // with some pre-checks out of the way, allow delegation to the host if it's in inventory
@@ -251,7 +249,7 @@ fn get_actual_connection(
         },
         // there was no 'with' block, use teh original connection
         None => Ok((None, input_connection)),
-    };
+    }
 }
 
 fn run_task_on_host(
@@ -344,7 +342,7 @@ fn run_task_on_host(
     let mut last: Option<Result<Arc<TaskResponse>, Arc<TaskResponse>>> = None;
 
     // even if we are not iterating over a list of items, make a list of one item to simplify the logic
-    let evaluated_items = template_items(&handle, &validate, TemplateMode::Strict, &items_input)?;
+    let evaluated_items = template_items(&handle, &validate, TemplateMode::Strict, items_input)?;
 
     // walking over each item or just the single task if 'with_items' was not used
     for item in evaluated_items.iter() {
@@ -359,56 +357,55 @@ fn run_task_on_host(
         let evaluated = task.evaluate(&handle, &validate, TemplateMode::Strict)?;
 
         // Check skip_if_exists AFTER proper templating
-        if let Some(original_with) = task.get_with() {
-            if let Some(ref skip_path_raw) = original_with.skip_if_exists {
-                // Import needed types
-                use crate::handle::template::BlendTarget;
+        if let Some(original_with) = task.get_with()
+            && let Some(ref skip_path_raw) = original_with.skip_if_exists
+        {
+            // Import needed types
+            use crate::handle::template::BlendTarget;
 
-                // Template the path using the context directly
-                let template_result = handle.run_state.context.read().unwrap().render_template(
-                    skip_path_raw,
-                    &handle.host,
-                    BlendTarget::NotTemplateModule,
-                    TemplateMode::Strict,
-                );
+            // Template the path using the context directly
+            let template_result = handle.run_state.context.read().unwrap().render_template(
+                skip_path_raw,
+                &handle.host,
+                BlendTarget::NotTemplateModule,
+                TemplateMode::Strict,
+            );
 
-                match template_result {
-                    Ok(templated) => {
-                        // Check if template was fully resolved
-                        if templated.contains("{{") {
-                            // Template variable not found - FAIL FAST
-                            return Err(handle.response.is_failed(
-                                &validate,
-                                &format!(
-                                    "skip_if_exists: undefined variable in template '{}'",
-                                    skip_path_raw
-                                ),
-                            ));
-                        }
-
-                        // Screen the templated result for illegal path characters
-                        let skip_path = match crate::tasks::cmd_library::screen_path(&templated) {
-                            Ok(path) => path,
-                            Err(e) => {
-                                return Err(handle.response.is_failed(
-                                    &validate,
-                                    &format!("skip_if_exists path invalid: {}", e),
-                                ));
-                            }
-                        };
-
-                        use std::path::Path;
-                        if Path::new(&skip_path).exists() {
-                            return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
-                        }
-                    }
-                    Err(e) => {
-                        // Template error - FAIL FAST
+            match template_result {
+                Ok(templated) => {
+                    // Check if template was fully resolved
+                    if templated.contains("{{") {
+                        // Template variable not found - FAIL FAST
                         return Err(handle.response.is_failed(
                             &validate,
-                            &format!("skip_if_exists template error: {}", e),
+                            &format!(
+                                "skip_if_exists: undefined variable in template '{}'",
+                                skip_path_raw
+                            ),
                         ));
                     }
+
+                    // Screen the templated result for illegal path characters
+                    let skip_path = match crate::tasks::cmd_library::screen_path(&templated) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            return Err(handle.response.is_failed(
+                                &validate,
+                                &format!("skip_if_exists path invalid: {}", e),
+                            ));
+                        }
+                    };
+
+                    use std::path::Path;
+                    if Path::new(&skip_path).exists() {
+                        return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
+                    }
+                }
+                Err(e) => {
+                    // Template error - FAIL FAST
+                    return Err(handle
+                        .response
+                        .is_failed(&validate, &format!("skip_if_exists template error: {}", e)));
                 }
             }
         }
@@ -429,7 +426,7 @@ fn run_task_on_host(
             // for delegation, loops, and retries!
             match run_task_on_host_inner(
                 run_state,
-                &connection,
+                connection,
                 host,
                 play,
                 task,
@@ -445,7 +442,7 @@ fn run_task_on_host(
                     }
                     // we have retries left
                     _ => {
-                        retries = retries - 1;
+                        retries -= 1;
                         run_state.visitor.read().unwrap().on_host_task_retry(
                             &run_state.context,
                             host,
@@ -469,11 +466,11 @@ fn run_task_on_host(
     // looping over a list of no items should be impossible unless someone passed in a variable that was
     // an empty list
     if last.is_some() {
-        return last.unwrap();
+        last.unwrap()
     } else {
-        return Err(handle
+        Err(handle
             .response
-            .is_failed(&validate, &String::from("with/items contained no entries")));
+            .is_failed(&validate, &String::from("with/items contained no entries")))
     }
 }
 
@@ -516,7 +513,7 @@ fn run_task_on_host_inner(
         if are_handlers == HandlerMode::Handlers {
             // if we are running handlers at the moment, skip any un-notified handlers
             if !my_host.is_notified(play_count, &logic.subscribe.as_ref().unwrap().clone()) {
-                return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
+                return Ok(handle.response.is_skipped(&Arc::clone(validate)));
             }
         }
 
@@ -539,20 +536,19 @@ fn run_task_on_host_inner(
     let query = TaskRequest::query(&sudo_details);
 
     // invoke the resource and see what actions it thinks need to be performed
-    let qrc = action.dispatch(&handle, &query);
+    let qrc = action.dispatch(handle, &query);
 
     // in check mode we short-circuit evaluation early, except for passive modules
     // like 'facts'
 
-    if run_state.visitor.read().unwrap().is_check_mode() {
-        match qrc {
-            Ok(ref qrc_ok) => match qrc_ok.status {
-                TaskStatus::NeedsPassive => { /* allow modules like !facts or set to execute */ }
-                _ => {
-                    return qrc;
-                }
-            },
-            _ => {}
+    if run_state.visitor.read().unwrap().is_check_mode()
+        && let Ok(ref qrc_ok) = qrc
+    {
+        match qrc_ok.status {
+            TaskStatus::NeedsPassive => { /* allow modules like !facts or set to execute */ }
+            _ => {
+                return qrc;
+            }
         }
     }
 
@@ -566,7 +562,7 @@ fn run_task_on_host_inner(
             TaskStatus::NeedsCreation => match modify_mode {
                 true => {
                     let req = TaskRequest::create(&sudo_details);
-                    let crc = action.dispatch(&handle, &req);
+                    let crc = action.dispatch(handle, &req);
                     match crc {
                         Ok(ref crc_ok) => match crc_ok.status {
                             TaskStatus::IsCreated => crc,
@@ -589,7 +585,7 @@ fn run_task_on_host_inner(
             TaskStatus::NeedsRemoval => match modify_mode {
                 true => {
                     let req = TaskRequest::remove(&sudo_details);
-                    let rrc = action.dispatch(&handle, &req);
+                    let rrc = action.dispatch(handle, &req);
                     match rrc {
                         Ok(ref rrc_ok) => match rrc_ok.status {
                             TaskStatus::IsRemoved => rrc,
@@ -611,7 +607,7 @@ fn run_task_on_host_inner(
             TaskStatus::NeedsModification => match modify_mode {
                 true => {
                     let req = TaskRequest::modify(&sudo_details, qrc_ok.changes.clone());
-                    let mrc = action.dispatch(&handle, &req);
+                    let mrc = action.dispatch(handle, &req);
                     match mrc {
                         Ok(ref mrc_ok) => match mrc_ok.status {
                             TaskStatus::IsModified => mrc,
@@ -635,7 +631,7 @@ fn run_task_on_host_inner(
             TaskStatus::NeedsExecution => match modify_mode {
                 true => {
                     let req = TaskRequest::execute(&sudo_details);
-                    let erc = action.dispatch(&handle, &req);
+                    let erc = action.dispatch(handle, &req);
                     match erc {
                         Ok(ref erc_ok) => match erc_ok.status {
                             TaskStatus::IsExecuted => erc,
@@ -657,7 +653,7 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsPassive => {
                 let req = TaskRequest::passive(&sudo_details);
-                let prc = action.dispatch(&handle, &req);
+                let prc = action.dispatch(handle, &req);
                 match prc {
                     Ok(ref prc_ok) => match prc_ok.status {
                         TaskStatus::IsPassive => prc,
@@ -736,5 +732,5 @@ fn run_task_on_host_inner(
 
     // ok, we're done, whew
 
-    return result;
+    result
 }

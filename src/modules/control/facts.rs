@@ -53,16 +53,16 @@ impl IsTask for FactsTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(FactsAction {
                 facter: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("facter"),
                     &self.facter,
                 )?,
                 ohai: handle.template.boolean_option_default_false(
-                    &request,
+                    request,
                     tm,
                     &String::from("ohai"),
                     &self.ohai,
@@ -70,7 +70,7 @@ impl IsTask for FactsTask {
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
-        });
+        })
     }
 }
 
@@ -81,18 +81,14 @@ impl IsAction for FactsAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            TaskRequestType::Query => {
-                return Ok(handle.response.needs_passive(request));
-            }
+            TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
 
             TaskRequestType::Passive => {
                 self.do_facts(handle, request)?;
-                return Ok(handle.response.is_passive(request));
+                Ok(handle.response.is_passive(request))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -122,7 +118,7 @@ impl FactsAction {
             self.do_ohai(handle, request, &facts)?;
         }
         handle.host.write().unwrap().update_facts(&facts);
-        return Ok(());
+        Ok(())
     }
 
     fn insert_string(
@@ -171,7 +167,7 @@ impl FactsAction {
             &String::from("jet_os_flavor"),
             &String::from("OSX"),
         );
-        return Ok(());
+        Ok(())
     }
 
     fn do_linux_facts(
@@ -186,7 +182,7 @@ impl FactsAction {
             &String::from("Linux"),
         );
         self.do_linux_os_release(handle, request, mapping)?;
-        return Ok(());
+        Ok(())
     }
 
     fn do_linux_os_release(
@@ -212,11 +208,7 @@ impl FactsAction {
                 let mut k1 = key.unwrap().trim().to_string();
                 k1.make_ascii_lowercase();
                 let v1 = value.unwrap().trim().to_string().replace("\"", "");
-                self.insert_string(
-                    mapping,
-                    &format!("jet_os_release_{}", k1.to_string()),
-                    &v1.clone(),
-                );
+                self.insert_string(mapping, &format!("jet_os_release_{}", k1), &v1.clone());
                 if k1.eq("id_like") {
                     if v1.find("rhel").is_some() {
                         self.insert_string(
@@ -264,7 +256,7 @@ impl FactsAction {
                 &String::from("Unknown"),
             )
         }
-        return Ok(());
+        Ok(())
     }
 
     fn do_arch(
@@ -285,8 +277,8 @@ impl FactsAction {
         };
         let result = handle.remote.run(request, &cmd, CheckRc::Checked)?;
         let (_rc, out) = cmd_info(&result);
-        self.insert_string(mapping, &String::from("jet_arch"), &String::from(out));
-        return Ok(());
+        self.insert_string(mapping, &String::from("jet_arch"), &out);
+        Ok(())
     }
 
     fn do_facter(
@@ -300,7 +292,7 @@ impl FactsAction {
                 .remote
                 .run(request, &String::from("facter --json"), CheckRc::Checked)?;
         let (_rc, out) = cmd_info(&result);
-        match self.insert_json(mapping, &String::from("facter"), &String::from(out)) {
+        match self.insert_json(mapping, &String::from("facter"), &out) {
             Ok(_) => {}
             Err(_) => {
                 return Err(handle
@@ -308,7 +300,7 @@ impl FactsAction {
                     .is_failed(request, &String::from("failed to parse facter output")));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn do_ohai(
@@ -321,7 +313,7 @@ impl FactsAction {
             .remote
             .run(request, &String::from("ohai"), CheckRc::Checked)?;
         let (_rc, out) = cmd_info(&result);
-        match self.insert_json(mapping, &String::from("ohai"), &String::from(out)) {
+        match self.insert_json(mapping, &String::from("ohai"), &out) {
             Ok(_) => {}
             Err(_) => {
                 return Err(handle
@@ -329,6 +321,6 @@ impl FactsAction {
                     .is_failed(request, &String::from("failed to parse ohai output")));
             }
         }
-        return Ok(());
+        Ok(())
     }
 }

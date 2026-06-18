@@ -62,20 +62,20 @@ impl IsTask for TemplateTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let src = handle
             .template
-            .string(&request, tm, &String::from("src"), &self.src)?;
-        return Ok(EvaluatedTask {
+            .string(request, tm, &String::from("src"), &self.src)?;
+        Ok(EvaluatedTask {
             action: Arc::new(TemplateAction {
                 src: handle
                     .template
                     .find_template_path(request, tm, &String::from("src"), &src)?,
                 dest: handle
                     .template
-                    .path(&request, tm, &String::from("dest"), &self.dest)?,
-                attributes: FileAttributesInput::template(&handle, &request, tm, &self.attributes)?,
+                    .path(request, tm, &String::from("dest"), &self.dest)?,
+                attributes: FileAttributesInput::template(handle, request, tm, &self.attributes)?,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -107,12 +107,12 @@ impl IsAction for TemplateAction {
                 if !changes.is_empty() {
                     return Ok(handle.response.needs_modification(request, &changes));
                 }
-                return Ok(handle.response.is_matched(request));
+                Ok(handle.response.is_matched(request))
             }
 
             TaskRequestType::Create => {
                 self.do_template(handle, request, true, None)?;
-                return Ok(handle.response.is_created(request));
+                Ok(handle.response.is_created(request))
             }
 
             TaskRequestType::Modify => {
@@ -127,14 +127,12 @@ impl IsAction for TemplateAction {
                         Recurse::No,
                     )?;
                 }
-                return Ok(handle
+                Ok(handle
                     .response
-                    .is_modified(request, request.changes.clone()));
+                    .is_modified(request, request.changes.clone()))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
@@ -147,19 +145,19 @@ impl TemplateAction {
         write: bool,
         _changes: Option<Vec<Field>>,
     ) -> Result<String, Arc<TaskResponse>> {
-        let template_contents = handle.local.read_file(&request, &self.src)?;
+        let template_contents = handle.local.read_file(request, &self.src)?;
         let data = handle.template.string_for_template_module_use_only(
-            &request,
+            request,
             TemplateMode::Strict,
             &String::from("src"),
             &template_contents,
         )?;
         if write {
-            handle.remote.write_data(&request, &data, &self.dest, |f| {
+            handle.remote.write_data(request, &data, &self.dest, |f| {
                 /* after save */
                 match handle.remote.process_all_common_file_attributes(
                     request,
-                    &f,
+                    f,
                     &self.attributes,
                     Recurse::No,
                 ) {
@@ -168,6 +166,6 @@ impl TemplateAction {
                 }
             })?;
         }
-        return Ok(data);
+        Ok(data)
     }
 }

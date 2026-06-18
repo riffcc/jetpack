@@ -80,35 +80,30 @@ impl IsTask for SelfLocateTask {
             action: Arc::new(SelfLocateAction {
                 save: handle.template.string_no_spaces(
                     request,
-                    tm.clone(),
+                    tm,
                     &String::from("save"),
                     &self.save,
                 )?,
                 api_host: handle.template.string_option(
                     request,
-                    tm.clone(),
+                    tm,
                     &String::from("api_host"),
                     &self.api_host,
                 )?,
                 api_token_id: handle.template.string_option(
                     request,
-                    tm.clone(),
+                    tm,
                     &String::from("api_token_id"),
                     &self.api_token_id,
                 )?,
                 api_token_secret: handle.template.string_option(
                     request,
-                    tm.clone(),
+                    tm,
                     &String::from("api_token_secret"),
                     &self.api_token_secret,
                 )?,
             }),
-            with: Arc::new(PreLogicInput::template(
-                handle,
-                request,
-                tm.clone(),
-                &self.with,
-            )?),
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
         })
     }
@@ -213,11 +208,9 @@ echo "WORKLOAD_ID=$WORKLOAD_ID"
         let mut workload_id: Option<String> = None;
 
         for line in output.lines() {
-            if line.starts_with("VIRT_TYPE=") {
-                let value = &line[10..];
+            if let Some(value) = line.strip_prefix("VIRT_TYPE=") {
                 virt_type = VirtualizationType::from_str(value.trim());
-            } else if line.starts_with("WORKLOAD_ID=") {
-                let value = &line[12..];
+            } else if let Some(value) = line.strip_prefix("WORKLOAD_ID=") {
                 let val = value.trim();
                 if !val.is_empty() {
                     workload_id = Some(val.to_string());

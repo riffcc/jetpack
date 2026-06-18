@@ -100,14 +100,11 @@ struct JetpackLocalConfig {
 }
 
 fn is_cli_mode_valid(value: &String) -> bool {
-    match cli_mode_from_string(value) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    cli_mode_from_string(value).is_ok()
 }
 
 fn cli_mode_from_string(s: &String) -> Result<u32, String> {
-    return match s.as_str() {
+    match s.as_str() {
         "local" => Ok(CLI_MODE_LOCAL),
         "check-local" => Ok(CLI_MODE_CHECK_LOCAL),
         "ssh" => Ok(CLI_MODE_SSH),
@@ -119,7 +116,7 @@ fn cli_mode_from_string(s: &String) -> Result<u32, String> {
         "inventory-check" => Ok(CLI_MODE_INVENTORY_CHECK),
         "full-check" => Ok(CLI_MODE_FULL_CHECK),
         _ => Err(format!("invalid mode: {}", s)),
-    };
+    }
 }
 
 // all the supported flags
@@ -252,7 +249,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
     for (e, i) in inputs.iter() {
         map.insert(i.to_string(), e.clone());
     }
-    return map;
+    map
 }
 
 // output from --version
@@ -269,9 +266,9 @@ fn show_version() {
                                 |-|-",
         GIT_VERSION, GIT_BRANCH, BUILD_TIME
     );
-    println!("");
-    crate::util::terminal::markdown_print(&String::from(header_table));
-    println!("");
+    println!();
+    crate::util::terminal::markdown_print(&header_table);
+    println!();
 }
 
 // output from --help
@@ -309,7 +306,7 @@ fn show_help() {
                       |-|-";
 
     crate::util::terminal::markdown_print(&String::from(mode_table));
-    println!("");
+    println!();
 
     let flags_table = "|:-|:-|\n\
                        | *Category* | *Flags* |*Description*\n\
@@ -356,14 +353,20 @@ fn show_help() {
                        |-|";
 
     crate::util::terminal::markdown_print(&String::from(flags_table));
-    println!("");
+    println!();
+}
+
+impl Default for CliParser {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CliParser {
     // construct a parser with empty result values that will be filled in once parsed.
 
     pub fn new() -> Self {
-        let p = CliParser {
+        CliParser {
             playbook_paths: Arc::new(RwLock::new(Vec::new())),
             inventory_paths: Arc::new(RwLock::new(Vec::new())),
             role_paths: Arc::new(RwLock::new(Vec::new())),
@@ -429,8 +432,7 @@ impl CliParser {
             async_mode: false,
             pull_url: None,
             chroot_path: None,
-        };
-        return p;
+        }
     }
 
     pub fn show_help(&self) {
@@ -457,7 +459,7 @@ impl CliParser {
 
         'each_argument: for argument in &args {
             let argument_str = argument.as_str();
-            arg_count = arg_count + 1;
+            arg_count += 1;
 
             match arg_count {
                 // the program name doesn't matter
@@ -478,14 +480,14 @@ impl CliParser {
 
                     // if it's not --help, then the second argument is the
                     // required 'mode' parameter
-                    let _result = self.store_mode(argument)?;
+                    self.store_mode(argument)?;
                     continue 'each_argument;
                 }
 
                 // for the rest of the arguments we need to pay attention to whether
                 // we are reading a flag or a value, which alternate
                 _ => {
-                    if next_is_value == false {
+                    if !next_is_value {
                         // if we expect a flag...
                         // the --help argument requires special handling as it has no
                         // following value
@@ -600,9 +602,7 @@ impl CliParser {
                             }
                         }
 
-                        if result.is_err() {
-                            return result;
-                        }
+                        result.as_ref()?;
                     } else {
                         next_is_value = false;
                         continue 'each_argument;
@@ -642,7 +642,7 @@ impl CliParser {
             self.mode = cli_mode_from_string(value).unwrap();
             return Ok(());
         }
-        return Err(format!("jetp mode ({}) is not valid, see --help", value));
+        Err(format!("jetp mode ({}) is not valid, see --help", value))
     }
 
     fn append_playbook(&mut self, value: &String) -> Result<(), String> {
@@ -669,7 +669,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn append_roles(&mut self, value: &String) -> Result<(), String> {
@@ -692,7 +692,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn append_modules(&mut self, value: &String) -> Result<(), String> {
@@ -715,7 +715,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn append_inventory(&mut self, value: &String) -> Result<(), String> {
@@ -736,7 +736,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_show_groups(&mut self, value: &String) -> Result<(), String> {
@@ -752,7 +752,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_show_hosts(&mut self, value: &String) -> Result<(), String> {
@@ -768,7 +768,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_limit_groups(&mut self, value: &String) -> Result<(), String> {
@@ -784,7 +784,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_limit_hosts(&mut self, value: &String) -> Result<(), String> {
@@ -800,7 +800,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_tags(&mut self, value: &String) -> Result<(), String> {
@@ -816,17 +816,17 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_sudo(&mut self, value: &String) -> Result<(), String> {
         self.sudo = Some(value.clone());
-        return Ok(());
+        Ok(())
     }
 
     fn store_default_user(&mut self, value: &String) -> Result<(), String> {
         self.default_user = value.clone();
-        return Ok(());
+        Ok(())
     }
 
     fn store_batch_size(&mut self, value: &String) -> Result<(), String> {
@@ -839,14 +839,12 @@ impl CliParser {
         match value.parse::<usize>() {
             Ok(n) => {
                 self.batch_size = Some(n);
-                return Ok(());
+                Ok(())
             }
-            Err(_e) => {
-                return Err(format!(
-                    "{}: invalid value",
-                    Arguments::ARGUMENT_BATCH_SIZE.as_str()
-                ));
-            }
+            Err(_e) => Err(format!(
+                "{}: invalid value",
+                Arguments::ARGUMENT_BATCH_SIZE.as_str()
+            )),
         }
     }
 
@@ -854,14 +852,12 @@ impl CliParser {
         match value.parse::<usize>() {
             Ok(n) => {
                 self.threads = n;
-                return Ok(());
+                Ok(())
             }
-            Err(_e) => {
-                return Err(format!(
-                    "{}: invalid value",
-                    Arguments::ARGUMENT_THREADS.as_str()
-                ));
-            }
+            Err(_e) => Err(format!(
+                "{}: invalid value",
+                Arguments::ARGUMENT_THREADS.as_str()
+            )),
         }
     }
 
@@ -869,14 +865,12 @@ impl CliParser {
         match value.parse::<i64>() {
             Ok(n) => {
                 self.default_port = n;
-                return Ok(());
+                Ok(())
             }
-            Err(_e) => {
-                return Err(format!(
-                    "{}: invalid value",
-                    Arguments::ARGUMENT_PORT.as_str()
-                ));
-            }
+            Err(_e) => Err(format!(
+                "{}: invalid value",
+                Arguments::ARGUMENT_PORT.as_str()
+            )),
         }
     }
 
@@ -886,8 +880,8 @@ impl CliParser {
     }
 
     fn increase_verbosity(&mut self, amount: u32) -> Result<(), String> {
-        self.verbosity = self.verbosity + amount;
-        return Ok(());
+        self.verbosity += amount;
+        Ok(())
     }
 
     fn add_implicit_role_paths(&mut self) -> Result<(), String> {
@@ -904,7 +898,7 @@ impl CliParser {
                 // ignore as there does not need to be a roles/ dir alongside playbooks
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn add_implicit_module_paths(&mut self) -> Result<(), String> {
@@ -921,7 +915,7 @@ impl CliParser {
                 // ignore as there does not need to be a modules/ dir alongside playbooks
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn apply_local_bootstrap_defaults(&mut self) -> Result<(), String> {
@@ -1076,7 +1070,7 @@ impl CliParser {
                 Err(y) => return Err(y),
             };
         }
-        return Ok(());
+        Ok(())
     }
 
     fn add_module_paths_from_environment(&mut self) -> Result<(), String> {
@@ -1097,7 +1091,7 @@ impl CliParser {
                 Err(y) => return Err(y),
             };
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_extra_vars(&mut self, value: &String) -> Result<(), String> {
@@ -1116,8 +1110,8 @@ impl CliParser {
             let parsed: Result<serde_yaml::Mapping, serde_yaml::Error> =
                 serde_yaml::from_reader(extra_file);
             if parsed.is_err() {
-                show_yaml_error_in_context(&parsed.unwrap_err(), &path);
-                return Err(format!("edit the file and try again?"));
+                show_yaml_error_in_context(&parsed.unwrap_err(), path);
+                return Err("edit the file and try again?".to_string());
             }
             blend_variables(
                 &mut self.extra_vars,
@@ -1135,12 +1129,12 @@ impl CliParser {
             blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(serde_map));
         }
 
-        return Ok(());
+        Ok(())
     }
 
     fn store_forward_agent(&mut self) -> Result<(), String> {
         self.forward_agent = true;
-        return Ok(());
+        Ok(())
     }
 
     fn store_login_password(&mut self) -> Result<(), String> {
@@ -1152,7 +1146,7 @@ impl CliParser {
             }
             Err(e) => return Err(format!("failure reading input: {}", e)),
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_groups(&mut self, value: &String) -> Result<(), String> {
@@ -1168,7 +1162,7 @@ impl CliParser {
                 ));
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn store_async_mode(&mut self) -> Result<(), String> {
@@ -1611,7 +1605,7 @@ mod tests {
 }
 
 fn split_string(value: &String) -> Result<Vec<String>, String> {
-    return Ok(value.split(":").map(|x| String::from(x)).collect());
+    Ok(value.split(":").map(String::from).collect())
 }
 
 // accept paths eliminated by ":" and return a list of paths, provided they exist
@@ -1630,5 +1624,5 @@ fn parse_paths(from: &String, value: &String) -> Result<Vec<PathBuf>, String> {
             ));
         }
     }
-    return Ok(results);
+    Ok(results)
 }

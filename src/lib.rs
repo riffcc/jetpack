@@ -14,12 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-// Clippy is temporarily silenced crate-wide: the codebase carries ~1,430
-// pre-existing lints (overwhelmingly its deliberate explicit-`return` style).
-// A dedicated cleanup pass will re-enable and address them per-lint; until
-// then this keeps `cargo clippy` quiet. See tracking issue #8.
-#![allow(clippy::all)]
-
 pub mod cli;
 pub mod connection;
 pub mod dns;

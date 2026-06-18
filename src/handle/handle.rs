@@ -94,7 +94,7 @@ impl TaskHandle {
         // run_state itself is a bit of a pseudo-global and contains quite a few more parameters, see playbook/traversal.rs for
         // what it contains.
 
-        let s = Self {
+        Self {
             run_state: Arc::clone(&run_state_handle),
             _connection: Arc::clone(&connection_handle),
             host: Arc::clone(&host_handle),
@@ -102,8 +102,7 @@ impl TaskHandle {
             local: Arc::clone(&local),
             response: Arc::clone(&response),
             template: Arc::clone(&template),
-        };
-        s
+        }
     }
 
     pub fn debug(&self, _request: &Arc<TaskRequest>, message: &String) {

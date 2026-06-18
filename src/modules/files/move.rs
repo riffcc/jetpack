@@ -66,16 +66,16 @@ impl IsTask for MoveTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         let src = handle
             .template
-            .path(&request, tm, &String::from("src"), &self.src)?;
+            .path(request, tm, &String::from("src"), &self.src)?;
         let dest = handle
             .template
-            .path(&request, tm, &String::from("dest"), &self.dest)?;
+            .path(request, tm, &String::from("dest"), &self.dest)?;
 
         let mode = match &self.mode {
             Some(m) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("mode"), m)?,
+                    .string(request, tm, &String::from("mode"), m)?,
             ),
             None => None,
         };
@@ -84,7 +84,7 @@ impl IsTask for MoveTask {
             Some(o) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("owner"), o)?,
+                    .string(request, tm, &String::from("owner"), o)?,
             ),
             None => None,
         };
@@ -93,17 +93,16 @@ impl IsTask for MoveTask {
             Some(g) => Some(
                 handle
                     .template
-                    .string(&request, tm, &String::from("group"), g)?,
+                    .string(request, tm, &String::from("group"), g)?,
             ),
             None => None,
         };
 
         let backup = match &self.backup {
             Some(b) => {
-                let backup_str =
-                    handle
-                        .template
-                        .string(&request, tm, &String::from("backup"), b)?;
+                let backup_str = handle
+                    .template
+                    .string(request, tm, &String::from("backup"), b)?;
                 backup_str == "true" || backup_str == "yes" || backup_str == "1"
             }
             None => false,
@@ -113,13 +112,13 @@ impl IsTask for MoveTask {
             Some(f) => {
                 let force_str = handle
                     .template
-                    .string(&request, tm, &String::from("force"), f)?;
+                    .string(request, tm, &String::from("force"), f)?;
                 force_str == "true" || force_str == "yes" || force_str == "1"
             }
             None => false,
         };
 
-        return Ok(EvaluatedTask {
+        Ok(EvaluatedTask {
             action: Arc::new(MoveAction {
                 src,
                 dest,
@@ -129,9 +128,9 @@ impl IsTask for MoveTask {
                 backup,
                 force,
             }),
-            with: Arc::new(PreLogicInput::template(&handle, &request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(&handle, &request, tm, &self.and)?),
-        });
+            with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
+            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+        })
     }
 }
 
@@ -142,7 +141,7 @@ impl MoveAction {
         request: &Arc<TaskRequest>,
         path: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
-        handle.remote.file_exists(&request, &path.to_string())
+        handle.remote.file_exists(request, &path.to_string())
     }
 
     fn check_parent_dir_exists(
@@ -151,19 +150,19 @@ impl MoveAction {
         request: &Arc<TaskRequest>,
     ) -> Result<(), Arc<TaskResponse>> {
         // Extract parent directory path
-        if let Some(slash_pos) = self.dest.rfind('/') {
-            if slash_pos > 0 {
-                // Not root directory
-                let parent_dir = &self.dest[..slash_pos];
-                if !handle
-                    .remote
-                    .get_is_directory(&request, &parent_dir.to_string())?
-                {
-                    return Err(handle.response.is_failed(
-                        &request,
-                        &format!("Parent directory '{}' does not exist", parent_dir),
-                    ));
-                }
+        if let Some(slash_pos) = self.dest.rfind('/')
+            && slash_pos > 0
+        {
+            // Not root directory
+            let parent_dir = &self.dest[..slash_pos];
+            if !handle
+                .remote
+                .get_is_directory(request, &parent_dir.to_string())?
+            {
+                return Err(handle.response.is_failed(
+                    request,
+                    &format!("Parent directory '{}' does not exist", parent_dir),
+                ));
             }
         }
         Ok(())
@@ -176,7 +175,7 @@ impl MoveAction {
     ) -> Result<(), Arc<TaskResponse>> {
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         handle.remote.run(
-            &request,
+            request,
             &format!(
                 "cp -a \"{}\" \"{}.backup.{}\"",
                 self.dest, self.dest, timestamp
@@ -193,7 +192,7 @@ impl MoveAction {
     ) -> Result<(), Arc<TaskResponse>> {
         handle
             .remote
-            .rename(&request, &self.src, &self.dest, self.force)?;
+            .rename(request, &self.src, &self.dest, self.force)?;
         Ok(())
     }
 
@@ -204,7 +203,7 @@ impl MoveAction {
     ) -> Result<(), Arc<TaskResponse>> {
         if let Some(ref mode) = self.mode {
             handle.remote.run(
-                &request,
+                request,
                 &format!("chmod {} \"{}\"", mode, self.dest),
                 CheckRc::Checked,
             )?;
@@ -219,7 +218,7 @@ impl MoveAction {
             };
 
             handle.remote.run(
-                &request,
+                request,
                 &format!("chown {} \"{}\"", owner_str, self.dest),
                 CheckRc::Checked,
             )?;
@@ -240,7 +239,7 @@ impl IsAction for MoveAction {
                 if !self.check_file_exists(handle, request, &self.src)? {
                     return Err(handle
                         .response
-                        .is_failed(&request, &format!("Source '{}' does not exist", self.src)));
+                        .is_failed(request, &format!("Source '{}' does not exist", self.src)));
                 }
 
                 // Check if parent directory exists
@@ -248,7 +247,7 @@ impl IsAction for MoveAction {
 
                 // Check if destination exists
                 if self.check_file_exists(handle, request, &self.dest)? && !self.force {
-                    return Ok(handle.response.is_matched(&request));
+                    return Ok(handle.response.is_matched(request));
                 }
 
                 let mut changes = vec![Field::Content];
@@ -262,7 +261,7 @@ impl IsAction for MoveAction {
                     changes.push(Field::Group);
                 }
 
-                return Ok(handle.response.needs_modification(&request, &changes));
+                Ok(handle.response.needs_modification(request, &changes))
             }
 
             TaskRequestType::Modify => {
@@ -288,12 +287,10 @@ impl IsAction for MoveAction {
                     changes.push(Field::Group);
                 }
 
-                return Ok(handle.response.is_modified(&request, changes));
+                Ok(handle.response.is_modified(request, changes))
             }
 
-            _ => {
-                return Err(handle.response.not_supported(request));
-            }
+            _ => Err(handle.response.not_supported(request)),
         }
     }
 }
