@@ -23,4 +23,5 @@ pub mod fail;
 pub mod self_locate;
 pub mod set;
 pub mod wait_for_host;
+pub mod wait_for_http;
 pub mod wait_for_others;
