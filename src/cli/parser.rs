@@ -66,6 +66,8 @@ pub struct CliParser {
     pub async_mode: bool,
     pub pull_url: Option<String>,
     pub chroot_path: Option<String>,
+    pub no_browser: bool,
+    pub port_set: bool,
 }
 
 // subcommands are usually required
@@ -82,6 +84,7 @@ pub const CLI_MODE_SIMULATE: u32 = 7;
 pub const CLI_MODE_PULL: u32 = 8;
 pub const CLI_MODE_INVENTORY_CHECK: u32 = 9;
 pub const CLI_MODE_FULL_CHECK: u32 = 10;
+pub const CLI_MODE_DOCS: u32 = 11;
 
 const DEFAULT_LOCAL_PLAYBOOK: &str = "deploy/playbooks/bootstrap.yml";
 const DEFAULT_LOCAL_ROLES: &str = "deploy/roles";
@@ -115,6 +118,7 @@ fn cli_mode_from_string(s: &str) -> Result<u32, String> {
         "syntax-check" => Ok(CLI_MODE_SYNTAX),
         "inventory-check" => Ok(CLI_MODE_INVENTORY_CHECK),
         "full-check" => Ok(CLI_MODE_FULL_CHECK),
+        "docs" => Ok(CLI_MODE_DOCS),
         _ => Err(format!("invalid mode: {}", s)),
     }
 }
@@ -158,6 +162,7 @@ pub enum Arguments {
     ARGUMENT_ASYNC,
     ARGUMENT_URL,
     ARGUMENT_CHROOT,
+    ARGUMENT_DOCS_NO_BROWSER,
 }
 
 impl Arguments {
@@ -197,6 +202,7 @@ impl Arguments {
             Arguments::ARGUMENT_ASYNC => "--async",
             Arguments::ARGUMENT_URL => "--url",
             Arguments::ARGUMENT_CHROOT => "--chroot",
+            Arguments::ARGUMENT_DOCS_NO_BROWSER => "--no-browser",
         }
     }
 }
@@ -244,6 +250,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_ASYNC, "--async"),
         (Arguments::ARGUMENT_URL, "--url"),
         (Arguments::ARGUMENT_CHROOT, "--chroot"),
+        (Arguments::ARGUMENT_DOCS_NO_BROWSER, "--no-browser"),
     ];
     let mut map: HashMap<String, Arguments> = HashMap::new();
     for (e, i) in inputs.iter() {
@@ -281,6 +288,8 @@ fn show_help() {
                       | --- | --- | ---\n\
                       | utility: |\n\
                       | | show-inventory | displays inventory, specify --show-groups group1:group2 or --show-hosts host1:host2\n\
+                      | |\n\
+                      | | docs | builds and serves the documentation site locally (opens in your browser; use --no-browser over SSH)\n\
                       | |\n\
                       | --- | --- | ---\n\
                       | validation: |\n\
@@ -347,6 +356,8 @@ fn show_help() {
                        | | --sudo username | sudo to this user by default for all tasks\n\
                        | |\n\
                        | | --tags tag1:tag2 | only run tasks or roles with one of these tags\n\
+                       | |\n\
+                       | | --no-browser | (docs mode) print the local docs URL instead of opening a browser\n\
                        | |\n\
                        | | -v -vv -vvv| ever increasing verbosity\n\
                        | |\n\
@@ -432,6 +443,8 @@ impl CliParser {
             async_mode: false,
             pull_url: None,
             chroot_path: None,
+            no_browser: false,
+            port_set: false,
         }
     }
 
@@ -518,6 +531,7 @@ impl CliParser {
                             Arguments::ARGUMENT_VERBOSEST => self.increase_verbosity(3),
                             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => self.store_login_password(),
                             Arguments::ARGUMENT_ASYNC => self.store_async_mode(),
+                            Arguments::ARGUMENT_DOCS_NO_BROWSER => self.store_no_browser(),
                             _ => {
                                 standalone_arg_found = false;
                                 next_is_value = true;
@@ -621,6 +635,7 @@ impl CliParser {
             CLI_MODE_FULL_CHECK => self.threads = 1,
             CLI_MODE_SHOW => self.threads = 1,
             CLI_MODE_PULL => self.threads = 1,
+            CLI_MODE_DOCS => self.threads = 1,
             CLI_MODE_UNSET => {
                 self.needs_help = true;
             }
@@ -866,6 +881,9 @@ impl CliParser {
         match value.parse::<i64>() {
             Ok(n) => {
                 self.default_port = n;
+                // record that the user explicitly set --port, so mode-scoped
+                // consumers (e.g. `docs`) can distinguish it from the SSH default.
+                self.port_set = true;
                 Ok(())
             }
             Err(_e) => Err(format!(
@@ -877,6 +895,11 @@ impl CliParser {
 
     fn store_allow_localhost_delegation(&mut self) -> Result<(), String> {
         self.allow_localhost_delegation = true;
+        Ok(())
+    }
+
+    fn store_no_browser(&mut self) -> Result<(), String> {
+        self.no_browser = true;
         Ok(())
     }
 
@@ -1243,6 +1266,10 @@ mod tests {
             cli_mode_from_string(&"full-check".to_string()).unwrap(),
             CLI_MODE_FULL_CHECK
         );
+        assert_eq!(
+            cli_mode_from_string(&"docs".to_string()).unwrap(),
+            CLI_MODE_DOCS
+        );
 
         assert!(cli_mode_from_string(&"invalid".to_string()).is_err());
     }
@@ -1259,9 +1286,16 @@ mod tests {
         assert!(is_cli_mode_valid(&"syntax-check".to_string()));
         assert!(is_cli_mode_valid(&"inventory-check".to_string()));
         assert!(is_cli_mode_valid(&"full-check".to_string()));
+        assert!(is_cli_mode_valid(&"docs".to_string()));
 
         assert!(!is_cli_mode_valid(&"invalid".to_string()));
         assert!(!is_cli_mode_valid(&"".to_string()));
+    }
+
+    #[test]
+    fn test_no_browser_flag_in_argument_map() {
+        let parser = CliParser::new();
+        assert!(parser.argument_map.contains_key("--no-browser"));
     }
 
     #[test]
@@ -1275,6 +1309,7 @@ mod tests {
         assert_eq!(Arguments::ARGUMENT_VERBOSE.as_str(), "-v");
         assert_eq!(Arguments::ARGUMENT_VERBOSER.as_str(), "-vv");
         assert_eq!(Arguments::ARGUMENT_VERBOSEST.as_str(), "-vvv");
+        assert_eq!(Arguments::ARGUMENT_DOCS_NO_BROWSER.as_str(), "--no-browser");
     }
 
     #[test]

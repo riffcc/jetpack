@@ -1,0 +1,64 @@
+baseURL: "https://jetpack.dragonfly.computer/"
+title: "Jetpack"
+copyright: "© Riff.CC. Licensed under GPL-3.0-or-later."
+languageCode: "en-gb"
+enableRobotsTXT: true
+enableGitInfo: true
+
+module:
+  hugoVersion:
+    extended: true
+    min: "0.146.0"
+  imports:
+    - path: github.com/imfing/hextra
+
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+  highlight:
+    noClasses: false
+
+params:
+  description: "Jetpack is a fast, modern IT automation platform for configuration management, deployment, and orchestration."
+  navbar:
+    displayTitle: true
+    displayLogo: false
+    width: wide
+  page:
+    width: full
+  theme:
+    default: system
+    displayToggle: true
+  customCss:
+    - css/custom.css
+  footer:
+    enable: true
+    displayCopyright: true
+    displayPoweredBy: false
+  editURL:
+    enable: false
+
+menu:
+  main:
+    - name: Home
+      pageRef: /
+      weight: 1
+    - name: Docs
+      pageRef: /docs
+      weight: 2
+    - name: Search
+      weight: 5
+      params:
+        type: search
+    - name: GitHub
+      url: https://github.com/riffcc/jetpack
+      weight: 6
+      params:
+        icon: github
+
+languages:
+  en:
+    languageName: English
+    weight: 1
+    title: Jetpack

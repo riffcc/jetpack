@@ -12,3 +12,10 @@ tarpaulin-report.html
 
 # Environment
 .env
+
+# Hugo docs build artifacts
+docs/public/
+docs/resources/
+docs/.hugo_build.lock
+docs/node_modules/
+docs/go.sum

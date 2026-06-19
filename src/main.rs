@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use jetpack::cli::docs::docs;
 use jetpack::cli::parser::CliParser;
 use jetpack::cli::playbooks::{
     full_check, inventory_check, playbook_check_local, playbook_check_ssh, playbook_local,
@@ -76,7 +77,8 @@ fn liftoff() -> Result<(), String> {
         }
         jetpack::cli::parser::CLI_MODE_SYNTAX
         | jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK
-        | jetpack::cli::parser::CLI_MODE_FULL_CHECK => {
+        | jetpack::cli::parser::CLI_MODE_FULL_CHECK
+        | jetpack::cli::parser::CLI_MODE_DOCS => {
             // validation modes load inventory on demand inside the check
             // functions; do not seed localhost so inventory-check inspects the
             // on-disk tree exactly as declared.
@@ -90,7 +92,9 @@ fn liftoff() -> Result<(), String> {
     };
 
     match cli_parser.mode {
-        jetpack::cli::parser::CLI_MODE_SHOW | jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK => {}
+        jetpack::cli::parser::CLI_MODE_SHOW
+        | jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK
+        | jetpack::cli::parser::CLI_MODE_DOCS => {}
         jetpack::cli::parser::CLI_MODE_PULL => {
             if !cli_parser.playbook_set && cli_parser.pull_url.is_none() {
                 return Err(String::from(
@@ -129,6 +133,7 @@ fn liftoff() -> Result<(), String> {
         jetpack::cli::parser::CLI_MODE_SYNTAX => playbook_syntax_check(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK => inventory_check(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_FULL_CHECK => full_check(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_DOCS => docs(&cli_parser),
 
         _ => {
             println!("invalid CLI mode");
