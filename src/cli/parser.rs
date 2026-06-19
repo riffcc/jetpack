@@ -68,6 +68,7 @@ pub struct CliParser {
     pub chroot_path: Option<String>,
     pub no_browser: bool,
     pub port_set: bool,
+    pub check: bool,
 }
 
 // subcommands are usually required
@@ -85,6 +86,7 @@ pub const CLI_MODE_PULL: u32 = 8;
 pub const CLI_MODE_INVENTORY_CHECK: u32 = 9;
 pub const CLI_MODE_FULL_CHECK: u32 = 10;
 pub const CLI_MODE_DOCS: u32 = 11;
+pub const CLI_MODE_GEN_REFERENCE: u32 = 12;
 
 const DEFAULT_LOCAL_PLAYBOOK: &str = "deploy/playbooks/bootstrap.yml";
 const DEFAULT_LOCAL_ROLES: &str = "deploy/roles";
@@ -119,13 +121,31 @@ fn cli_mode_from_string(s: &str) -> Result<u32, String> {
         "inventory-check" => Ok(CLI_MODE_INVENTORY_CHECK),
         "full-check" => Ok(CLI_MODE_FULL_CHECK),
         "docs" => Ok(CLI_MODE_DOCS),
+        "gen-reference" => Ok(CLI_MODE_GEN_REFERENCE),
         _ => Err(format!("invalid mode: {}", s)),
     }
 }
 
+/// User-facing CLI mode names, for the docs reference. Excludes the internal
+/// `__simulate` mode and the `UNSET` sentinel.
+pub fn all_mode_names() -> &'static [&'static str] {
+    &[
+        "local",
+        "check-local",
+        "ssh",
+        "check-ssh",
+        "show-inventory",
+        "pull",
+        "syntax-check",
+        "inventory-check",
+        "full-check",
+        "docs",
+    ]
+}
+
 // all the supported flags
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, strum::EnumIter)]
 #[allow(non_camel_case_types)]
 pub enum Arguments {
     ARGUMENT_VERSION,
@@ -163,10 +183,11 @@ pub enum Arguments {
     ARGUMENT_URL,
     ARGUMENT_CHROOT,
     ARGUMENT_DOCS_NO_BROWSER,
+    ARGUMENT_CHECK,
 }
 
 impl Arguments {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Arguments::ARGUMENT_VERSION => "--version",
             Arguments::ARGUMENT_INVENTORY => "--inventory",
@@ -203,6 +224,7 @@ impl Arguments {
             Arguments::ARGUMENT_URL => "--url",
             Arguments::ARGUMENT_CHROOT => "--chroot",
             Arguments::ARGUMENT_DOCS_NO_BROWSER => "--no-browser",
+            Arguments::ARGUMENT_CHECK => "--check",
         }
     }
 }
@@ -251,6 +273,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_URL, "--url"),
         (Arguments::ARGUMENT_CHROOT, "--chroot"),
         (Arguments::ARGUMENT_DOCS_NO_BROWSER, "--no-browser"),
+        (Arguments::ARGUMENT_CHECK, "--check"),
     ];
     let mut map: HashMap<String, Arguments> = HashMap::new();
     for (e, i) in inputs.iter() {
@@ -445,6 +468,7 @@ impl CliParser {
             chroot_path: None,
             no_browser: false,
             port_set: false,
+            check: false,
         }
     }
 
@@ -532,6 +556,7 @@ impl CliParser {
                             Arguments::ARGUMENT_ASK_LOGIN_PASSWORD => self.store_login_password(),
                             Arguments::ARGUMENT_ASYNC => self.store_async_mode(),
                             Arguments::ARGUMENT_DOCS_NO_BROWSER => self.store_no_browser(),
+                            Arguments::ARGUMENT_CHECK => self.store_check(),
                             _ => {
                                 standalone_arg_found = false;
                                 next_is_value = true;
@@ -636,6 +661,7 @@ impl CliParser {
             CLI_MODE_SHOW => self.threads = 1,
             CLI_MODE_PULL => self.threads = 1,
             CLI_MODE_DOCS => self.threads = 1,
+            CLI_MODE_GEN_REFERENCE => self.threads = 1,
             CLI_MODE_UNSET => {
                 self.needs_help = true;
             }
@@ -900,6 +926,11 @@ impl CliParser {
 
     fn store_no_browser(&mut self) -> Result<(), String> {
         self.no_browser = true;
+        Ok(())
+    }
+
+    fn store_check(&mut self) -> Result<(), String> {
+        self.check = true;
         Ok(())
     }
 

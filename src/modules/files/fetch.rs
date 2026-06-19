@@ -40,6 +40,7 @@ const MODULE: &str = "fetch";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct FetchTask {
     pub name: Option<String>,
     /// Remote path to fetch.

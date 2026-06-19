@@ -24,6 +24,7 @@ const MODULE: &str = "apt";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct AptTask {
     pub name: Option<String>,
     pub package: String,

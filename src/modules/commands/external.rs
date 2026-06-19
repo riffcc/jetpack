@@ -26,6 +26,7 @@ const MODULE: &str = "External";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct ExternalTask {
     pub name: Option<String>,
     #[serde(rename = "use")]

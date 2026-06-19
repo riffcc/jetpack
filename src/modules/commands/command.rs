@@ -25,6 +25,7 @@ const MODULE: &str = "Command";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct CommandTask {
     pub name: Option<String>,
     pub cmd: String,

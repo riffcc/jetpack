@@ -52,6 +52,7 @@ const MODULE: &str = "proxmox_migrate";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct ProxmoxMigrateTask {
     pub name: Option<String>,
     pub api_host: String,

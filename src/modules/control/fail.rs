@@ -23,6 +23,7 @@ const MODULE: &str = "fail";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct FailTask {
     pub name: Option<String>,
     pub msg: Option<String>,

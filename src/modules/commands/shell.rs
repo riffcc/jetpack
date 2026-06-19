@@ -25,6 +25,7 @@ const MODULE: &str = "Shell";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct ShellTask {
     pub name: Option<String>,
     pub cmd: String,

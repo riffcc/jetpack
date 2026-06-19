@@ -27,6 +27,7 @@ const MODULE: &str = "group";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct GroupTask {
     pub name: Option<String>,
     pub group: String,

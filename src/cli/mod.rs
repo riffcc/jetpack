@@ -15,6 +15,7 @@
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 pub mod docs;
+pub mod gen_reference;
 pub mod parser;
 pub mod playbooks;
 pub mod show;

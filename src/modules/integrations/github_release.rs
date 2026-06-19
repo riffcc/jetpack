@@ -24,6 +24,7 @@ const MODULE: &str = "GithubRelease";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct GithubReleaseTask {
     pub name: Option<String>,
     pub repo: String,

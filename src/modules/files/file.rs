@@ -26,6 +26,7 @@ const MODULE: &str = "file";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct FileTask {
     pub name: Option<String>,
     pub path: String,

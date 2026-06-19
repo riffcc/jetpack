@@ -47,6 +47,11 @@ jobs:
           hugo-version: ${{ env.HUGO_VERSION }}
           extended: true
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Verify reference docs are up to date
+        run: cargo run -- gen-reference --check
+
       - name: Build Hugo site
         working-directory: docs
         run: hugo --gc --minify --enableGitInfo

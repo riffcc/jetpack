@@ -47,6 +47,7 @@ const MODULE: &str = "proxmox_node";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct ProxmoxNodeTask {
     pub name: Option<String>,
     pub api_host: String,

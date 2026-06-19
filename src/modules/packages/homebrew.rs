@@ -24,6 +24,7 @@ const MODULE: &str = "homebrew";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct HomebrewTask {
     pub name: Option<String>,
     pub package: String,

@@ -39,6 +39,7 @@ semver = "1.0"
 tokio = { version = "1.47.0", features = ["full"] }
 urlencoding = "2.1"
 regex = "1.10"
+strum = { version = "0.26", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.8.0"

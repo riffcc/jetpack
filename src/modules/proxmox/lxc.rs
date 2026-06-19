@@ -25,6 +25,7 @@ const MODULE: &str = "proxmox_lxc";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct ProxmoxLxcTask {
     pub name: Option<String>,
     pub api_host: String,

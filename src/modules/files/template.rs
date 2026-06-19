@@ -28,6 +28,7 @@ const MODULE: &str = "template";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct TemplateTask {
     pub name: Option<String>,
     pub src: String,

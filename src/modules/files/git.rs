@@ -27,6 +27,7 @@ const MODULE: &str = "git";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct GitTask {
     pub name: Option<String>,
     pub repo: String,

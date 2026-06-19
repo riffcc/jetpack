@@ -27,6 +27,7 @@ const MODULE: &str = "user";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct UserTask {
     pub name: Option<String>,
     pub user: String,

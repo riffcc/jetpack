@@ -24,6 +24,7 @@ const MODULE: &str = "pacman";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct PacmanTask {
     pub name: Option<String>,
     pub package: String,

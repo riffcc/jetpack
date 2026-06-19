@@ -23,6 +23,7 @@ const MODULE: &str = "assert";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct AssertTask {
     pub name: Option<String>,
     pub msg: Option<String>,

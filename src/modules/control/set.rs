@@ -23,6 +23,7 @@ const MODULE: &str = "Set";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct SetTask {
     pub name: Option<String>,
     pub vars: Option<serde_yaml::Mapping>,

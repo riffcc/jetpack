@@ -25,6 +25,7 @@ const MODULE: &str = "yum_dnf";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct YumDnfTask {
     pub name: Option<String>,
     pub package: String,
