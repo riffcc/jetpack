@@ -1,10 +1,12 @@
 name: Deploy Docs to GitHub Pages
 
-# Builds the Hugo/Hextra site under docs/ and publishes it to GitHub Pages.
-# The site is served at https://riffcc.github.io/jetpack/ — baseURL is set in
-# docs/hugo.yaml, so Hugo emits /jetpack/-prefixed asset URLs directly (no
-# runtime baseURL rewriting needed). Repo prerequisite: Settings → Pages →
-# Source must be set to "GitHub Actions".
+# Builds the Hugo/Hextra site under docs/ and publishes it to GitHub Pages,
+# served at https://jetpack.dragonfly.computer/. baseURL is set in docs/hugo.yaml
+# and docs/static/CNAME carries the custom domain. Repo prerequisites:
+#   - Settings → Pages → Source = "GitHub Actions"
+#   - Settings → Pages → Custom domain = jetpack.dragonfly.computer (the
+#     static/CNAME file sets this automatically on first deploy)
+#   - DNS: CNAME jetpack.dragonfly.computer -> riffcc.github.io
 
 on:
   push:
