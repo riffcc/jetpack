@@ -73,7 +73,7 @@ fn docs_inner(parser: &CliParser) -> Result<i32, String> {
 
 /// Locate the docs site: $JET_DOCS_DIR if set and valid, else walk up from the
 /// current directory looking for a `docs/` containing both hugo.yaml and go.mod.
-fn find_docs_root() -> Result<PathBuf, String> {
+pub(crate) fn find_docs_root() -> Result<PathBuf, String> {
     if let Ok(explicit) = std::env::var("JET_DOCS_DIR") {
         let candidate = PathBuf::from(&explicit);
         if site_is_at(&candidate) {

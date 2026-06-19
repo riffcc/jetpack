@@ -17,6 +17,7 @@
 pub mod cli;
 pub mod connection;
 pub mod dns;
+pub mod docs;
 pub mod handle;
 pub mod inventory;
 pub mod modules;
