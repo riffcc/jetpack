@@ -1224,6 +1224,93 @@ impl ProxmoxLxcProvisioner {
             Ok(())
         })
     }
+
+    /// Current container status string (e.g. "running", "stopped"), or `None` if
+    /// the container does not exist (non-2xx from `/status/current`).
+    fn container_status(
+        &self,
+        conn: &ClusterConnection,
+        vmid: u64,
+    ) -> Result<Option<String>, String> {
+        let url = self.get_api_url(
+            conn,
+            &format!("/nodes/{}/lxc/{}/status/current", conn.node, vmid),
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+        rt.block_on(async {
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+            let resp = self
+                .apply_auth(conn, client.get(&url))
+                .send()
+                .await
+                .map_err(|e| format!("API: {}", e))?;
+            if !resp.status().is_success() {
+                return Ok(None);
+            }
+            #[derive(serde::Deserialize)]
+            struct Wrapper {
+                data: Option<Status>,
+            }
+            #[derive(serde::Deserialize)]
+            struct Status {
+                status: String,
+            }
+            let w: Wrapper = resp.json().await.map_err(|e| format!("Parse: {}", e))?;
+            Ok(w.data.map(|s| s.status))
+        })
+    }
+
+    /// Bounded readiness check: poll until the container reports `stopped`
+    /// (or is gone). Same poll-until-ready shape as `wait_for_ssh` / `wait_for_http`.
+    fn wait_for_stopped(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            match self.container_status(conn, vmid)? {
+                None => return Ok(()),
+                Some(status) if status == "stopped" => return Ok(()),
+                Some(_) => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!("timed out waiting for container {} to stop", vmid));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+
+    /// Stop a container (POST `/status/stop`).
+    fn stop_container(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
+        let url = self.get_api_url(
+            conn,
+            &format!("/nodes/{}/lxc/{}/status/stop", conn.node, vmid),
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Failed to create async runtime: {}", e))?;
+        rt.block_on(async {
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+            let response = self
+                .apply_auth(conn, client.post(&url))
+                .send()
+                .await
+                .map_err(|e| format!("Failed to stop container: {}", e))?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let text = response.text().await.unwrap_or_default();
+                return Err(format!("Failed to stop container: {} - {}", status, text));
+            }
+            Ok(())
+        })
+    }
 }
 
 impl Provisioner for ProxmoxLxcProvisioner {
@@ -1629,6 +1716,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
     ) -> Result<(), String> {
         let conn = self.get_cluster_connection(config, inventory)?;
         let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
+        let state = crate::provisioners::ProvisionState::parse(&config.state)?;
 
         // Find by VMID first, then hostname
         let vmid = if let Some(ref vmid_str) = config.vmid {
@@ -1640,8 +1728,48 @@ impl Provisioner for ProxmoxLxcProvisioner {
                 .ok_or_else(|| format!("Container '{}' not found", hostname))?
         };
 
-        let force = config.state == "force-absent";
+        // "live" = anything not safely stopped (running, paused, …).
+        let is_live = self
+            .container_status(&conn, vmid)?
+            .map(|s| s != "stopped")
+            .unwrap_or(false);
+        crate::provisioners::refuse_destroy_if_running(state, is_live)
+            .map_err(|e| format!("cannot destroy {}: {}", hostname, e))?;
+
+        // force=1&purge=1 makes Proxmox stop+delete server-side — used for the
+        // explicit `destroyed` (and deprecated `force-absent`) state.
+        let force = state == crate::provisioners::ProvisionState::Destroyed;
         self.delete_container(&conn, vmid, force)
+    }
+
+    fn stop(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<ProvisionResult, String> {
+        let conn = self.get_cluster_connection(config, inventory)?;
+        let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
+
+        let vmid = if let Some(ref vmid_str) = config.vmid {
+            vmid_str.parse::<u64>().ok()
+        } else {
+            self.find_container_by_hostname(&conn, hostname)?
+        };
+
+        if let Some(vmid) = vmid {
+            let is_live = self
+                .container_status(&conn, vmid)?
+                .map(|s| s != "stopped")
+                .unwrap_or(false);
+            if is_live {
+                self.stop_container(&conn, vmid)?;
+                self.wait_for_stopped(&conn, vmid)?;
+                return Ok(ProvisionResult::Stopped);
+            }
+        }
+        // Absent or already stopped — desired state reached, no action.
+        Ok(ProvisionResult::AlreadyExists)
     }
 }
 
@@ -2736,14 +2864,18 @@ mod tests {
 
     #[test]
     fn test_provision_state_force_absent() {
-        // state: force_absent should force remove even if running
+        // `force-absent` (hyphen) is the accepted deprecated alias for `destroyed`.
         let config = ProvisionConfig {
             provision_type: "proxmox_lxc".to_string(),
-            state: "force_absent".to_string(),
+            state: "force-absent".to_string(),
             ..test_config()
         };
 
-        assert_eq!(config.state, "force_absent");
+        assert_eq!(config.state, "force-absent");
+        assert_eq!(
+            crate::provisioners::ProvisionState::parse(&config.state).unwrap(),
+            crate::provisioners::ProvisionState::Destroyed
+        );
     }
 
     // ========== VMID Range Tests ==========
