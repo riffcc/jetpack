@@ -23,6 +23,7 @@ const MODULE: &str = "echo";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct EchoTask {
     pub name: Option<String>,
     pub msg: String,

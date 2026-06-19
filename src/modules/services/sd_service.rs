@@ -25,6 +25,7 @@ const MODULE: &str = "sd_service";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct SystemdServiceTask {
     pub name: Option<String>,
     pub service: String,

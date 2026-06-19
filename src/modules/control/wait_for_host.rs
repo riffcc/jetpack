@@ -21,6 +21,7 @@ const MODULE: &str = "wait_for_host";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct WaitForHostTask {
     pub name: Option<String>,
     /// Timeout in seconds (default: 300)

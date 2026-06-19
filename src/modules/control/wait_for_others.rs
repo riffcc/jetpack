@@ -37,6 +37,7 @@ const MODULE: &str = "wait_for_others";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct WaitForOthersTask {
     pub name: Option<String>,
     /// Barrier mode: "strict" or "loose" (default: "loose")

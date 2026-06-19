@@ -24,6 +24,7 @@ const MODULE: &str = "self_locate";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct SelfLocateTask {
     pub name: Option<String>,
 

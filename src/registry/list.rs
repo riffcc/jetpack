@@ -80,8 +80,9 @@ use crate::modules::packages::zypper::ZypperTask;
 use crate::modules::services::sd_service::SystemdServiceTask;
 
 #[allow(non_camel_case_types)]
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, strum::EnumIter, strum::AsRefStr)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum Task {
     // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
     Apt(AptTask),
@@ -320,5 +321,97 @@ impl Task {
                 .unwrap_or(false),
             _ => false,
         }
+    }
+
+    /// Documentation category for this module (used by `jetpack gen-reference`).
+    /// The exhaustive match means a new module variant won't compile until it has
+    /// a category here — so the docs reference can't silently drop a module.
+    pub fn category(&self) -> &'static str {
+        match self {
+            Task::Group(_) | Task::User(_) => "access",
+            Task::Command(_) | Task::External(_) | Task::Shell(_) => "commands",
+            Task::Assert(_)
+            | Task::Debug(_)
+            | Task::Echo(_)
+            | Task::Facts(_)
+            | Task::Fail(_)
+            | Task::Self_Locate(_)
+            | Task::Set(_)
+            | Task::Wait_For_Host(_)
+            | Task::Wait_For_Others(_) => "control",
+            Task::Copy(_)
+            | Task::Directory(_)
+            | Task::Download(_)
+            | Task::Fetch(_)
+            | Task::File(_)
+            | Task::Git(_)
+            | Task::Move(_)
+            | Task::Stat(_)
+            | Task::Template(_)
+            | Task::Unpack(_) => "files",
+            Task::Github_Release(_) => "integrations",
+            Task::Instantiate(_) => "inventory",
+            Task::Proxmox_Lxc(_) | Task::Proxmox_Migrate(_) | Task::Proxmox_Node(_) => "proxmox",
+            Task::Apt(_)
+            | Task::Dnf(_)
+            | Task::Homebrew(_)
+            | Task::Pacman(_)
+            | Task::Yum(_)
+            | Task::Zypper(_) => "packages",
+            Task::Sd_Service(_) => "services",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    const KNOWN_CATEGORIES: [&str; 9] = [
+        "access",
+        "commands",
+        "control",
+        "files",
+        "integrations",
+        "inventory",
+        "packages",
+        "proxmox",
+        "services",
+    ];
+
+    #[test]
+    fn every_module_tag_is_lowercase_snake() {
+        // the canonical YAML tag is the lowercased enum variant; derive it from
+        // the variant (via AsRefStr), never from get_module() — some modules'
+        // MODULE consts drift to "Download"/"Command" casing.
+        for variant in Task::iter() {
+            let tag = variant.as_ref();
+            assert!(
+                !tag.is_empty() && tag.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "module tag {:?} must be lowercase snake_case",
+                tag
+            );
+        }
+    }
+
+    #[test]
+    fn every_module_has_a_known_category() {
+        for variant in Task::iter() {
+            assert!(
+                KNOWN_CATEGORIES.contains(&variant.category()),
+                "module {} has unknown category {:?}",
+                variant.as_ref(),
+                variant.category()
+            );
+        }
+    }
+
+    #[test]
+    fn yum_and_dnf_are_both_registered() {
+        // two tags, one struct (YumDnfTask) — both must appear in the reference.
+        let tags: Vec<String> = Task::iter().map(|v| v.as_ref().to_string()).collect();
+        assert!(tags.iter().any(|t| t == "yum"), "yum tag missing");
+        assert!(tags.iter().any(|t| t == "dnf"), "dnf tag missing");
     }
 }

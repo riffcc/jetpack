@@ -27,6 +27,7 @@ const MODULE: &str = "copy";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct CopyTask {
     pub name: Option<String>,
     pub src: String,

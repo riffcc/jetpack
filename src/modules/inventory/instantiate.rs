@@ -80,6 +80,7 @@ const MODULE: &str = "instantiate";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct InstantiateTask {
     pub name: Option<String>,
 
@@ -121,7 +122,7 @@ pub struct InstantiateTask {
     pub and: Option<PostLogicInput>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct ProvisionTemplate {
     #[serde(rename = "type")]
     pub provision_type: String,

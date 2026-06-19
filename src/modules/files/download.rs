@@ -24,6 +24,7 @@ const MODULE: &str = "Download";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct DownloadTask {
     pub name: Option<String>,
     pub url: String,

@@ -24,6 +24,7 @@ const MODULE: &str = "debug";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct DebugTask {
     pub name: Option<String>,
     pub vars: Option<Vec<String>>,

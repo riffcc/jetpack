@@ -24,6 +24,7 @@ const MODULE: &str = "Move";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct MoveTask {
     pub name: Option<String>,
     pub src: String,

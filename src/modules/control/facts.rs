@@ -24,6 +24,7 @@ const MODULE: &str = "facts";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct FactsTask {
     pub name: Option<String>,
     pub facter: Option<String>,

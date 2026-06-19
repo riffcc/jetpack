@@ -25,6 +25,7 @@ const MODULE: &str = "Unpack";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct UnpackTask {
     pub name: Option<String>,
     pub src: String,

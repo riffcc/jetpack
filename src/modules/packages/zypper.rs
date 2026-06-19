@@ -24,6 +24,7 @@ const MODULE: &str = "zypper";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct ZypperTask {
     pub name: Option<String>,
     pub package: String,

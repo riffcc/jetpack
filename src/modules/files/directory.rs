@@ -26,6 +26,7 @@ const MODULE: &str = "directory";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct DirectoryTask {
     pub name: Option<String>,
     pub path: String,

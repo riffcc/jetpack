@@ -23,6 +23,7 @@ const MODULE: &str = "stat";
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct StatTask {
     pub name: Option<String>,
     pub path: String,
