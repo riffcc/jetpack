@@ -540,10 +540,64 @@ impl ProxmoxVmProvisioner {
         })
     }
 
-    fn delete_vm(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
-        let _ = self.stop_vm(conn, vmid);
-        std::thread::sleep(std::time::Duration::from_secs(3));
+    /// Current VM status string (e.g. "running", "stopped"), or `None` if the VM
+    /// does not exist (non-2xx from `/status/current`).
+    fn vm_status(&self, conn: &ClusterConnection, vmid: u64) -> Result<Option<String>, String> {
+        let url = self.api_url(
+            conn,
+            &format!("/nodes/{}/qemu/{}/status/current", conn.node, vmid),
+        );
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Runtime: {}", e))?;
+        rt.block_on(async {
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .map_err(|e| format!("HTTP: {}", e))?;
+            let resp = self
+                .apply_auth(conn, client.get(&url))
+                .send()
+                .await
+                .map_err(|e| format!("API: {}", e))?;
+            if !resp.status().is_success() {
+                return Ok(None);
+            }
+            #[derive(serde::Deserialize)]
+            struct Wrapper {
+                data: Option<Status>,
+            }
+            #[derive(serde::Deserialize)]
+            struct Status {
+                status: String,
+            }
+            let w: Wrapper = resp.json().await.map_err(|e| format!("Parse: {}", e))?;
+            Ok(w.data.map(|s| s.status))
+        })
+    }
 
+    /// Bounded readiness check: poll until the VM reports `stopped` (or is gone).
+    /// Replaces the old blind `sleep 3` before DELETE — same poll-until-ready
+    /// shape as `wait_for_ssh` / `wait_for_http`.
+    fn wait_for_stopped(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            match self.vm_status(conn, vmid)? {
+                None => return Ok(()),
+                Some(status) if status == "stopped" => return Ok(()),
+                Some(_) => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!("timed out waiting for VM {} to stop", vmid));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+
+    fn delete_vm(&self, conn: &ClusterConnection, vmid: u64) -> Result<(), String> {
+        // Pure DELETE — the caller ensures the VM is stopped first (see `destroy`
+        // / `stop`). No stop, no blind sleep.
         let url = self.api_url(conn, &format!("/nodes/{}/qemu/{}", conn.node, vmid));
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -748,10 +802,46 @@ impl Provisioner for ProxmoxVmProvisioner {
     ) -> Result<(), String> {
         let conn = self.get_cluster_connection(config, inventory)?;
         let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
+        let state = crate::provisioners::ProvisionState::parse(&config.state)?;
 
         if let Some(vmid) = self.find_vm(&conn, hostname)? {
+            // "live" = anything not safely stopped (running, paused, …).
+            let is_live = self
+                .vm_status(&conn, vmid)?
+                .map(|s| s != "stopped")
+                .unwrap_or(false);
+            crate::provisioners::refuse_destroy_if_running(state, is_live)
+                .map_err(|e| format!("cannot destroy {}: {}", hostname, e))?;
+            if is_live {
+                // state: destroyed / force-absent — stop, wait, then delete.
+                self.stop_vm(&conn, vmid)?;
+                self.wait_for_stopped(&conn, vmid)?;
+            }
             self.delete_vm(&conn, vmid)?;
         }
         Ok(())
+    }
+
+    fn stop(
+        &self,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
+    ) -> Result<ProvisionResult, String> {
+        let conn = self.get_cluster_connection(config, inventory)?;
+        let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
+        if let Some(vmid) = self.find_vm(&conn, hostname)? {
+            let is_live = self
+                .vm_status(&conn, vmid)?
+                .map(|s| s != "stopped")
+                .unwrap_or(false);
+            if is_live {
+                self.stop_vm(&conn, vmid)?;
+                self.wait_for_stopped(&conn, vmid)?;
+                return Ok(ProvisionResult::Stopped);
+            }
+        }
+        // Absent or already stopped — desired state reached, no action.
+        Ok(ProvisionResult::AlreadyExists)
     }
 }

@@ -371,6 +371,11 @@ impl PlaybookVisitor {
                 ctx.increment_attempted_for_host(host_name);
                 ctx.increment_removed_for_host(host_name);
             }
+            crate::provisioners::ProvisionResult::Stopped => {
+                println!("{color_blue}✓ {} => stopped{color_reset}", host_name);
+                ctx.increment_attempted_for_host(host_name);
+                ctx.increment_matched_for_host(host_name);
+            }
         }
     }
 
