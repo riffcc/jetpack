@@ -720,12 +720,36 @@ impl Provisioner for ProxmoxVmProvisioner {
                             "Dragonfly: registered {} (MAC {}) as machine {}",
                             hostname, mac, reg.machine_id
                         );
+                        // Force the hostname — register's doesn't always stick
+                        // (the PXE agent can report "localhost" before the host
+                        // is configured), so explicitly PUT it.
+                        match dragonfly.set_hostname(&reg.machine_id, hostname) {
+                            Ok(()) => {}
+                            Err(e) => eprintln!(
+                                "Dragonfly: WARNING: set_hostname for {} failed: {}",
+                                hostname, e
+                            ),
+                        }
                         if let Some(os) =
                             crate::provisioners::dragonfly::var(&host_vars, "dragonfly_os_template")
                         {
                             match dragonfly.assign_os(&reg.machine_id, &os) {
                                 Ok(()) => {
-                                    eprintln!("Dragonfly: assigned OS {} to {}", os, hostname)
+                                    eprintln!("Dragonfly: assigned OS {} to {}", os, hostname);
+                                    // assign_os records the choice; reimage tells
+                                    // Dragonfly to actually apply it.
+                                    match dragonfly.reimage(&reg.machine_id) {
+                                        Ok(()) => {
+                                            eprintln!(
+                                                "Dragonfly: reimage triggered for {}",
+                                                hostname
+                                            )
+                                        }
+                                        Err(e) => eprintln!(
+                                            "Dragonfly: WARNING: reimage for {} failed: {}",
+                                            hostname, e
+                                        ),
+                                    }
                                 }
                                 Err(e) => eprintln!(
                                     "Dragonfly: WARNING: assign_os({}) for {} failed: {}",

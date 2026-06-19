@@ -36,6 +36,11 @@ struct OsAssignmentRequest<'a> {
     os_choice: &'a str,
 }
 
+#[derive(Serialize)]
+struct HostnameUpdateRequest<'a> {
+    hostname: &'a str,
+}
+
 #[derive(Deserialize)]
 struct LeaseInfo {
     mac: String,
@@ -103,6 +108,26 @@ impl DragonflyClient {
         Ok(())
     }
 
+    /// Force-set the machine's hostname. The hostname sent at register doesn't
+    /// always stick (the PXE agent can report "localhost" before the host is
+    /// configured), so we explicitly PUT it after registering.
+    pub fn set_hostname(&self, machine_id: &str, hostname: &str) -> Result<(), String> {
+        let body = HostnameUpdateRequest { hostname };
+        let _ = self.put(&format!("/machines/{}/hostname", machine_id), &body)?;
+        Ok(())
+    }
+
+    /// Trigger imaging: Dragonfly images the machine with its assigned os_choice.
+    /// `assign_os` records the choice; this tells Dragonfly to apply it.
+    pub fn reimage(&self, machine_id: &str) -> Result<(), String> {
+        let _ = self.request(
+            reqwest::Method::POST,
+            &format!("/machines/{}/reimage", machine_id),
+            None,
+        )?;
+        Ok(())
+    }
+
     /// Resolve the current DHCP-assigned IPv4 for a MAC, if a lease exists.
     pub fn lookup_ip(&self, mac: &str) -> Result<Option<String>, String> {
         let resp = self.get("/dhcp/leases")?;
@@ -123,6 +148,12 @@ impl DragonflyClient {
         let json =
             serde_json::to_string(body).map_err(|e| format!("dragonfly: encode body: {}", e))?;
         self.request(reqwest::Method::POST, path, Some(json))
+    }
+
+    fn put<T: Serialize>(&self, path: &str, body: &T) -> Result<HttpResponse, String> {
+        let json =
+            serde_json::to_string(body).map_err(|e| format!("dragonfly: encode body: {}", e))?;
+        self.request(reqwest::Method::PUT, path, Some(json))
     }
 
     fn request(
@@ -352,6 +383,28 @@ mod tests {
         assert_eq!(recorded[0].path, "/api/machines/0192abcd/os");
         let body: serde_json::Value = serde_json::from_str(&recorded[0].body).unwrap();
         assert_eq!(body["os_choice"], "debian-13");
+    }
+
+    #[test]
+    fn set_hostname_puts_to_machine_hostname_path() {
+        let server = MockServer::start(|_| (200, "{}".to_string()));
+        let c = client(&server.url());
+        c.set_hostname("0192abcd", "k8s04").unwrap();
+        let recorded = server.recorded();
+        assert_eq!(recorded[0].method, "PUT");
+        assert_eq!(recorded[0].path, "/api/machines/0192abcd/hostname");
+        let body: serde_json::Value = serde_json::from_str(&recorded[0].body).unwrap();
+        assert_eq!(body["hostname"], "k8s04");
+    }
+
+    #[test]
+    fn reimage_posts_to_machine_reimage_path() {
+        let server = MockServer::start(|_| (200, "{}".to_string()));
+        let c = client(&server.url());
+        c.reimage("0192abcd").unwrap();
+        let recorded = server.recorded();
+        assert_eq!(recorded[0].method, "POST");
+        assert_eq!(recorded[0].path, "/api/machines/0192abcd/reimage");
     }
 
     #[test]
