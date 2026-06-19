@@ -238,7 +238,11 @@ fn load_vars_directory(
         match is_group {
             true => {
                 let group = inv.get_group(&effective_name.clone());
-                group.write().unwrap().set_variables(yaml_result);
+                // Merge onto existing vars (don't replace) so group_vars from
+                // successive --inventory paths overlay earlier ones, with the later
+                // path winning on key conflicts. Matches the host_vars branch below
+                // and the dynamic-inventory group-vars path. (#18)
+                group.write().unwrap().update_variables(yaml_result);
             }
             false => {
                 let host = inv.get_host(&effective_name);
@@ -389,5 +393,63 @@ pub fn convert_json_vars(input: &serde_json::Value) -> serde_yaml::Mapping {
             "unable to load JSON back to YAML (1), this shouldn't happen: {}",
             y
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    // Build a minimal on-disk inventory tree:
+    //   <root>/groups/            (required by load_inventory; may be empty)
+    //   <root>/group_vars/all.yml (the given YAML body)
+    //
+    // Returns the TempDir (caller must keep it alive for the duration of the load)
+    // and the path to pass as a --inventory argument.
+    fn inventory_tree_with_group_vars(all_vars_yaml: &str) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("groups")).unwrap();
+        fs::create_dir_all(dir.path().join("group_vars")).unwrap();
+        let mut file = fs::File::create(dir.path().join("group_vars").join("all.yml")).unwrap();
+        file.write_all(all_vars_yaml.as_bytes()).unwrap();
+        let path = dir.path().to_path_buf();
+        (dir, path)
+    }
+
+    // Load two inventory trees (in order) and return the merged `all` group vars.
+    fn load_two_inventories(first_yaml: &str, second_yaml: &str) -> serde_yaml::Mapping {
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        let (_keep_a, path_a) = inventory_tree_with_group_vars(first_yaml);
+        let (_keep_b, path_b) = inventory_tree_with_group_vars(second_yaml);
+        let paths = Arc::new(RwLock::new(vec![path_a, path_b]));
+        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+        inventory
+            .read()
+            .unwrap()
+            .get_group("all")
+            .read()
+            .unwrap()
+            .get_variables()
+    }
+
+    // Regression for #18: group_vars from a later --inventory path must merge onto
+    // (not replace) an earlier path's group_vars for the same group, with the later
+    // path winning on key conflicts.
+    #[test]
+    fn group_vars_merge_across_multiple_inventory_paths() {
+        let vars = load_two_inventories(
+            "url: https://example.com\nshared: from-first\n",
+            "token: s3cr3t\nshared: from-second\n",
+        );
+
+        // Key only present in the first path must survive loading the second path.
+        assert_eq!(vars["url"], "https://example.com");
+        // New key contributed by the second path is present.
+        assert_eq!(vars["token"], "s3cr3t");
+        // On conflict, the later path wins.
+        assert_eq!(vars["shared"], "from-second");
     }
 }
