@@ -650,17 +650,13 @@ impl Provisioner for ProxmoxVmProvisioner {
         // Create empty VM for PXE boot
         let mac = self.create_empty_vm(&conn, &config, hostname, vmid)?;
 
-        // Log MAC for Dragonfly registration
+        // Log MAC, then run the Dragonfly post-create hook (opt-in via
+        // dragonfly_api_url + _token vars): pre-register the PXE VM so Dragonfly
+        // images it on boot, and optionally assign its OS template. Best-effort
+        // by design — a Dragonfly outage must never block VM creation; the VM
+        // still PXEs and Dragonfly discovers it by MAC regardless.
         if !mac.is_empty() {
             eprintln!("VM {} created with MAC: {}", hostname, mac);
-        }
-
-        // Dragonfly post-create hook (opt-in via dragonfly_api_url + _token
-        // vars): pre-register the PXE VM so Dragonfly images it on boot, and
-        // optionally assign its OS template. Best-effort by design — a Dragonfly
-        // outage must never block VM creation; the VM still PXEs and Dragonfly
-        // discovers it by MAC regardless.
-        if !mac.is_empty() {
             if let Some(dragonfly) =
                 crate::provisioners::dragonfly::DragonflyClient::try_from_vars(&host_vars)
             {
