@@ -693,12 +693,51 @@ impl Provisioner for ProxmoxVmProvisioner {
 
     fn get_ip(
         &self,
-        _config: &ProvisionConfig,
-        _inventory_name: &str,
-        _inventory: &Arc<RwLock<Inventory>>,
+        config: &ProvisionConfig,
+        inventory_name: &str,
+        inventory: &Arc<RwLock<Inventory>>,
     ) -> Result<Option<String>, String> {
-        // IP comes from Dragonfly after PXE boot, not from Proxmox
-        Ok(None)
+        // Resolve the DHCP-assigned IP from Dragonfly after PXE boot. Opt out
+        // entirely when Dragonfly isn't configured so non-Dragonfly deployments
+        // are unchanged. Best-effort: callers (.ok().flatten()) treat any error
+        // as "no IP known".
+        let inv_name = inventory_name.to_string();
+        let host_vars = {
+            let inv = inventory.read().map_err(|e| format!("Inventory: {}", e))?;
+            if inv.has_host(&inv_name) {
+                let host = inv.get_host(&inv_name);
+                let h = host.read().map_err(|e| format!("Host: {}", e))?;
+                h.get_blended_variables()
+            } else {
+                serde_yaml::Mapping::new()
+            }
+        };
+        let dragonfly =
+            match crate::provisioners::dragonfly::DragonflyClient::try_from_vars(&host_vars) {
+                Some(d) => d,
+                None => return Ok(None),
+            };
+
+        // Recover the VM's MAC from Proxmox (works for auto-generated MACs, which
+        // Proxmox stores in the VM config after creation), then ask Dragonfly for
+        // that MAC's current lease.
+        let templated = self.template_config(config, &host_vars)?;
+        let conn = self.get_cluster_connection(&templated, inventory)?;
+        let hostname = templated.hostname.as_deref().unwrap_or(inventory_name);
+        let Some(vmid) = self.find_vm(&conn, hostname)? else {
+            return Ok(None);
+        };
+        let mac = {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("Runtime: {}", e))?;
+            rt.block_on(self.get_vm_mac(&conn, vmid))?
+        };
+        match mac {
+            Some(m) if !m.is_empty() => dragonfly.lookup_ip(&m),
+            _ => Ok(None),
+        }
     }
 
     fn destroy(
