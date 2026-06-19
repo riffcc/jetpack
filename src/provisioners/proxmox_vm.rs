@@ -655,6 +655,43 @@ impl Provisioner for ProxmoxVmProvisioner {
             eprintln!("VM {} created with MAC: {}", hostname, mac);
         }
 
+        // Dragonfly post-create hook (opt-in via dragonfly_api_url + _token
+        // vars): pre-register the PXE VM so Dragonfly images it on boot, and
+        // optionally assign its OS template. Best-effort by design — a Dragonfly
+        // outage must never block VM creation; the VM still PXEs and Dragonfly
+        // discovers it by MAC regardless.
+        if !mac.is_empty() {
+            if let Some(dragonfly) =
+                crate::provisioners::dragonfly::DragonflyClient::try_from_vars(&host_vars)
+            {
+                match dragonfly.register_machine(&mac, Some(hostname)) {
+                    Ok(reg) => {
+                        eprintln!(
+                            "Dragonfly: registered {} (MAC {}) as machine {}",
+                            hostname, mac, reg.machine_id
+                        );
+                        if let Some(os) =
+                            crate::provisioners::dragonfly::var(&host_vars, "dragonfly_os_template")
+                        {
+                            match dragonfly.assign_os(&reg.machine_id, &os) {
+                                Ok(()) => {
+                                    eprintln!("Dragonfly: assigned OS {} to {}", os, hostname)
+                                }
+                                Err(e) => eprintln!(
+                                    "Dragonfly: WARNING: assign_os({}) for {} failed: {}",
+                                    os, hostname, e
+                                ),
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!(
+                        "Dragonfly: WARNING: register {} (MAC {}) failed: {}",
+                        hostname, mac, e
+                    ),
+                }
+            }
+        }
+
         Ok(ProvisionResult::Created)
     }
 

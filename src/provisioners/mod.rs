@@ -33,6 +33,7 @@
 //!   net0: "name=eth0,bridge=vmbr0,ip=10.10.10.2/24,gw=10.10.10.1"
 //! ```
 
+pub mod dragonfly;
 pub mod proxmox_lxc;
 pub mod proxmox_vm;
 
