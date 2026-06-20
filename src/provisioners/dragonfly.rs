@@ -18,6 +18,17 @@ pub struct DragonflyClient {
     token: String,
 }
 
+/// Proxmox VM/LXC source info for Dragonfly registration. When included,
+/// Dragonfly sets MachineSource::Proxmox so it can reboot-pxe the VM on
+/// reimage (vs Manual, which can't trigger a PXE reboot).
+#[derive(Clone, Debug)]
+pub struct ProxmoxSource {
+    pub proxmox_type: String, // "vm" | "lxc" | "node"
+    pub cluster: String,
+    pub node: String,
+    pub vmid: u64,
+}
+
 #[derive(Serialize)]
 struct RegisterRequest<'a> {
     mac_address: &'a str,
@@ -29,6 +40,16 @@ struct RegisterRequest<'a> {
     // the agent fills them in on check-in.
     disks: &'a [serde_json::Value],
     nameservers: &'a [String],
+    // Proxmox source — when present, Dragonfly stores MachineSource::Proxmox
+    // and can reboot-pxe the VM on reimage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxmox_type: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxmox_cluster: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxmox_node: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxmox_vmid: Option<u64>,
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -104,6 +125,7 @@ impl DragonflyClient {
         mac: &str,
         ip_address: &str,
         hostname: Option<&str>,
+        proxmox: Option<&ProxmoxSource>,
     ) -> Result<RegisterResponse, String> {
         let body = RegisterRequest {
             mac_address: mac,
@@ -111,6 +133,10 @@ impl DragonflyClient {
             hostname,
             disks: &[],
             nameservers: &[],
+            proxmox_type: proxmox.map(|p| p.proxmox_type.as_str()),
+            proxmox_cluster: proxmox.map(|p| p.cluster.as_str()),
+            proxmox_node: proxmox.map(|p| p.node.as_str()),
+            proxmox_vmid: proxmox.map(|p| p.vmid),
         };
         let resp = self.post("/machines", &body)?;
         serde_json::from_str::<RegisterResponse>(&resp.body).map_err(|e| {
@@ -397,7 +423,7 @@ mod tests {
         });
         let c = client(&server.url());
         let resp = c
-            .register_machine("BC:24:11:22:33:44", "", Some("k8s01"))
+            .register_machine("BC:24:11:22:33:44", "", Some("k8s01"), None)
             .unwrap();
         assert_eq!(resp.machine_id, "0192abcd");
         assert_eq!(resp.next_step, "awaiting_os_assignment");
@@ -424,7 +450,10 @@ mod tests {
             )
         });
         let c = client(&server.url());
-        assert!(c.register_machine("aa:bb:cc:dd:ee:ff", "", None).is_ok());
+        assert!(
+            c.register_machine("aa:bb:cc:dd:ee:ff", "", None, None)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -486,7 +515,10 @@ mod tests {
     fn surfaces_http_error_as_err() {
         let server = MockServer::start(|_| (500, r#"{"error":"boom"}"#.to_string()));
         let c = client(&server.url());
-        assert!(c.register_machine("aa:bb:cc:dd:ee:ff", "", None).is_err());
+        assert!(
+            c.register_machine("aa:bb:cc:dd:ee:ff", "", None, None)
+                .is_err()
+        );
     }
 
     #[test]
