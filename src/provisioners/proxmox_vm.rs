@@ -648,7 +648,7 @@ fn trigger_dragonfly_imaging(
 ) {
     let machine_id = match existing_machine_id {
         Some(id) => id.to_string(),
-        None => match dragonfly.register_machine(mac, Some(hostname)) {
+        None => match dragonfly.register_machine(mac, "", Some(hostname)) {
             Ok(reg) => {
                 eprintln!(
                     "Dragonfly: registered {} (MAC {}) as machine {}",

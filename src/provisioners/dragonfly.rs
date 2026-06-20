@@ -21,8 +21,14 @@ pub struct DragonflyClient {
 #[derive(Serialize)]
 struct RegisterRequest<'a> {
     mac_address: &'a str,
+    ip_address: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     hostname: Option<&'a str>,
+    // Dragonfly's RegisterRequest requires these (non-Option, no default). We
+    // pre-register before PXE boot so disk/nameserver info isn't known yet —
+    // the agent fills them in on check-in.
+    disks: &'a [serde_json::Value],
+    nameservers: &'a [String],
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
@@ -96,11 +102,15 @@ impl DragonflyClient {
     pub fn register_machine(
         &self,
         mac: &str,
+        ip_address: &str,
         hostname: Option<&str>,
     ) -> Result<RegisterResponse, String> {
         let body = RegisterRequest {
             mac_address: mac,
+            ip_address,
             hostname,
+            disks: &[],
+            nameservers: &[],
         };
         let resp = self.post("/machines", &body)?;
         serde_json::from_str::<RegisterResponse>(&resp.body).map_err(|e| {
@@ -370,7 +380,7 @@ mod tests {
         });
         let c = client(&server.url());
         let resp = c
-            .register_machine("BC:24:11:22:33:44", Some("k8s01"))
+            .register_machine("BC:24:11:22:33:44", "", Some("k8s01"))
             .unwrap();
         assert_eq!(resp.machine_id, "0192abcd");
         assert_eq!(resp.next_step, "awaiting_os_assignment");
@@ -382,7 +392,10 @@ mod tests {
         assert_eq!(recorded[0].auth.as_deref(), Some("bearer df_test_token"));
         let body: serde_json::Value = serde_json::from_str(&recorded[0].body).unwrap();
         assert_eq!(body["mac_address"], "BC:24:11:22:33:44");
+        assert_eq!(body["ip_address"], "");
         assert_eq!(body["hostname"], "k8s01");
+        assert_eq!(body["disks"], serde_json::json!([]));
+        assert_eq!(body["nameservers"], serde_json::json!([]));
     }
 
     #[test]
@@ -394,7 +407,7 @@ mod tests {
             )
         });
         let c = client(&server.url());
-        assert!(c.register_machine("aa:bb:cc:dd:ee:ff", None).is_ok());
+        assert!(c.register_machine("aa:bb:cc:dd:ee:ff", "", None).is_ok());
     }
 
     #[test]
@@ -444,7 +457,7 @@ mod tests {
     fn surfaces_http_error_as_err() {
         let server = MockServer::start(|_| (500, r#"{"error":"boom"}"#.to_string()));
         let c = client(&server.url());
-        assert!(c.register_machine("aa:bb:cc:dd:ee:ff", None).is_err());
+        assert!(c.register_machine("aa:bb:cc:dd:ee:ff", "", None).is_err());
     }
 
     #[test]
