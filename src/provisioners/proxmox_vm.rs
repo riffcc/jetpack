@@ -665,6 +665,14 @@ fn trigger_dragonfly_imaging(
             }
         },
     };
+    // Set hostname explicitly — register's hostname doesn't always stick (the
+    // PXE agent may report "localhost" on first check-in).
+    if let Err(e) = dragonfly.set_hostname(&machine_id, hostname) {
+        eprintln!(
+            "Dragonfly: WARNING: set_hostname for {} failed: {}",
+            hostname, e
+        );
+    }
     if let Some(os) = os
         && let Err(e) = dragonfly.assign_os(&machine_id, os)
     {

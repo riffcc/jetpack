@@ -138,6 +138,17 @@ impl DragonflyClient {
         Ok(())
     }
 
+    /// Set a machine's hostname (PUT /machines/{id}/hostname). The hostname from
+    /// register_machine doesn't always stick — the PXE agent may report
+    /// "localhost" on first check-in. This sets it explicitly.
+    pub fn set_hostname(&self, machine_id: &str, hostname: &str) -> Result<(), String> {
+        let _ = self.put(
+            &format!("/machines/{}/hostname", machine_id),
+            &serde_json::json!({ "hostname": hostname }),
+        )?;
+        Ok(())
+    }
+
     /// Resolve the current DHCP-assigned IPv4 for a MAC, if a lease exists.
     pub fn lookup_ip(&self, mac: &str) -> Result<Option<String>, String> {
         let resp = self.get("/dhcp/leases")?;
@@ -187,6 +198,12 @@ impl DragonflyClient {
         let json =
             serde_json::to_string(body).map_err(|e| format!("dragonfly: encode body: {}", e))?;
         self.request(reqwest::Method::POST, path, Some(json))
+    }
+
+    fn put<T: Serialize>(&self, path: &str, body: &T) -> Result<HttpResponse, String> {
+        let json =
+            serde_json::to_string(body).map_err(|e| format!("dragonfly: encode body: {}", e))?;
+        self.request(reqwest::Method::PUT, path, Some(json))
     }
 
     fn request(
@@ -429,6 +446,18 @@ mod tests {
         let recorded = server.recorded();
         assert_eq!(recorded[0].method, "POST");
         assert_eq!(recorded[0].path, "/api/machines/0192abcd/reimage");
+    }
+
+    #[test]
+    fn set_hostname_puts_to_machine_hostname_path() {
+        let server = MockServer::start(|_| (200, "{}".to_string()));
+        let c = client(&server.url());
+        c.set_hostname("0192abcd", "k8s01").unwrap();
+        let recorded = server.recorded();
+        assert_eq!(recorded[0].method, "PUT");
+        assert_eq!(recorded[0].path, "/api/machines/0192abcd/hostname");
+        let body: serde_json::Value = serde_json::from_str(&recorded[0].body).unwrap();
+        assert_eq!(body["hostname"], "k8s01");
     }
 
     #[test]
