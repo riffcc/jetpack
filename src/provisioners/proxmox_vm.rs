@@ -466,11 +466,17 @@ impl ProxmoxVmProvisioner {
                 None
             };
 
-            // If we didn't specify MAC, query the VM to get the generated one
-            if mac.is_none()
-                && let Ok(Some(generated_mac)) = self.get_vm_mac(conn, vmid).await
-            {
-                return Ok(generated_mac);
+            // If we didn't specify MAC, the VM was just created — wait for the
+            // creation task (UPID) to complete via Proxmox's tasks API, then
+            // read the generated MAC from the now-available config.
+            if mac.is_none() {
+                let body: serde_json::Value = resp.json().await.unwrap_or_default();
+                if let Some(upid) = body.get("data").and_then(|d| d.as_str()) {
+                    self.wait_for_task(conn, upid).await?;
+                }
+                if let Ok(Some(generated_mac)) = self.get_vm_mac(conn, vmid).await {
+                    return Ok(generated_mac);
+                }
             }
 
             Ok(mac.unwrap_or_default())
