@@ -644,26 +644,25 @@ fn trigger_dragonfly_imaging(
     mac: &str,
     hostname: &str,
     os: Option<&str>,
-    existing_machine_id: Option<&str>,
+    proxmox: Option<&crate::provisioners::dragonfly::ProxmoxSource>,
 ) {
-    let machine_id = match existing_machine_id {
-        Some(id) => id.to_string(),
-        None => match dragonfly.register_machine(mac, "", Some(hostname)) {
-            Ok(reg) => {
-                eprintln!(
-                    "Dragonfly: registered {} (MAC {}) as machine {}",
-                    hostname, mac, reg.machine_id
-                );
-                reg.machine_id
-            }
-            Err(e) => {
-                eprintln!(
-                    "Dragonfly: WARNING: register {} (MAC {}) failed: {}",
-                    hostname, mac, e
-                );
-                return;
-            }
-        },
+    // Always register (creates-or-updates by MAC) so Dragonfly has the Proxmox
+    // source fields — needed for reboot-pxe on reimage.
+    let machine_id = match dragonfly.register_machine(mac, "", Some(hostname), proxmox) {
+        Ok(reg) => {
+            eprintln!(
+                "Dragonfly: registered {} (MAC {}) as machine {}",
+                hostname, mac, reg.machine_id
+            );
+            reg.machine_id
+        }
+        Err(e) => {
+            eprintln!(
+                "Dragonfly: WARNING: register {} (MAC {}) failed: {}",
+                hostname, mac, e
+            );
+            return;
+        }
     };
     // Set hostname explicitly — register's hostname doesn't always stick (the
     // PXE agent may report "localhost" on first check-in).
@@ -698,6 +697,7 @@ fn converge_dragonfly(
     mac: &str,
     hostname: &str,
     os: Option<&str>,
+    proxmox: Option<&crate::provisioners::dragonfly::ProxmoxSource>,
 ) {
     match dragonfly.find_machine_by_mac(mac) {
         Ok(None) => {
@@ -705,7 +705,7 @@ fn converge_dragonfly(
                 "Dragonfly: {} not registered yet — registering + imaging",
                 hostname
             );
-            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, None);
+            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, proxmox);
         }
         Ok(Some(m)) if m.is_installed() => {
             eprintln!("Dragonfly: {} already Installed — no action", hostname);
@@ -715,7 +715,7 @@ fn converge_dragonfly(
                 "Dragonfly: {} not yet imaged (status: {}) — re-triggering",
                 hostname, m.status
             );
-            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, Some(&m.id));
+            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, proxmox);
         }
         Err(e) => eprintln!(
             "Dragonfly: WARNING: lookup for {} (MAC {}) failed: {}",
@@ -795,7 +795,13 @@ impl Provisioner for ProxmoxVmProvisioner {
             if let Some(ref dragonfly) = dragonfly
                 && let Some(mac) = self.vm_mac(&conn, vmid)?
             {
-                converge_dragonfly(dragonfly, &mac, hostname, os.as_deref());
+                let proxmox = crate::provisioners::dragonfly::ProxmoxSource {
+                    proxmox_type: "vm".to_string(),
+                    cluster: config.cluster.clone(),
+                    node: conn.node.clone(),
+                    vmid,
+                };
+                converge_dragonfly(dragonfly, &mac, hostname, os.as_deref(), Some(&proxmox));
             }
             return Ok(ProvisionResult::AlreadyExists);
         }
@@ -817,7 +823,13 @@ impl Provisioner for ProxmoxVmProvisioner {
         if !mac.is_empty() {
             eprintln!("VM {} created with MAC: {}", hostname, mac);
             if let Some(ref dragonfly) = dragonfly {
-                trigger_dragonfly_imaging(dragonfly, &mac, hostname, os.as_deref(), None);
+                let proxmox = crate::provisioners::dragonfly::ProxmoxSource {
+                    proxmox_type: "vm".to_string(),
+                    cluster: config.cluster.clone(),
+                    node: conn.node.clone(),
+                    vmid,
+                };
+                trigger_dragonfly_imaging(dragonfly, &mac, hostname, os.as_deref(), Some(&proxmox));
             }
         }
 
