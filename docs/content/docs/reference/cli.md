@@ -30,7 +30,7 @@ cascade:
 |---|---|---|
 | `--allow-localhost-delegation` | no | — |
 | `--ask-login-password` | no | — |
-| `--async` | no | Run tasks asynchronously. |
+| `--async` | no | Run tasks asynchronously (per-host parallelism). |
 | `--batch-size` | yes | — |
 | `--check` | yes | — |
 | `--chroot` | yes | — |
