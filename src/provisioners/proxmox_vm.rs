@@ -624,6 +624,50 @@ impl ProxmoxVmProvisioner {
         })
     }
 
+    /// Wait for a Proxmox async task (UPID) to complete via the tasks API —
+    /// the native mechanism for Proxmox async operations.
+    async fn wait_for_task(&self, conn: &ClusterConnection, upid: &str) -> Result<(), String> {
+        let url = self.api_url(conn, &format!("/nodes/{}/tasks/{}/status", conn.node, upid));
+        loop {
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .map_err(|e| format!("HTTP: {}", e))?;
+            let resp = self
+                .apply_auth(conn, client.get(&url))
+                .send()
+                .await
+                .map_err(|e| format!("Task status: {}", e))?;
+            if !resp.status().is_success() {
+                return Err(format!("Task status query failed: {}", resp.status()));
+            }
+            #[derive(serde::Deserialize)]
+            struct Wrapper {
+                data: Option<TaskStatus>,
+            }
+            #[derive(serde::Deserialize)]
+            struct TaskStatus {
+                status: String,
+                exitstatus: Option<String>,
+            }
+            let wrapper: Wrapper = resp
+                .json()
+                .await
+                .map_err(|e| format!("Parse task status: {}", e))?;
+            if let Some(task) = wrapper.data
+                && task.status == "stopped"
+            {
+                if let Some(exit) = &task.exitstatus
+                    && exit != "OK"
+                {
+                    return Err(format!("Proxmox task failed ({}): {}", upid, exit));
+                }
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+
     /// Resolve a VM's MAC synchronously (wraps the async get_vm_mac for callers
     /// that aren't already in an async context, like ensure_exists).
     fn vm_mac(&self, conn: &ClusterConnection, vmid: u64) -> Result<Option<String>, String> {
