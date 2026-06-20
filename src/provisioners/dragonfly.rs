@@ -31,6 +31,21 @@ pub struct RegisterResponse {
     pub next_step: String,
 }
 
+/// A Dragonfly machine's identity + imaging state, as returned by the list API.
+#[derive(Deserialize, Debug, PartialEq)]
+pub struct MachineRef {
+    pub id: String,
+    pub status: String,
+}
+
+impl MachineRef {
+    /// Terminal success state: the OS has been imaged/installed. Anything else
+    /// means the machine still needs imaging (or re-imaging).
+    pub fn is_installed(&self) -> bool {
+        self.status == "Installed"
+    }
+}
+
 #[derive(Serialize)]
 struct OsAssignmentRequest<'a> {
     os_choice: &'a str,
@@ -103,6 +118,16 @@ impl DragonflyClient {
         Ok(())
     }
 
+    /// Trigger a reimage workflow for a machine. `assign_os` selects the OS
+    /// template; this kicks off the actual imaging (POST /machines/{id}/reimage).
+    pub fn reimage(&self, machine_id: &str) -> Result<(), String> {
+        let _ = self.post(
+            &format!("/machines/{}/reimage", machine_id),
+            &serde_json::Value::Null,
+        )?;
+        Ok(())
+    }
+
     /// Resolve the current DHCP-assigned IPv4 for a MAC, if a lease exists.
     pub fn lookup_ip(&self, mac: &str) -> Result<Option<String>, String> {
         let resp = self.get("/dhcp/leases")?;
@@ -113,6 +138,35 @@ impl DragonflyClient {
             .into_iter()
             .find(|lease| normalize_mac(&lease.mac) == target)
             .map(|lease| lease.ip))
+    }
+
+    /// Look up a machine by MAC (read-only). Returns its id + imaging status, or
+    /// None if Dragonfly has no machine with that MAC. Used to decide whether a VM
+    /// still needs imaging (status != "Installed") or is already done — without
+    /// re-registering (which would mutate the machine).
+    pub fn find_machine_by_mac(&self, mac: &str) -> Result<Option<MachineRef>, String> {
+        let resp = self.get("/machines")?;
+        #[derive(Deserialize)]
+        struct List {
+            data: Vec<Entry>,
+        }
+        #[derive(Deserialize)]
+        struct Entry {
+            id: String,
+            mac_address: String,
+            status: String,
+        }
+        let list: List = serde_json::from_str(&resp.body)
+            .map_err(|e| format!("dragonfly machines: parse: {} (body: {})", e, resp.body))?;
+        let target = normalize_mac(mac);
+        Ok(list
+            .data
+            .into_iter()
+            .find(|e| normalize_mac(&e.mac_address) == target)
+            .map(|e| MachineRef {
+                id: e.id,
+                status: e.status,
+            }))
     }
 
     fn get(&self, path: &str) -> Result<HttpResponse, String> {
@@ -355,6 +409,16 @@ mod tests {
     }
 
     #[test]
+    fn reimage_posts_to_machine_reimage_path() {
+        let server = MockServer::start(|_| (200, "{}".to_string()));
+        let c = client(&server.url());
+        c.reimage("0192abcd").unwrap();
+        let recorded = server.recorded();
+        assert_eq!(recorded[0].method, "POST");
+        assert_eq!(recorded[0].path, "/api/machines/0192abcd/reimage");
+    }
+
+    #[test]
     fn lookup_ip_matches_mac_case_insensitively() {
         let server = MockServer::start(|_| {
             (
@@ -381,5 +445,61 @@ mod tests {
         let server = MockServer::start(|_| (500, r#"{"error":"boom"}"#.to_string()));
         let c = client(&server.url());
         assert!(c.register_machine("aa:bb:cc:dd:ee:ff", None).is_err());
+    }
+
+    #[test]
+    fn machineref_is_installed_only_for_terminal_state() {
+        assert!(
+            MachineRef {
+                id: "x".into(),
+                status: "Installed".into()
+            }
+            .is_installed()
+        );
+        for s in [
+            "Discovered",
+            "ReadyToInstall",
+            "Initializing",
+            "Installing",
+            "Writing",
+            "ExistingOs",
+            "Failed",
+            "Offline",
+        ] {
+            assert!(
+                !MachineRef {
+                    id: "x".into(),
+                    status: s.into()
+                }
+                .is_installed(),
+                "status {s:?} should NOT count as installed"
+            );
+        }
+    }
+
+    #[test]
+    fn find_machine_by_mac_returns_id_and_status() {
+        let server = MockServer::start(|_| {
+            (
+                200,
+                r#"{"data":[{"id":"m1","mac_address":"bc:24:11:22:33:44","status":"Installed","hostname":"a"},{"id":"m2","mac_address":"aa:bb:cc:dd:ee:ff","status":"Discovered"}]}"#.to_string(),
+            )
+        });
+        let c = client(&server.url());
+        // uppercase requesting MAC must match the lowercase entry
+        let m = c
+            .find_machine_by_mac("BC:24:11:22:33:44")
+            .unwrap()
+            .expect("machine should be found");
+        assert_eq!(m.id, "m1");
+        assert_eq!(m.status, "Installed");
+        assert!(m.is_installed());
+    }
+
+    #[test]
+    fn find_machine_by_mac_returns_none_when_absent() {
+        let server = MockServer::start(|_| (200, r#"{"data":[]}"#.to_string()));
+        let c = client(&server.url());
+        assert_eq!(c.find_machine_by_mac("00:00:00:00:00:00").unwrap(), None);
     }
 }

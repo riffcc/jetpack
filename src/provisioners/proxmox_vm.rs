@@ -623,6 +623,97 @@ impl ProxmoxVmProvisioner {
             Ok(())
         })
     }
+
+    /// Resolve a VM's MAC synchronously (wraps the async get_vm_mac for callers
+    /// that aren't already in an async context, like ensure_exists).
+    fn vm_mac(&self, conn: &ClusterConnection, vmid: u64) -> Result<Option<String>, String> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("Runtime: {}", e))?;
+        rt.block_on(self.get_vm_mac(conn, vmid))
+    }
+}
+
+/// Trigger Dragonfly imaging for a machine: register (if no machine_id is
+/// given), assign the OS template, then kick off the reimage workflow.
+/// Best-effort — every failure is logged and swallowed, so a Dragonfly outage
+/// never blocks VM creation or a run.
+fn trigger_dragonfly_imaging(
+    dragonfly: &crate::provisioners::dragonfly::DragonflyClient,
+    mac: &str,
+    hostname: &str,
+    os: Option<&str>,
+    existing_machine_id: Option<&str>,
+) {
+    let machine_id = match existing_machine_id {
+        Some(id) => id.to_string(),
+        None => match dragonfly.register_machine(mac, Some(hostname)) {
+            Ok(reg) => {
+                eprintln!(
+                    "Dragonfly: registered {} (MAC {}) as machine {}",
+                    hostname, mac, reg.machine_id
+                );
+                reg.machine_id
+            }
+            Err(e) => {
+                eprintln!(
+                    "Dragonfly: WARNING: register {} (MAC {}) failed: {}",
+                    hostname, mac, e
+                );
+                return;
+            }
+        },
+    };
+    if let Some(os) = os
+        && let Err(e) = dragonfly.assign_os(&machine_id, os)
+    {
+        eprintln!(
+            "Dragonfly: WARNING: assign_os({}) for {} failed: {}",
+            os, hostname, e
+        );
+    }
+    match dragonfly.reimage(&machine_id) {
+        Ok(()) => eprintln!("Dragonfly: reimaging {} (machine {})", hostname, machine_id),
+        Err(e) => eprintln!(
+            "Dragonfly: WARNING: reimage for {} (machine {}) failed: {}",
+            hostname, machine_id, e
+        ),
+    }
+}
+
+/// Converge a VM's Dragonfly imaging state: if the machine isn't `Installed`,
+/// (re-)trigger assign_os + reimage; if already `Installed`, leave it alone
+/// (never re-image a working host). Best-effort; lookup errors are warned.
+fn converge_dragonfly(
+    dragonfly: &crate::provisioners::dragonfly::DragonflyClient,
+    mac: &str,
+    hostname: &str,
+    os: Option<&str>,
+) {
+    match dragonfly.find_machine_by_mac(mac) {
+        Ok(None) => {
+            eprintln!(
+                "Dragonfly: {} not registered yet — registering + imaging",
+                hostname
+            );
+            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, None);
+        }
+        Ok(Some(m)) if m.is_installed() => {
+            eprintln!("Dragonfly: {} already Installed — no action", hostname);
+        }
+        Ok(Some(m)) => {
+            eprintln!(
+                "Dragonfly: {} not yet imaged (status: {}) — re-triggering",
+                hostname, m.status
+            );
+            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, Some(&m.id));
+        }
+        Err(e) => eprintln!(
+            "Dragonfly: WARNING: lookup for {} (MAC {}) failed: {}",
+            hostname, mac, e
+        ),
+    }
 }
 
 impl Provisioner for ProxmoxVmProvisioner {
@@ -686,13 +777,25 @@ impl Provisioner for ProxmoxVmProvisioner {
         let config = self.template_config(config, &host_vars)?;
         let conn = self.get_cluster_connection(&config, inventory)?;
         let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
+        let os = crate::provisioners::dragonfly::var(&host_vars, "dragonfly_os_template");
+        let dragonfly = crate::provisioners::dragonfly::DragonflyClient::try_from_vars(&host_vars);
 
-        // Check if exists
-        if self.find_vm(&conn, hostname)?.is_some() {
+        // Exists → converge: if the VM exists but Dragonfly hasn't finished imaging
+        // it (e.g. stuck at "No OS"), re-trigger assign_os + reimage. An already-
+        // Installed machine is left untouched. No-op when Dragonfly isn't configured.
+        if let Some(vmid) = self.find_vm(&conn, hostname)? {
+            if let Some(ref dragonfly) = dragonfly
+                && let Some(mac) = self.vm_mac(&conn, vmid)?
+            {
+                converge_dragonfly(dragonfly, &mac, hostname, os.as_deref());
+            }
             return Ok(ProvisionResult::AlreadyExists);
         }
 
-        // Get VMID - use specified or auto-assign from Proxmox
+        // Absent → create + image: create the VM, then register + assign_os +
+        // reimage with Dragonfly so it images on PXE boot. Best-effort — a
+        // Dragonfly outage must never block VM creation; the VM still PXEs and
+        // Dragonfly discovers it by MAC.
         let vmid = if let Some(ref vmid_str) = config.vmid {
             vmid_str
                 .parse::<u64>()
@@ -701,44 +804,12 @@ impl Provisioner for ProxmoxVmProvisioner {
             self.get_next_vmid(&conn)?
         };
 
-        // Create empty VM for PXE boot
         let mac = self.create_empty_vm(&conn, &config, hostname, vmid)?;
 
-        // Log MAC, then run the Dragonfly post-create hook (opt-in via
-        // dragonfly_api_url + _token vars): pre-register the PXE VM so Dragonfly
-        // images it on boot, and optionally assign its OS template. Best-effort
-        // by design — a Dragonfly outage must never block VM creation; the VM
-        // still PXEs and Dragonfly discovers it by MAC regardless.
         if !mac.is_empty() {
             eprintln!("VM {} created with MAC: {}", hostname, mac);
-            if let Some(dragonfly) =
-                crate::provisioners::dragonfly::DragonflyClient::try_from_vars(&host_vars)
-            {
-                match dragonfly.register_machine(&mac, Some(hostname)) {
-                    Ok(reg) => {
-                        eprintln!(
-                            "Dragonfly: registered {} (MAC {}) as machine {}",
-                            hostname, mac, reg.machine_id
-                        );
-                        if let Some(os) =
-                            crate::provisioners::dragonfly::var(&host_vars, "dragonfly_os_template")
-                        {
-                            match dragonfly.assign_os(&reg.machine_id, &os) {
-                                Ok(()) => {
-                                    eprintln!("Dragonfly: assigned OS {} to {}", os, hostname)
-                                }
-                                Err(e) => eprintln!(
-                                    "Dragonfly: WARNING: assign_os({}) for {} failed: {}",
-                                    os, hostname, e
-                                ),
-                            }
-                        }
-                    }
-                    Err(e) => eprintln!(
-                        "Dragonfly: WARNING: register {} (MAC {}) failed: {}",
-                        hostname, mac, e
-                    ),
-                }
+            if let Some(ref dragonfly) = dragonfly {
+                trigger_dragonfly_imaging(dragonfly, &mac, hostname, os.as_deref(), None);
             }
         }
 
