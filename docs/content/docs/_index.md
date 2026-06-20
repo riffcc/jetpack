@@ -18,25 +18,25 @@ Jetpack is a general-purpose, community-driven IT automation platform for config
   {{< hextra/feature-card
     title="Introduction"
     subtitle="What Jetpack is, why it exists, and the ideas behind it."
-    link="docs/introduction/"
+    link="introduction/"
     icon="arrow-circle-right"
   >}}
   {{< hextra/feature-card
     title="Installation"
     subtitle="Build Jetpack from source or install a prebuilt binary."
-    link="docs/installation/"
+    link="installation/"
     icon="cloud-download"
   >}}
   {{< hextra/feature-card
     title="Usage"
     subtitle="Running playbooks locally and over SSH, plus task modifiers and instantiation."
-    link="docs/usage/"
+    link="usage/"
     icon="play"
   >}}
   {{< hextra/feature-card
     title="Modules"
     subtitle="The building blocks: files, packages, services, commands, access, control, and more."
-    link="docs/modules/"
+    link="modules/"
     icon="cube"
   >}}
 {{< /hextra/feature-grid >}}
