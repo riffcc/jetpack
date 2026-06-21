@@ -771,16 +771,107 @@ fn converge_dragonfly(
             eprintln!("Dragonfly: {} already Installed — no action", hostname);
         }
         Ok(Some(m)) => {
+            // Registered with Dragonfly but not yet `Installed`. Do NOT reimage:
+            // the machine may be mid-imaging, or finished-but-not-yet-marked
+            // (the `Installed` mark is eventual — set by the pre-reboot workflow
+            // event or the Proxmox sync daemon). Re-imaging here cancels its
+            // workflow and wipes a freshly-installed box (#26). A stalled
+            // install is recovered by rebooting (re-PXE → the idempotent
+            // workflow resumes), not by reimage. Reimage is explicit-only.
             eprintln!(
-                "Dragonfly: {} not yet imaged (status: {}) — re-triggering",
+                "Dragonfly: {} registered (status: {}) — no implicit reimage (#26)",
                 hostname, m.status
             );
-            trigger_dragonfly_imaging(dragonfly, mac, ip, hostname, network, os, proxmox);
         }
         Err(e) => eprintln!(
             "Dragonfly: WARNING: lookup for {} (MAC {}) failed: {}",
             hostname, mac, e
         ),
+    }
+}
+
+#[cfg(test)]
+mod converge_tests {
+    use super::*;
+    use crate::provisioners::dragonfly::NetworkSpec;
+    use crate::provisioners::dragonfly::tests::{MockServer, client};
+
+    /// #26: a machine that is registered with Dragonfly but not yet `Installed`
+    /// (mid-imaging, or finished-but-not-yet-marked) must NOT be re-imaged by a
+    /// converge run — re-imaging cancels its workflow and wipes a freshly-
+    /// installed box. Only an *unregistered* machine (None) is imaged here.
+    #[test]
+    fn converge_does_not_reimage_registered_non_installed_machine() {
+        // GET /machines returns a registered, non-Installed machine. Every other
+        // endpoint is answered so that a *wrong* re-image would fully execute
+        // and be recorded (so this test fails loudly, not silently).
+        let server = MockServer::start(|req| {
+            if req.method == "GET" {
+                (
+                    200,
+                    r#"{"data":[{"id":"m1","mac_address":"bc:24:11:22:33:44","status":"Installing"}]}"#
+                        .to_string(),
+                )
+            } else if req.path.ends_with("/reimage") {
+                (200, "{}".to_string())
+            } else if req.path.ends_with("/os") {
+                (200, "{}".to_string())
+            } else if req.path.ends_with("/hostname") {
+                (200, "{}".to_string())
+            } else {
+                // admin/create
+                (200, r#"{"machine_id":"m1","created":false}"#.to_string())
+            }
+        });
+        let c = client(&server.url());
+        converge_dragonfly(
+            &c,
+            "BC:24:11:22:33:44",
+            None,
+            "k8s06",
+            &NetworkSpec::default(),
+            Some("debian-13"),
+            None,
+        );
+        let reimaged = server
+            .recorded()
+            .iter()
+            .any(|r| r.method == "POST" && r.path.contains("/reimage"));
+        assert!(
+            !reimaged,
+            "converge must NOT reimage a registered non-Installed machine (#26)"
+        );
+    }
+
+    /// A machine not yet registered with Dragonfly (None) is still imaged — the
+    /// create path is unchanged by the #26 fix.
+    #[test]
+    fn converge_images_unregistered_machine() {
+        let server = MockServer::start(|req| {
+            if req.method == "GET" {
+                (200, r#"{"data":[]}"#.to_string())
+            } else {
+                (200, r#"{"machine_id":"m1","created":true}"#.to_string())
+            }
+        });
+        let c = client(&server.url());
+        converge_dragonfly(
+            &c,
+            "BC:24:11:22:33:44",
+            None,
+            "newhost",
+            &NetworkSpec::default(),
+            Some("debian-13"),
+            None,
+        );
+        let reimaged = server
+            .recorded()
+            .iter()
+            .any(|r| r.method == "POST" && r.path.contains("/reimage"));
+        assert!(
+            reimaged,
+            "converge must image an unregistered machine (create path unchanged)"
+        );
     }
 }
 
