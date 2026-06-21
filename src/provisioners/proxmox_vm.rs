@@ -773,9 +773,10 @@ fn converge_dragonfly(
         Ok(Some(m)) => {
             // Registered with Dragonfly but not yet `Installed`. Do NOT reimage:
             // the machine may be mid-imaging, or finished-but-not-yet-marked
-            // (the `Installed` mark is eventual — set by the pre-reboot workflow
-            // event or the Proxmox sync daemon). Re-imaging here cancels its
-            // workflow and wipes a freshly-installed box (#26). A stalled
+            // (the `Installed` mark is set by the workflow's reboot/kexec
+            // action_started handoff — the pre-boot agent committing to the
+            // finished OS — NOT by Proxmox power state). Re-imaging here cancels
+            // its workflow and wipes a freshly-installed box (#26). A stalled
             // install is recovered by rebooting (re-PXE → the idempotent
             // workflow resumes), not by reimage. Reimage is explicit-only.
             eprintln!(
