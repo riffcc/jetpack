@@ -29,33 +29,58 @@ pub struct ProxmoxSource {
     pub vmid: u64,
 }
 
+/// Body for `POST /api/machines/admin/create`. Mirrors Dragonfly's
+/// `AdminCreateMachineRequest`; only the fields Jetpack sends are modelled.
+/// `ip_address` is optional: present → Dragonfly sets `StaticIpv4` and bakes
+/// the static config via cloud-init; absent → the machine is left in `Dhcp`.
 #[derive(Serialize)]
-struct RegisterRequest<'a> {
+struct AdminCreateMachineRequest<'a> {
     mac_address: &'a str,
-    ip_address: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ip_address: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hostname: Option<&'a str>,
-    // Dragonfly's RegisterRequest requires these (non-Option, no default). We
-    // pre-register before PXE boot so disk/nameserver info isn't known yet —
-    // the agent fills them in on check-in.
-    disks: &'a [serde_json::Value],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prefix_len: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gateway: Option<&'a str>,
     nameservers: &'a [String],
-    // Proxmox source — when present, Dragonfly stores MachineSource::Proxmox
-    // and can reboot-pxe the VM on reimage.
     #[serde(skip_serializing_if = "Option::is_none")]
-    proxmox_type: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    proxmox_cluster: Option<&'a str>,
+    proxmox_vmid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     proxmox_node: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    proxmox_vmid: Option<u64>,
+    proxmox_cluster: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxmox_type: Option<&'a str>,
 }
 
 #[derive(Deserialize, Debug, PartialEq)]
-pub struct RegisterResponse {
+pub struct AdminCreateMachineResponse {
     pub machine_id: String,
-    pub next_step: String,
+    pub created: bool,
+}
+
+/// Static network details sent in the admin/create body so cloud-init writes a
+/// complete config. Read from inventory group_vars (`node_network_*`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NetworkSpec {
+    pub prefix_len: Option<u8>,
+    pub gateway: Option<String>,
+    pub nameservers: Vec<String>,
+}
+
+impl NetworkSpec {
+    /// Build from blended inventory vars. Missing keys degrade gracefully
+    /// (None / empty) — these only matter for the static path; the server
+    /// ignores them when no IP is declared.
+    pub fn from_vars(vars: &serde_yaml::Mapping) -> Self {
+        Self {
+            prefix_len: var(vars, "node_network_prefix_len").and_then(|s| s.parse().ok()),
+            gateway: var(vars, "node_network_gateway"),
+            nameservers: var_list(vars, "node_network_nameservers"),
+        }
+    }
 }
 
 /// A Dragonfly machine's identity + imaging state, as returned by the list API.
@@ -102,6 +127,24 @@ pub fn var(vars: &serde_yaml::Mapping, key: &str) -> Option<String> {
     }
 }
 
+/// Read a list-of-strings inventory var (a YAML sequence). Empty when unset or
+/// not a sequence. Used for `node_network_nameservers`.
+fn var_list(vars: &serde_yaml::Mapping, key: &str) -> Vec<String> {
+    match vars.get(serde_yaml::Value::String(key.to_string())) {
+        Some(serde_yaml::Value::Sequence(items)) => items
+            .iter()
+            .map(|v| match v {
+                serde_yaml::Value::String(s) => s.clone(),
+                other => serde_yaml::to_string(other)
+                    .ok()
+                    .map(|s| s.trim().trim_matches('"').to_string())
+                    .unwrap_or_default(),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Normalize a MAC for comparison: lowercase, colon-separated. Dragonfly stores
 /// MACs as lowercase-with-colons.
 fn normalize_mac(mac: &str) -> String {
@@ -119,29 +162,36 @@ impl DragonflyClient {
         })
     }
 
-    /// Register (or update) a machine by MAC. Idempotent on the server side.
-    pub fn register_machine(
+    /// Pre-create (or update) a machine via the admin endpoint. Upsert by MAC:
+    /// Dragonfly returns `created: true` for a new machine, `false` for an
+    /// update. When `ip` is `Some` the machine is set to `StaticIpv4` with the
+    /// full network config; when `None` it's left in `Dhcp` (same outcome the
+    /// old open-registration path gave). Re-running is safe — it just
+    /// re-applies the config.
+    pub fn admin_create_machine(
         &self,
         mac: &str,
-        ip_address: &str,
+        ip: Option<&str>,
         hostname: Option<&str>,
+        network: &NetworkSpec,
         proxmox: Option<&ProxmoxSource>,
-    ) -> Result<RegisterResponse, String> {
-        let body = RegisterRequest {
+    ) -> Result<AdminCreateMachineResponse, String> {
+        let body = AdminCreateMachineRequest {
             mac_address: mac,
-            ip_address,
+            ip_address: ip,
             hostname,
-            disks: &[],
-            nameservers: &[],
+            prefix_len: network.prefix_len,
+            gateway: network.gateway.as_deref(),
+            nameservers: &network.nameservers,
             proxmox_type: proxmox.map(|p| p.proxmox_type.as_str()),
             proxmox_cluster: proxmox.map(|p| p.cluster.as_str()),
             proxmox_node: proxmox.map(|p| p.node.as_str()),
-            proxmox_vmid: proxmox.map(|p| p.vmid),
+            proxmox_vmid: proxmox.map(|p| p.vmid as u32),
         };
-        let resp = self.post("/machines", &body)?;
-        serde_json::from_str::<RegisterResponse>(&resp.body).map_err(|e| {
+        let resp = self.post("/machines/admin/create", &body)?;
+        serde_json::from_str::<AdminCreateMachineResponse>(&resp.body).map_err(|e| {
             format!(
-                "dragonfly register: parse response: {} (body: {})",
+                "dragonfly admin/create: parse response: {} (body: {})",
                 e, resp.body
             )
         })
@@ -165,7 +215,7 @@ impl DragonflyClient {
     }
 
     /// Set a machine's hostname (PUT /machines/{id}/hostname). The hostname from
-    /// register_machine doesn't always stick — the PXE agent may report
+    /// admin/create doesn't always stick — the PXE agent may report
     /// "localhost" on first check-in. This sets it explicitly.
     pub fn set_hostname(&self, machine_id: &str, hostname: &str) -> Result<(), String> {
         let _ = self.put(
@@ -414,46 +464,113 @@ mod tests {
     }
 
     #[test]
-    fn register_machine_posts_mac_and_hostname_with_bearer_auth() {
+    fn admin_create_machine_posts_full_static_body() {
         let server = MockServer::start(|_| {
             (
                 201,
-                r#"{"machine_id":"0192abcd","next_step":"awaiting_os_assignment"}"#.to_string(),
+                r#"{"machine_id":"0192abcd","created":true}"#.to_string(),
             )
         });
         let c = client(&server.url());
+        let network = NetworkSpec {
+            prefix_len: Some(24),
+            gateway: Some("10.7.1.1".to_string()),
+            nameservers: vec!["10.7.1.11".to_string(), "10.7.1.12".to_string()],
+        };
+        let proxmox = ProxmoxSource {
+            proxmox_type: "vm".to_string(),
+            cluster: "SpaceTempAgency".to_string(),
+            node: "bee".to_string(),
+            vmid: 101,
+        };
         let resp = c
-            .register_machine("BC:24:11:22:33:44", "", Some("k8s01"), None)
+            .admin_create_machine(
+                "BC:24:11:22:33:44",
+                Some("10.7.1.241"),
+                Some("k8s01"),
+                &network,
+                Some(&proxmox),
+            )
             .unwrap();
         assert_eq!(resp.machine_id, "0192abcd");
-        assert_eq!(resp.next_step, "awaiting_os_assignment");
+        assert!(resp.created);
 
         let recorded = server.recorded();
         assert_eq!(recorded.len(), 1);
         assert_eq!(recorded[0].method, "POST");
-        assert_eq!(recorded[0].path, "/api/machines");
+        assert_eq!(recorded[0].path, "/api/machines/admin/create");
         assert_eq!(recorded[0].auth.as_deref(), Some("bearer df_test_token"));
         let body: serde_json::Value = serde_json::from_str(&recorded[0].body).unwrap();
         assert_eq!(body["mac_address"], "BC:24:11:22:33:44");
-        assert_eq!(body["ip_address"], "");
+        assert_eq!(body["ip_address"], "10.7.1.241");
         assert_eq!(body["hostname"], "k8s01");
-        assert_eq!(body["disks"], serde_json::json!([]));
-        assert_eq!(body["nameservers"], serde_json::json!([]));
+        assert_eq!(body["prefix_len"], 24);
+        assert_eq!(body["gateway"], "10.7.1.1");
+        assert_eq!(
+            body["nameservers"],
+            serde_json::json!(["10.7.1.11", "10.7.1.12"])
+        );
+        assert_eq!(body["proxmox_type"], "vm");
+        assert_eq!(body["proxmox_cluster"], "SpaceTempAgency");
+        assert_eq!(body["proxmox_node"], "bee");
+        assert_eq!(body["proxmox_vmid"], 101);
     }
 
     #[test]
-    fn register_machine_accepts_update_status() {
+    fn admin_create_machine_omits_ip_for_dhcp() {
         let server = MockServer::start(|_| {
             (
                 200,
-                r#"{"machine_id":"0192abcd","next_step":"awaiting_os_assignment"}"#.to_string(),
+                r#"{"machine_id":"0192abcd","created":false}"#.to_string(),
             )
         });
         let c = client(&server.url());
-        assert!(
-            c.register_machine("aa:bb:cc:dd:ee:ff", "", None, None)
-                .is_ok()
+        // No static IP, no network details known → DHCP precreate.
+        let resp = c
+            .admin_create_machine(
+                "BC:24:11:22:33:44",
+                None,
+                Some("k8s01"),
+                &NetworkSpec::default(),
+                None,
+            )
+            .unwrap();
+        assert!(!resp.created);
+
+        let recorded = server.recorded();
+        assert_eq!(recorded[0].path, "/api/machines/admin/create");
+        let body: serde_json::Value = serde_json::from_str(&recorded[0].body).unwrap();
+        // No static IP → ip_address / prefix_len / gateway omitted (server uses Dhcp).
+        assert!(body.get("ip_address").is_none());
+        assert!(body.get("prefix_len").is_none());
+        assert!(body.get("gateway").is_none());
+        assert_eq!(body["mac_address"], "BC:24:11:22:33:44");
+        assert_eq!(body["hostname"], "k8s01");
+    }
+
+    #[test]
+    fn network_spec_from_vars_reads_node_network_group_vars() {
+        let vars: serde_yaml::Mapping = serde_yaml::from_str(
+            "node_network_prefix_len: 24\n\
+             node_network_gateway: 10.7.1.1\n\
+             node_network_nameservers:\n\
+             - 10.7.1.11\n\
+             - 10.7.1.12\n",
+        )
+        .unwrap();
+        let spec = NetworkSpec::from_vars(&vars);
+        assert_eq!(spec.prefix_len, Some(24));
+        assert_eq!(spec.gateway.as_deref(), Some("10.7.1.1"));
+        assert_eq!(
+            spec.nameservers,
+            vec!["10.7.1.11".to_string(), "10.7.1.12".to_string()]
         );
+    }
+
+    #[test]
+    fn network_spec_from_vars_absent_is_empty() {
+        let spec = NetworkSpec::from_vars(&serde_yaml::Mapping::new());
+        assert_eq!(spec, NetworkSpec::default());
     }
 
     #[test]
@@ -516,8 +633,14 @@ mod tests {
         let server = MockServer::start(|_| (500, r#"{"error":"boom"}"#.to_string()));
         let c = client(&server.url());
         assert!(
-            c.register_machine("aa:bb:cc:dd:ee:ff", "", None, None)
-                .is_err()
+            c.admin_create_machine(
+                "aa:bb:cc:dd:ee:ff",
+                None,
+                None,
+                &NetworkSpec::default(),
+                None
+            )
+            .is_err()
         );
     }
 

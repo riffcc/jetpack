@@ -90,6 +90,7 @@ impl ProxmoxVmProvisioner {
             cluster: self.template_string(&templar, &config.cluster, vars)?,
             node: self.template_option(&templar, &config.node, vars)?,
             hostname: self.template_option(&templar, &config.hostname, vars)?,
+            ip: self.template_option(&templar, &config.ip, vars)?,
             vmid: self.template_option(&templar, &config.vmid, vars)?,
             memory: self.template_option(&templar, &config.memory, vars)?,
             cores: self.template_option(&templar, &config.cores, vars)?,
@@ -692,23 +693,30 @@ impl ProxmoxVmProvisioner {
 fn trigger_dragonfly_imaging(
     dragonfly: &crate::provisioners::dragonfly::DragonflyClient,
     mac: &str,
+    ip: Option<&str>,
     hostname: &str,
+    network: &crate::provisioners::dragonfly::NetworkSpec,
     os: Option<&str>,
     proxmox: Option<&crate::provisioners::dragonfly::ProxmoxSource>,
 ) {
-    // Always register (creates-or-updates by MAC) so Dragonfly has the Proxmox
-    // source fields — needed for reboot-pxe on reimage.
-    let machine_id = match dragonfly.register_machine(mac, "", Some(hostname), proxmox) {
+    // admin/create upserts by MAC. With `ip` it sets StaticIpv4 + the full
+    // network config; without, DHCP. Either way Dragonfly gets the Proxmox
+    // source (needed for reboot-pxe on reimage).
+    let machine_id = match dragonfly.admin_create_machine(mac, ip, Some(hostname), network, proxmox)
+    {
         Ok(reg) => {
             eprintln!(
-                "Dragonfly: registered {} (MAC {}) as machine {}",
-                hostname, mac, reg.machine_id
+                "Dragonfly: {} {} (MAC {}) as machine {}",
+                if reg.created { "created" } else { "updated" },
+                hostname,
+                mac,
+                reg.machine_id
             );
             reg.machine_id
         }
         Err(e) => {
             eprintln!(
-                "Dragonfly: WARNING: register {} (MAC {}) failed: {}",
+                "Dragonfly: WARNING: admin/create {} (MAC {}) failed: {}",
                 hostname, mac, e
             );
             return;
@@ -745,17 +753,19 @@ fn trigger_dragonfly_imaging(
 fn converge_dragonfly(
     dragonfly: &crate::provisioners::dragonfly::DragonflyClient,
     mac: &str,
+    ip: Option<&str>,
     hostname: &str,
+    network: &crate::provisioners::dragonfly::NetworkSpec,
     os: Option<&str>,
     proxmox: Option<&crate::provisioners::dragonfly::ProxmoxSource>,
 ) {
     match dragonfly.find_machine_by_mac(mac) {
         Ok(None) => {
             eprintln!(
-                "Dragonfly: {} not registered yet — registering + imaging",
+                "Dragonfly: {} not registered yet — precreating + imaging",
                 hostname
             );
-            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, proxmox);
+            trigger_dragonfly_imaging(dragonfly, mac, ip, hostname, network, os, proxmox);
         }
         Ok(Some(m)) if m.is_installed() => {
             eprintln!("Dragonfly: {} already Installed — no action", hostname);
@@ -765,7 +775,7 @@ fn converge_dragonfly(
                 "Dragonfly: {} not yet imaged (status: {}) — re-triggering",
                 hostname, m.status
             );
-            trigger_dragonfly_imaging(dragonfly, mac, hostname, os, proxmox);
+            trigger_dragonfly_imaging(dragonfly, mac, ip, hostname, network, os, proxmox);
         }
         Err(e) => eprintln!(
             "Dragonfly: WARNING: lookup for {} (MAC {}) failed: {}",
@@ -837,6 +847,7 @@ impl Provisioner for ProxmoxVmProvisioner {
         let hostname = config.hostname.as_deref().unwrap_or(inventory_name);
         let os = crate::provisioners::dragonfly::var(&host_vars, "dragonfly_os_template");
         let dragonfly = crate::provisioners::dragonfly::DragonflyClient::try_from_vars(&host_vars);
+        let network = crate::provisioners::dragonfly::NetworkSpec::from_vars(&host_vars);
 
         // Exists → converge: if the VM exists but Dragonfly hasn't finished imaging
         // it (e.g. stuck at "No OS"), re-trigger assign_os + reimage. An already-
@@ -851,7 +862,15 @@ impl Provisioner for ProxmoxVmProvisioner {
                     node: conn.node.clone(),
                     vmid,
                 };
-                converge_dragonfly(dragonfly, &mac, hostname, os.as_deref(), Some(&proxmox));
+                converge_dragonfly(
+                    dragonfly,
+                    &mac,
+                    config.ip.as_deref(),
+                    hostname,
+                    &network,
+                    os.as_deref(),
+                    Some(&proxmox),
+                );
             }
             return Ok(ProvisionResult::AlreadyExists);
         }
@@ -879,7 +898,15 @@ impl Provisioner for ProxmoxVmProvisioner {
                     node: conn.node.clone(),
                     vmid,
                 };
-                trigger_dragonfly_imaging(dragonfly, &mac, hostname, os.as_deref(), Some(&proxmox));
+                trigger_dragonfly_imaging(
+                    dragonfly,
+                    &mac,
+                    config.ip.as_deref(),
+                    hostname,
+                    &network,
+                    os.as_deref(),
+                    Some(&proxmox),
+                );
             }
         }
 
@@ -892,10 +919,6 @@ impl Provisioner for ProxmoxVmProvisioner {
         inventory_name: &str,
         inventory: &Arc<RwLock<Inventory>>,
     ) -> Result<Option<String>, String> {
-        // Resolve the DHCP-assigned IP from Dragonfly after PXE boot. Opt out
-        // entirely when Dragonfly isn't configured so non-Dragonfly deployments
-        // are unchanged. Best-effort: callers (.ok().flatten()) treat any error
-        // as "no IP known".
         let inv_name = inventory_name.to_string();
         let host_vars = {
             let inv = inventory.read().map_err(|e| format!("Inventory: {}", e))?;
@@ -907,6 +930,17 @@ impl Provisioner for ProxmoxVmProvisioner {
                 serde_yaml::Mapping::new()
             }
         };
+        let templated = self.template_config(config, &host_vars)?;
+
+        // A declared static IP is the SSH target — cloud-init bakes it on the
+        // Dragonfly side, so there's nothing to discover via DHCP.
+        if let Some(ip) = &templated.ip {
+            return Ok(Some(ip.clone()));
+        }
+
+        // No static IP → resolve the DHCP-assigned IP from Dragonfly after PXE
+        // boot. Opt out when Dragonfly isn't configured so non-Dragonfly
+        // deployments are unchanged. Best-effort: callers treat errors as "no IP".
         let dragonfly =
             match crate::provisioners::dragonfly::DragonflyClient::try_from_vars(&host_vars) {
                 Some(d) => d,
@@ -916,7 +950,6 @@ impl Provisioner for ProxmoxVmProvisioner {
         // Recover the VM's MAC from Proxmox (works for auto-generated MACs, which
         // Proxmox stores in the VM config after creation), then ask Dragonfly for
         // that MAC's current lease.
-        let templated = self.template_config(config, &host_vars)?;
         let conn = self.get_cluster_connection(&templated, inventory)?;
         let hostname = templated.hostname.as_deref().unwrap_or(inventory_name);
         let Some(vmid) = self.find_vm(&conn, hostname)? else {
