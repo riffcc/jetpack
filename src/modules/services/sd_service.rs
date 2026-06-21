@@ -43,9 +43,23 @@ struct SystemdServiceAction {
     pub restart: bool,
 }
 
+/// How `systemctl is-enabled <unit>` classifies a unit's boot-time state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Enablement {
+    /// enabled / alias / linked — will start at boot.
+    Enabled,
+    /// disabled — won't start at boot.
+    Disabled,
+    /// static / indirect / generated / transient / masked — the unit has no
+    /// `[Install]` section, so it cannot be enabled or disabled. Typically
+    /// activated by other means (socket activation, udev, dependencies).
+    /// qemu-guest-agent, dbus and getty are common examples.
+    Static,
+}
+
 #[derive(Clone, PartialEq, Debug)]
 struct ServiceDetails {
-    enabled: bool,
+    enablement: Enablement,
     started: bool,
 }
 
@@ -110,12 +124,20 @@ impl IsAction for SystemdServiceAction {
                 let mut changes: Vec<Field> = Vec::new();
                 let actual = self.get_service_details(handle, request)?;
 
-                match (actual.enabled, self.enabled) {
-                    (true, Some(false)) => {
+                match (actual.enablement, self.enabled) {
+                    (Enablement::Enabled, Some(false)) => {
                         changes.push(Field::Disable);
                     }
-                    (false, Some(true)) => {
+                    (Enablement::Disabled, Some(true)) => {
                         changes.push(Field::Enable);
+                    }
+                    (Enablement::Static, _) => {
+                        // Static units have no [Install] section: `systemctl
+                        // enable`/`disable` are no-ops (systemd itself reports
+                        // "no installation config (static)"). Skip enablement
+                        // regardless of request so units started by other means
+                        // — qemu-guest-agent, dbus, getty — converge instead of
+                        // failing the play.
                     }
                     _ => {}
                 };
@@ -183,7 +205,6 @@ impl SystemdServiceAction {
         handle: &Arc<TaskHandle>,
         request: &Arc<TaskRequest>,
     ) -> Result<ServiceDetails, Arc<TaskResponse>> {
-        let is_enabled: bool;
         let is_active: bool;
         let is_enabled_cmd = format!("systemctl is-enabled '{}'", self.service);
         let is_active_cmd = format!("systemctl is-active '{}'", self.service);
@@ -192,19 +213,18 @@ impl SystemdServiceAction {
             .remote
             .run(request, &is_enabled_cmd, CheckRc::Unchecked)?;
         let (_rc, out) = cmd_info(&result);
-        if out.find("disabled").is_some() || out.find("deactivating").is_some() {
-            is_enabled = false;
-        } else if out.find("enabled").is_some() || out.find("alias").is_some() {
-            is_enabled = true;
-        } else {
-            return Err(handle.response.is_failed(
-                request,
-                &format!(
-                    "systemctl enablement status unexpected for service({}): ({})",
-                    self.service, out
-                ),
-            ));
-        }
+        let enablement = match classify_enablement(&out) {
+            Ok(e) => e,
+            Err(reason) => {
+                return Err(handle.response.is_failed(
+                    request,
+                    &format!(
+                        "systemctl enablement status unexpected for service({}): {}",
+                        self.service, reason
+                    ),
+                ));
+            }
+        };
 
         let result2 = handle
             .remote
@@ -225,7 +245,7 @@ impl SystemdServiceAction {
         }
 
         Ok(ServiceDetails {
-            enabled: is_enabled,
+            enablement,
             started: is_active,
         })
     }
@@ -273,5 +293,93 @@ impl SystemdServiceAction {
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("systemctl restart '{}'", self.service);
         handle.remote.run(request, &cmd, CheckRc::Checked)
+    }
+}
+
+/// Classify the stdout of `systemctl is-enabled <unit>` into an [`Enablement`]
+/// state. Kept as a free function so the parsing logic is unit-testable without
+/// a live host. `systemctl is-enabled` emits exactly one token per unit, so we
+/// match the trimmed token in full rather than as a substring — a state like
+/// `static` must never be misread as containing another state. Unrecognized
+/// output is an error: it usually means the unit isn't installed (`not-found`)
+/// or is broken (`bad`), which the caller should surface rather than silently
+/// treat as enabled or disabled.
+fn classify_enablement(out: &str) -> Result<Enablement, String> {
+    match out.trim() {
+        "enabled" | "enabled-runtime" | "alias" | "linked" | "linked-runtime" => {
+            Ok(Enablement::Enabled)
+        }
+        "disabled" => Ok(Enablement::Disabled),
+        "static" | "indirect" | "generated" | "transient" | "masked" | "masked-runtime" => {
+            Ok(Enablement::Static)
+        }
+        other => Err(format!(
+            "{:?} — expected one of: enabled, enabled-runtime, alias, linked, \
+             linked-runtime, disabled, static, indirect, generated, transient, \
+             masked, masked-runtime",
+            other
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_enabled_states() {
+        for s in [
+            "enabled",
+            "enabled-runtime",
+            "alias",
+            "linked",
+            "linked-runtime",
+        ] {
+            assert_eq!(
+                classify_enablement(s).unwrap(),
+                Enablement::Enabled,
+                "{}",
+                s
+            );
+            // real systemctl output carries a trailing newline
+            assert_eq!(
+                classify_enablement(&format!("{}\n", s)).unwrap(),
+                Enablement::Enabled,
+                "{}\\n",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn classifies_disabled() {
+        assert_eq!(
+            classify_enablement("disabled\n").unwrap(),
+            Enablement::Disabled
+        );
+    }
+
+    #[test]
+    fn classifies_static_units_as_not_enableable() {
+        // qemu-guest-agent, dbus, getty, ... ship without an [Install] section.
+        for s in [
+            "static",
+            "indirect",
+            "generated",
+            "transient",
+            "masked",
+            "masked-runtime",
+        ] {
+            assert_eq!(classify_enablement(s).unwrap(), Enablement::Static, "{}", s);
+        }
+    }
+
+    #[test]
+    fn rejects_unrecognized_states() {
+        // "not-found" / "bad" — the unit is absent or broken. Must surface as an
+        // error rather than be silently coerced to enabled/disabled.
+        assert!(classify_enablement("not-found\n").is_err());
+        assert!(classify_enablement("bad").is_err());
+        assert!(classify_enablement("something-unexpected").is_err());
     }
 }
