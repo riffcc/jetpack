@@ -329,7 +329,7 @@ impl DragonflyClient {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
@@ -338,24 +338,24 @@ mod tests {
 
     /// A recorded incoming request, for assertions.
     #[derive(Clone, Debug)]
-    struct RecordedReq {
-        method: String,
-        path: String,
-        auth: Option<String>,
-        body: String,
+    pub(crate) struct RecordedReq {
+        pub(crate) method: String,
+        pub(crate) path: String,
+        pub(crate) auth: Option<String>,
+        pub(crate) body: String,
     }
 
     /// Minimal HTTP/1.1 mock: responds per a closure, records every request.
     /// Runs in a plain OS thread (no tokio) so it cannot clash with the
     /// client's current-thread runtime. The listener thread detaches when the
     /// test ends.
-    struct MockServer {
+    pub(crate) struct MockServer {
         addr: String,
         requests: Arc<Mutex<Vec<RecordedReq>>>,
     }
 
     impl MockServer {
-        fn start<F>(responder: F) -> Self
+        pub(crate) fn start<F>(responder: F) -> Self
         where
             F: Fn(&RecordedReq) -> (u16, String) + Send + 'static,
         {
@@ -388,11 +388,11 @@ mod tests {
             MockServer { addr, requests }
         }
 
-        fn recorded(&self) -> Vec<RecordedReq> {
+        pub(crate) fn recorded(&self) -> Vec<RecordedReq> {
             self.requests.lock().unwrap().clone()
         }
 
-        fn url(&self) -> String {
+        pub(crate) fn url(&self) -> String {
             format!("http://{}", self.addr)
         }
     }
@@ -440,7 +440,7 @@ mod tests {
         }
     }
 
-    fn client(addr: &str) -> DragonflyClient {
+    pub(crate) fn client(addr: &str) -> DragonflyClient {
         DragonflyClient {
             base_url: addr.to_string(),
             token: "df_test_token".to_string(),
