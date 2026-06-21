@@ -69,6 +69,11 @@ pub struct ProvisionConfig {
     /// Hostname for the VM/container (defaults to inventory name if not specified)
     pub hostname: Option<String>,
 
+    /// Static IPv4 address for the VM (e.g. "10.7.1.241"). When set it is sent to
+    /// Dragonfly's admin/create so cloud-init bakes a static config, and becomes
+    /// the SSH target. When unset, the VM is precreated in DHCP mode.
+    pub ip: Option<String>,
+
     /// VM ID (optional - auto-assigned if not specified)
     pub vmid: Option<String>,
 
@@ -555,6 +560,20 @@ cores: "2"
         assert_eq!(config.hostname, Some("testhost".to_string()));
         assert_eq!(config.memory, Some("1024".to_string()));
         assert_eq!(config.cores, Some("2".to_string()));
+        assert!(config.extra.is_empty());
+    }
+
+    #[test]
+    fn test_provision_config_deserializes_ip() {
+        let yaml = r#"
+type: proxmox_vm
+cluster: hypervisor1
+hostname: k8s01
+ip: "10.7.1.241"
+"#;
+        let config: ProvisionConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.ip.as_deref(), Some("10.7.1.241"));
+        // `ip` is a named field — it must not also leak into the extra map.
         assert!(config.extra.is_empty());
     }
 

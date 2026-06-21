@@ -147,6 +147,7 @@ impl ProxmoxLxcProvisioner {
             cluster: self.template_string(&templar, &config.cluster, vars)?,
             node: self.template_option(&templar, &config.node, vars)?,
             hostname: self.template_option(&templar, &config.hostname, vars)?,
+            ip: self.template_option(&templar, &config.ip, vars)?,
             vmid: self.template_option(&templar, &config.vmid, vars)?,
             memory: self.template_option(&templar, &config.memory, vars)?,
             cores: self.template_option(&templar, &config.cores, vars)?,
@@ -1809,6 +1810,7 @@ mod tests {
             wait_delay: Some(2),
             wait_strategy: None,
             wait_max_delay: Some(30),
+            ip: None,
             extra: std::collections::HashMap::new(),
         }
     }
@@ -2074,6 +2076,7 @@ mod tests {
             cluster: "prod-cluster".to_string(),
             node: Some("pve-node-1".to_string()),
             hostname: Some("web-01".to_string()),
+            ip: Some("192.168.1.10".to_string()),
             vmid: Some("101".to_string()),
             memory: Some("4096".to_string()),
             cores: Some("4".to_string()),
