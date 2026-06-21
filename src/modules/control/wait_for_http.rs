@@ -54,9 +54,15 @@ fn default_verify_tls() -> bool {
 
 struct WaitForHttpAction {
     url: String,
-    timeout: u64,
-    delay: u64,
-    expected: Option<u16>,
+    // Numeric fields are kept as their templated *strings* and parsed in
+    // dispatch(), NOT in evaluate(). evaluate() runs once in TemplateMode::Off
+    // before the task's skip-condition is considered; in Off mode the templar
+    // substitutes the literal "empty" for every value (see templar.rs), so
+    // parsing here would abort the task before its `with.condition` could skip
+    // it. Parsing under Strict in dispatch() sees the real rendered values.
+    timeout: Option<String>,
+    delay: Option<String>,
+    expected: Option<String>,
     verify_tls: bool,
 }
 
@@ -80,28 +86,27 @@ impl IsTask for WaitForHttpTask {
         let url = handle
             .template
             .string(request, tm, &String::from("url"), &self.url)?;
-        let timeout = parse_secs(handle, request, tm, "timeout", &self.timeout, 300)?;
-        let delay = parse_secs(handle, request, tm, "delay", &self.delay, 5)?;
-        let expected = match &self.expected {
-            Some(code) => Some(
-                handle
-                    .template
-                    .string_no_spaces(request, tm, &String::from("expected"), code)?
-                    .parse::<u16>()
-                    .map_err(|e| {
-                        handle
-                            .response
-                            .is_failed(request, &format!("expected: {}", e))
-                    })?,
-            ),
-            None => None,
-        };
         Ok(EvaluatedTask {
             action: Arc::new(WaitForHttpAction {
                 url,
-                timeout,
-                delay,
-                expected,
+                timeout: handle.template.string_option(
+                    request,
+                    tm,
+                    &String::from("timeout"),
+                    &self.timeout,
+                )?,
+                delay: handle.template.string_option(
+                    request,
+                    tm,
+                    &String::from("delay"),
+                    &self.delay,
+                )?,
+                expected: handle.template.string_option(
+                    request,
+                    tm,
+                    &String::from("expected"),
+                    &self.expected,
+                )?,
                 verify_tls: self.verify_tls,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
@@ -110,24 +115,14 @@ impl IsTask for WaitForHttpTask {
     }
 }
 
-fn parse_secs(
-    handle: &Arc<TaskHandle>,
-    request: &Arc<TaskRequest>,
-    tm: TemplateMode,
-    field: &str,
-    value: &Option<String>,
-    default: u64,
-) -> Result<u64, Arc<TaskResponse>> {
+/// Parse an already-templated duration field into seconds, defaulting to
+/// `default` when unset. Free function (no host/handle) so it is unit-testable.
+fn parse_secs(field: &str, value: &Option<String>, default: u64) -> Result<u64, String> {
     match value {
-        Some(v) => handle
-            .template
-            .string_no_spaces(request, tm, &String::from(field), v)?
+        Some(v) => v
+            .trim()
             .parse::<u64>()
-            .map_err(|e| {
-                handle
-                    .response
-                    .is_failed(request, &format!("{}: {}", field, e))
-            }),
+            .map_err(|e| format!("{}: {}", field, e)),
         None => Ok(default),
     }
 }
@@ -140,16 +135,33 @@ impl IsAction for WaitForHttpAction {
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
             TaskRequestType::Query => Ok(handle.response.needs_passive(request)),
-            TaskRequestType::Passive => match poll_until_ready(
-                &self.url,
-                self.verify_tls,
-                self.expected,
-                self.timeout,
-                self.delay,
-            ) {
-                Ok(()) => Ok(handle.response.is_passive(request)),
-                Err(e) => Err(handle.response.is_failed(request, &e)),
-            },
+            TaskRequestType::Passive => {
+                // The action was templated under Strict in evaluate(); these are
+                // the real rendered values. Parse now, not earlier.
+                let timeout = match parse_secs("timeout", &self.timeout, 300) {
+                    Ok(v) => v,
+                    Err(e) => return Err(handle.response.is_failed(request, &e)),
+                };
+                let delay = match parse_secs("delay", &self.delay, 5) {
+                    Ok(v) => v,
+                    Err(e) => return Err(handle.response.is_failed(request, &e)),
+                };
+                let expected = match &self.expected {
+                    Some(code) => match code.trim().parse::<u16>() {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            return Err(handle
+                                .response
+                                .is_failed(request, &format!("expected: {}", e)));
+                        }
+                    },
+                    None => None,
+                };
+                match poll_until_ready(&self.url, self.verify_tls, expected, timeout, delay) {
+                    Ok(()) => Ok(handle.response.is_passive(request)),
+                    Err(e) => Err(handle.response.is_failed(request, &e)),
+                }
+            }
             _ => Err(handle.response.not_supported(request)),
         }
     }
@@ -244,5 +256,43 @@ mod tests {
         assert!(poll_until_ready(&url, true, Some(204), 5, 0).is_ok());
         // expects 200 but endpoint serves 204 -> never ready -> timeout
         assert!(poll_until_ready(&url, true, Some(200), 1, 0).is_err());
+    }
+
+    #[test]
+    fn parse_secs_uses_default_when_unset() {
+        assert_eq!(parse_secs("timeout", &None, 300).unwrap(), 300);
+    }
+
+    #[test]
+    fn parse_secs_parses_rendered_number() {
+        // role tasks write `timeout: 240` (a YAML integer); the struct field is
+        // Option<String> and serde_yaml renders the scalar as "240".
+        assert_eq!(
+            parse_secs("timeout", &Some("240".to_string()), 300).unwrap(),
+            240
+        );
+        // tolerate surrounding whitespace from templating
+        assert_eq!(
+            parse_secs("delay", &Some(" 2 \n".to_string()), 5).unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn parse_secs_rejects_garbage() {
+        // e.g. what TemplateMode::Off would have produced before parsing moved
+        // out of evaluate() — must surface as a clear error, never panic.
+        let err = parse_secs("timeout", &Some("empty".to_string()), 300).unwrap_err();
+        assert!(err.contains("timeout"), "{}", err);
+    }
+
+    #[test]
+    fn deserializes_unquoted_numeric_fields() {
+        // role tasks write bare integers for timeout/delay; the text load path
+        // (serde_yaml::from_str) must render them as parseable strings.
+        let yaml = "url: https://x\ntimeout: 240\ndelay: 2\nverify_tls: false\n";
+        let task: WaitForHttpTask = serde_yaml::from_str(yaml).expect("deserialize");
+        assert_eq!(task.timeout.as_deref(), Some("240"));
+        assert_eq!(task.delay.as_deref(), Some("2"));
     }
 }
