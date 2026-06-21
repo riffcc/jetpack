@@ -242,28 +242,35 @@ impl DragonflyClient {
     /// still needs imaging (status != "Installed") or is already done — without
     /// re-registering (which would mutate the machine).
     pub fn find_machine_by_mac(&self, mac: &str) -> Result<Option<MachineRef>, String> {
-        let resp = self.get("/machines")?;
-        #[derive(Deserialize)]
-        struct List {
-            data: Vec<Entry>,
+        // Use the dedicated by-MAC endpoint — one row, one call. Scanning
+        // `GET /machines` paginates (per_page 25), so any machine past page 1
+        // was invisible here, looked "unregistered", and got re-imaged on every
+        // converge run. The endpoint returns 404 when no machine has the MAC.
+        let resp = self.send_request(
+            reqwest::Method::GET,
+            &format!("/machines/by-mac/{}", mac),
+            None,
+        )?;
+        if resp.status == 404 {
+            return Ok(None);
+        }
+        if !(200..300).contains(&resp.status) {
+            return Err(format!(
+                "dragonfly: lookup by mac {} returned {}: {}",
+                mac, resp.status, resp.body
+            ));
         }
         #[derive(Deserialize)]
         struct Entry {
             id: String,
-            mac_address: String,
             status: String,
         }
-        let list: List = serde_json::from_str(&resp.body)
+        let e: Entry = serde_json::from_str(&resp.body)
             .map_err(|e| format!("dragonfly machines: parse: {} (body: {})", e, resp.body))?;
-        let target = normalize_mac(mac);
-        Ok(list
-            .data
-            .into_iter()
-            .find(|e| normalize_mac(&e.mac_address) == target)
-            .map(|e| MachineRef {
-                id: e.id,
-                status: e.status,
-            }))
+        Ok(Some(MachineRef {
+            id: e.id,
+            status: e.status,
+        }))
     }
 
     fn get(&self, path: &str) -> Result<HttpResponse, String> {
@@ -282,7 +289,11 @@ impl DragonflyClient {
         self.request(reqwest::Method::PUT, path, Some(json))
     }
 
-    fn request(
+    /// Send a request and return the raw response (status + body), erroring only
+    /// on transport failure. Does NOT treat 4xx/5xx as errors — callers like
+    /// `find_machine_by_mac` must inspect the status themselves (a 404 there
+    /// means "not registered", not a hard failure).
+    fn send_request(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -314,17 +325,29 @@ impl DragonflyClient {
                 .text()
                 .await
                 .map_err(|e| format!("dragonfly: read body: {}", e))?;
-            if !status.is_success() {
-                return Err(format!(
-                    "dragonfly: {} {} returned {}: {}",
-                    method, url, status, text
-                ));
-            }
             Ok(HttpResponse {
                 status: status.as_u16(),
                 body: text,
             })
         })
+    }
+
+    /// Send a request and error on any non-2xx response. The common case for
+    /// calls where only success is meaningful (create, reimage, assign_os, …).
+    fn request(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<String>,
+    ) -> Result<HttpResponse, String> {
+        let resp = self.send_request(method.clone(), path, body)?;
+        if !(200..300).contains(&resp.status) {
+            return Err(format!(
+                "dragonfly: {} /api{} returned {}: {}",
+                method, path, resp.status, resp.body
+            ));
+        }
+        Ok(resp)
     }
 }
 
@@ -679,11 +702,12 @@ pub(crate) mod tests {
         let server = MockServer::start(|_| {
             (
                 200,
-                r#"{"data":[{"id":"m1","mac_address":"bc:24:11:22:33:44","status":"Installed","hostname":"a"},{"id":"m2","mac_address":"aa:bb:cc:dd:ee:ff","status":"Discovered"}]}"#.to_string(),
+                r#"{"id":"m1","mac_address":"bc:24:11:22:33:44","status":"Installed","hostname":"a"}"#
+                    .to_string(),
             )
         });
         let c = client(&server.url());
-        // uppercase requesting MAC must match the lowercase entry
+        // The MAC is sent verbatim in the path; Dragonfly normalizes it.
         let m = c
             .find_machine_by_mac("BC:24:11:22:33:44")
             .unwrap()
@@ -691,12 +715,56 @@ pub(crate) mod tests {
         assert_eq!(m.id, "m1");
         assert_eq!(m.status, "Installed");
         assert!(m.is_installed());
+
+        // Uses the dedicated by-MAC endpoint, not the (paginated) machine list.
+        let recorded = server.recorded();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].method, "GET");
+        assert_eq!(recorded[0].path, "/api/machines/by-mac/BC:24:11:22:33:44");
+        assert_eq!(recorded[0].auth.as_deref(), Some("bearer df_test_token"));
     }
 
     #[test]
     fn find_machine_by_mac_returns_none_when_absent() {
-        let server = MockServer::start(|_| (200, r#"{"data":[]}"#.to_string()));
+        // 404 from the by-MAC endpoint = not registered (None), not an error.
+        let server = MockServer::start(|_| (404, r#"{"error":"Not Found"}"#.to_string()));
         let c = client(&server.url());
         assert_eq!(c.find_machine_by_mac("00:00:00:00:00:00").unwrap(), None);
+    }
+
+    /// Regression: the old implementation scanned `GET /machines`, which
+    /// paginates. A machine on page 2 was invisible → looked unregistered → got
+    /// re-imaged every converge run. The by-MAC endpoint finds it in one call
+    /// regardless of how many machines exist, so there is no "page 2" blind
+    /// spot. This pins that the lookup never lists machines.
+    #[test]
+    fn find_machine_by_mac_finds_machine_without_listing_all() {
+        // Answers the by-MAC lookup directly and 404s any list request, proving
+        // find does not scan the list.
+        let server = MockServer::start(|req| {
+            if req.path.starts_with("/api/machines/by-mac/") {
+                (
+                    200,
+                    r#"{"id":"m9","mac_address":"bc:24:11:ad:81:e0","status":"Installed"}"#
+                        .to_string(),
+                )
+            } else {
+                (404, r#"{"error":"no list scan"}"#.to_string())
+            }
+        });
+        let c = client(&server.url());
+        let m = c
+            .find_machine_by_mac("BC:24:11:AD:81:E0")
+            .unwrap()
+            .expect("found");
+        assert_eq!(m.id, "m9");
+        assert!(m.is_installed());
+        let recorded = server.recorded();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "must be a single by-MAC call, no list scan"
+        );
+        assert!(recorded[0].path.starts_with("/api/machines/by-mac/"));
     }
 }
