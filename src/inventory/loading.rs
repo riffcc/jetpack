@@ -99,12 +99,70 @@ pub fn load_inventory(
             }
         }
     }
+
+    // Now that every --inventory path has contributed its group_vars/host_vars,
+    // fold each host's (now path-complete) ancestor-group variables into its own
+    // stored variables. See `propagate_group_vars_to_hosts` for why this is needed.
+    propagate_group_vars_to_hosts(&inventory);
+
     Ok(())
 }
 
 // ==============================================================================================================
 // PRIVATE INTERNALS
 // ==============================================================================================================
+
+/// After every `--inventory` path is loaded, fold each host's ancestor-group
+/// variables into its own stored variables so `get_variables()` is fully
+/// resolved — consistent with what templates already see via
+/// `Host::get_blended_variables`.
+///
+/// Without this pass, group vars only reach a host's variables at the moment
+/// that host's `host_vars` file is loaded (see `load_vars_directory`). When a
+/// later inventory path — the canonical case is a secrets overlay — contributes
+/// `group_vars` for a group but carries no `host_vars` for the member, those
+/// vars land on the group object yet never propagate to the host. Templates
+/// (which resolve via blended vars) are unaffected; anything reading raw host
+/// variables — notably the DNS reconciliation — silently misses them, which is
+/// exactly how a `dns:` block defined in a secrets overlay never fires.
+///
+/// The group objects already carry their correctly path-merged values (each
+/// successive path's group_vars merges onto the group with later-wins, #18), so
+/// re-blending the ancestor-group vars underneath the host's own vars yields the
+/// complete, correctly-precedenced view: host-specific vars win over group vars
+/// (host vars are layered on top last), group vars fill the gaps.
+fn propagate_group_vars_to_hosts(inventory: &Arc<RwLock<Inventory>>) {
+    let host_names: Vec<String> = {
+        let inv = inventory.read().unwrap();
+        inv.hosts.keys().cloned().collect()
+    };
+
+    for host_name in &host_names {
+        let host_arc = {
+            let inv = inventory.read().unwrap();
+            inv.get_host(host_name)
+        };
+        let mut host = host_arc.write().unwrap();
+
+        // Base layer: ancestor group vars, deep-blended. Each group object
+        // already holds its path-merged values, so blending them gives the
+        // complete group-var view for this host.
+        let mut blended = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+        for (_name, group_arc) in host.get_ancestor_groups(20) {
+            let group_vars =
+                serde_yaml::Value::from(group_arc.read().unwrap().get_variables());
+            crate::util::yaml::blend_variables(&mut blended, group_vars);
+        }
+
+        // Top layer: the host's own variables win over group vars.
+        let mine = serde_yaml::Value::from(host.get_variables());
+        crate::util::yaml::blend_variables(&mut blended, mine);
+
+        if let serde_yaml::Value::Mapping(resolved) = blended {
+            host.set_variables(resolved);
+        }
+    }
+}
 
 // loads an entire on-disk inventory tree structure (groups/, group_vars/, host_vars/)
 fn load_on_disk_inventory_tree(
@@ -451,5 +509,92 @@ mod tests {
         assert_eq!(vars["token"], "s3cr3t");
         // On conflict, the later path wins.
         assert_eq!(vars["shared"], "from-second");
+    }
+
+    // Build an inventory tree with a named group (+ optional members), optional
+    // group_vars for that group, and optional host_vars. The groups/ dir is
+    // always created (load_inventory requires it); the group-members file is
+    // written only when `members` is non-empty so a path can carry group_vars
+    // with an empty groups/ (the secrets-overlay shape).
+    fn inventory_tree_with_host(
+        group: &str,
+        members: &[&str],
+        group_vars_yaml: Option<&str>,
+        host_vars: &[(&str, &str)],
+    ) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let groups_dir = root.join("groups");
+        fs::create_dir_all(&groups_dir).unwrap();
+        if !members.is_empty() {
+            let mut body = String::from("hosts:\n");
+            for m in members {
+                body.push_str(&format!("  - {}\n", m));
+            }
+            fs::write(groups_dir.join(group), body).unwrap();
+        }
+        if let Some(yaml) = group_vars_yaml {
+            let gv = root.join("group_vars");
+            fs::create_dir_all(&gv).unwrap();
+            fs::write(gv.join(group), yaml).unwrap();
+        }
+        if !host_vars.is_empty() {
+            let hv = root.join("host_vars");
+            fs::create_dir_all(&hv).unwrap();
+            for (host, yaml) in host_vars {
+                fs::write(hv.join(host), yaml).unwrap();
+            }
+        }
+        let path = root.to_path_buf();
+        (dir, path)
+    }
+
+    // Regression for the london k3s DNS no-op: group_vars contributed by a later
+    // --inventory path (a secrets overlay) must reach a member host's resolved
+    // variables — not just sit on the group object. The host's host_vars live in
+    // the first (public) path; a `dns:` block lives only in the second (secrets)
+    // path's group_vars (and that path has no host_vars to trigger propagation).
+    // After loading both, the host's variables must contain the dns block, or the
+    // DNS reconciliation (which reads host variables) silently never fires.
+    #[test]
+    fn group_vars_from_later_inventory_path_reach_host_variables() {
+        let (_keep_pub, pub_path) = inventory_tree_with_host(
+            "webservers",
+            &["web1"],
+            Some("public_key: from-public\n"),
+            &[("web1", "host_key: from-host\n")],
+        );
+        let (_keep_sec, sec_path) = inventory_tree_with_host(
+            "webservers",
+            &[],
+            Some(
+                "dns:\n  path: dns/riff.cc\n  zone: lon.riff.cc\n  source_of_truth: inventory\n",
+            ),
+            &[],
+        );
+
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        let paths = Arc::new(RwLock::new(vec![pub_path, sec_path]));
+        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+
+        let host_vars = inventory
+            .read()
+            .unwrap()
+            .get_host("web1")
+            .read()
+            .unwrap()
+            .get_variables();
+
+        // Public group var propagated via the path-1 host_vars load.
+        assert_eq!(host_vars["public_key"], "from-public");
+        // Host-specific var present.
+        assert_eq!(host_vars["host_key"], "from-host");
+        // THE REGRESSION: the secrets-overlay group var must reach the host.
+        let dns_key = serde_yaml::Value::String("dns".to_string());
+        assert!(
+            host_vars.get(&dns_key).is_some(),
+            "dns block from secrets group_vars must propagate to host variables; got: {:?}",
+            host_vars
+        );
     }
 }
