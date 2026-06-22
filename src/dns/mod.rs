@@ -164,9 +164,7 @@ pub fn add_host_record(config: &DnsConfig, inventory_name: &str, ip: &str) -> Re
     if changed && config.auto_sync {
         if config.has_native_gravity() {
             gravity::upsert_record(config, &zone, &hostname, "A", ip)?;
-            if ptr_changed
-                && let Some(ref reverse_zone) = config.reverse_zone
-            {
+            if ptr_changed && let Some(ref reverse_zone) = config.reverse_zone {
                 let host_part = ip
                     .rsplit('.')
                     .next()
@@ -175,9 +173,7 @@ pub fn add_host_record(config: &DnsConfig, inventory_name: &str, ip: &str) -> Re
             }
         } else {
             sync(config, &zone)?;
-            if ptr_changed
-                && let Some(ref reverse_zone) = config.reverse_zone
-            {
+            if ptr_changed && let Some(ref reverse_zone) = config.reverse_zone {
                 sync(config, reverse_zone)?;
             }
         }

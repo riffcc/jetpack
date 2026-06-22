@@ -114,7 +114,10 @@ fn token_for(config: &DnsConfig) -> Result<String, String> {
 }
 
 fn base_url(config: &DnsConfig) -> Result<String, String> {
-    Ok(gravity_config(config)?.api_url.trim_end_matches('/').to_string())
+    Ok(gravity_config(config)?
+        .api_url
+        .trim_end_matches('/')
+        .to_string())
 }
 
 async fn client(config: &DnsConfig) -> Result<reqwest::Client, String> {
@@ -139,7 +142,11 @@ pub fn upsert_record(
     data: &str,
 ) -> Result<(), String> {
     crate::runtime::block_on(replace_records_async(
-        config, zone, hostname, record_type, &[data],
+        config,
+        zone,
+        hostname,
+        record_type,
+        &[data],
     ))
 }
 
@@ -152,7 +159,11 @@ pub fn replace_records(
     values: &[&str],
 ) -> Result<(), String> {
     crate::runtime::block_on(replace_records_async(
-        config, zone, hostname, record_type, values,
+        config,
+        zone,
+        hostname,
+        record_type,
+        values,
     ))
 }
 

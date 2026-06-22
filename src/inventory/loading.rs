@@ -149,8 +149,7 @@ fn propagate_group_vars_to_hosts(inventory: &Arc<RwLock<Inventory>>) {
         // complete group-var view for this host.
         let mut blended = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
         for (_name, group_arc) in host.get_ancestor_groups(20) {
-            let group_vars =
-                serde_yaml::Value::from(group_arc.read().unwrap().get_variables());
+            let group_vars = serde_yaml::Value::from(group_arc.read().unwrap().get_variables());
             crate::util::yaml::blend_variables(&mut blended, group_vars);
         }
 
@@ -567,9 +566,7 @@ mod tests {
         let (_keep_sec, sec_path) = inventory_tree_with_host(
             "webservers",
             &[],
-            Some(
-                "dns:\n  path: dns/riff.cc\n  zone: lon.riff.cc\n  source_of_truth: inventory\n",
-            ),
+            Some("dns:\n  path: dns/riff.cc\n  zone: lon.riff.cc\n  source_of_truth: inventory\n"),
             &[],
         );
 

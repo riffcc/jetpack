@@ -43,7 +43,11 @@ async fn replace_records_is_a_noop_when_values_already_match() {
         .await;
 
     let result = jetpack::dns::gravity::replace_records_async(
-        &cfg, "example.com", "foo", "A", &["10.0.0.1"],
+        &cfg,
+        "example.com",
+        "foo",
+        "A",
+        &["10.0.0.1"],
     )
     .await;
     assert!(result.is_ok(), "replace failed: {:?}", result.err());
@@ -81,7 +85,11 @@ async fn replace_records_deletes_old_and_posts_new_when_values_differ() {
         .await;
 
     let result = jetpack::dns::gravity::replace_records_async(
-        &cfg, "example.com", "foo", "A", &["10.0.0.2"],
+        &cfg,
+        "example.com",
+        "foo",
+        "A",
+        &["10.0.0.2"],
     )
     .await;
     assert!(result.is_ok(), "replace failed: {:?}", result.err());
@@ -129,7 +137,11 @@ async fn zone_query_is_fqdn_with_trailing_dot_even_for_list() {
 
     // Desired == existing → no-op, so only the list (GET) fires.
     let result = jetpack::dns::gravity::replace_records_async(
-        &cfg, "example.com", "foo", "A", &["10.0.0.1"],
+        &cfg,
+        "example.com",
+        "foo",
+        "A",
+        &["10.0.0.1"],
     )
     .await;
     assert!(result.is_ok(), "replace failed: {:?}", result.err());
@@ -169,7 +181,11 @@ async fn default_ttl_is_overridable_from_config() {
         .await;
 
     let result = jetpack::dns::gravity::replace_records_async(
-        &cfg, "example.com", "foo", "A", &["10.0.0.5"],
+        &cfg,
+        "example.com",
+        "foo",
+        "A",
+        &["10.0.0.5"],
     )
     .await;
     assert!(result.is_ok(), "replace failed: {:?}", result.err());
@@ -201,8 +217,7 @@ async fn delete_record_deletes_every_matching_uid() {
         .mount(&server)
         .await;
 
-    let result =
-        jetpack::dns::gravity::delete_record_async(&cfg, "example.com", "foo", "A").await;
+    let result = jetpack::dns::gravity::delete_record_async(&cfg, "example.com", "foo", "A").await;
     assert!(result.is_ok(), "delete failed: {:?}", result.err());
 
     // GET (list) + 2 DELETE (one per uid) = 3 calls.
@@ -222,7 +237,11 @@ async fn non_success_response_is_propagated_as_an_error() {
         .await;
 
     let result = jetpack::dns::gravity::replace_records_async(
-        &cfg, "example.com", "foo", "A", &["10.0.0.1"],
+        &cfg,
+        "example.com",
+        "foo",
+        "A",
+        &["10.0.0.1"],
     )
     .await;
     let err = result.expect_err("expected an error");
