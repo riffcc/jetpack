@@ -14,6 +14,7 @@
 //!
 //! Supports all OctoDNS providers: Gravity, Route53, Cloudflare, PowerDNS, etc.
 
+pub mod gravity;
 pub mod zone;
 
 use serde::Deserialize;
@@ -64,6 +65,10 @@ pub struct DnsConfig {
     /// Reverse DNS zone (e.g., "10.10.10.in-addr.arpa")
     /// If set, PTR records are automatically created for provisioned hosts
     pub reverse_zone: Option<String>,
+
+    /// Native Gravity provider configuration. When present, record mutations
+    /// are pushed directly to the Gravity API instead of via OctoDNS sync.
+    pub gravity: Option<gravity::GravityConfig>,
 }
 
 fn default_true() -> bool {
@@ -119,6 +124,11 @@ impl DnsConfig {
     pub fn is_dns_authoritative(&self) -> bool {
         self.source_of_truth == DnsSourceOfTruth::Dns
     }
+
+    /// Whether a native Gravity provider is configured for direct record sync.
+    pub fn has_native_gravity(&self) -> bool {
+        self.gravity.is_some()
+    }
 }
 
 /// Add a DNS A record for a host, plus PTR if configured, and optionally sync
@@ -152,9 +162,20 @@ pub fn add_host_record(config: &DnsConfig, inventory_name: &str, ip: &str) -> Re
 
     // Sync to provider if auto_sync enabled
     if changed && config.auto_sync {
-        sync(config, &zone)?;
-        if ptr_changed && let Some(ref reverse_zone) = config.reverse_zone {
-            sync(config, reverse_zone)?;
+        if config.has_native_gravity() {
+            gravity::upsert_record(config, &zone, &hostname, "A", ip)?;
+            if ptr_changed && let Some(ref reverse_zone) = config.reverse_zone {
+                let host_part = ip
+                    .rsplit('.')
+                    .next()
+                    .ok_or_else(|| format!("Invalid IP: {}", ip))?;
+                gravity::upsert_record(config, reverse_zone, host_part, "PTR", &fqdn)?;
+            }
+        } else {
+            sync(config, &zone)?;
+            if ptr_changed && let Some(ref reverse_zone) = config.reverse_zone {
+                sync(config, reverse_zone)?;
+            }
         }
     }
 
@@ -177,11 +198,22 @@ pub fn remove_host_record(config: &DnsConfig, inventory_name: &str) -> Result<bo
 
     let hostname = extract_hostname(inventory_name);
 
+    let previous_ip = zone::get_a_record(&config.zones_path(), &zone, &hostname)?;
+
     // Remove record from zone file
     let changed = zone::remove_a_record(&config.zones_path(), &zone, &hostname)?;
 
     if changed && config.auto_sync {
-        sync(config, &zone)?;
+        if config.has_native_gravity() {
+            gravity::delete_record(config, &zone, &hostname, "A")?;
+            if let (Some(ip), Some(reverse_zone)) = (previous_ip, config.reverse_zone.as_ref()) {
+                if let Some(host_part) = ip.rsplit('.').next() {
+                    gravity::delete_record(config, reverse_zone, host_part, "PTR")?;
+                }
+            }
+        } else {
+            sync(config, &zone)?;
+        }
     }
 
     Ok(changed)
@@ -194,7 +226,23 @@ pub fn set_service_records(
     service_name: &str,
     ips: &[String],
 ) -> Result<bool, String> {
-    zone::set_a_records(&config.zones_path(), zone, service_name, ips)
+    let changed = zone::set_a_records(&config.zones_path(), zone, service_name, ips)?;
+
+    if changed && config.auto_sync {
+        if config.has_native_gravity() {
+            gravity::replace_records(
+                config,
+                zone,
+                service_name,
+                "A",
+                &ips.iter().map(|ip| ip.as_str()).collect::<Vec<_>>(),
+            )?;
+        } else {
+            sync(config, zone)?;
+        }
+    }
+
+    Ok(changed)
 }
 
 /// Add a CNAME alias pointing to a target
@@ -204,7 +252,22 @@ pub fn add_cname_alias(
     alias: &str,
     target: &str,
 ) -> Result<bool, String> {
-    zone::add_cname_record(&config.zones_path(), zone, alias, target)
+    let changed = zone::add_cname_record(&config.zones_path(), zone, alias, target)?;
+
+    if changed && config.auto_sync {
+        if config.has_native_gravity() {
+            let target_fqdn = if target.ends_with('.') {
+                target.to_string()
+            } else {
+                format!("{}.", target)
+            };
+            gravity::replace_records(config, zone, alias, "CNAME", &[target_fqdn.as_str()])?;
+        } else {
+            sync(config, zone)?;
+        }
+    }
+
+    Ok(changed)
 }
 
 /// Add a PTR record for reverse DNS
@@ -226,7 +289,17 @@ pub fn add_ptr_record(config: &DnsConfig, ip: &str, fqdn: &str) -> Result<bool, 
 
 /// Remove a record (A, CNAME, or PTR)
 pub fn remove_record(config: &DnsConfig, zone: &str, name: &str) -> Result<bool, String> {
-    zone::remove_a_record(&config.zones_path(), zone, name)
+    let changed = zone::remove_a_record(&config.zones_path(), zone, name)?;
+
+    if changed && config.auto_sync {
+        if config.has_native_gravity() {
+            gravity::delete_hostname_records(config, zone, name)?;
+        } else {
+            sync(config, zone)?;
+        }
+    }
+
+    Ok(changed)
 }
 
 /// Sync zone to providers via OctoDNS

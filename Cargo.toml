@@ -43,3 +43,4 @@ strum = { version = "0.26", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.8.0"
+wiremock = "0.6"
