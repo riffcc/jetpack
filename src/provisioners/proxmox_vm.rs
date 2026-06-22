@@ -808,10 +808,7 @@ mod converge_tests {
         // execute and be recorded (so this test fails loudly, not silently).
         let server = MockServer::start(|req| {
             if req.method == "GET" && req.path.starts_with("/api/machines/by-mac/") {
-                (
-                    200,
-                    r#"{"id":"m1","status":"Installing"}"#.to_string(),
-                )
+                (200, r#"{"id":"m1","status":"Installing"}"#.to_string())
             } else if req.path.ends_with("/reimage") {
                 (200, "{}".to_string())
             } else if req.path.ends_with("/os") {
