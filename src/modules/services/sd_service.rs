@@ -230,19 +230,18 @@ impl SystemdServiceAction {
             .remote
             .run(request, &is_active_cmd, CheckRc::Unchecked)?;
         let (_rc2, out2) = cmd_info(&result2);
-        if out2.find("inactive").is_some() || out2.find("failed").is_some() {
-            is_active = false;
-        } else if out2.find("active").is_some() {
-            is_active = true;
-        } else {
-            return Err(handle.response.is_failed(
-                request,
-                &format!(
-                    "systemctl activity status unexpected for service({}): {}",
-                    self.service, out2
-                ),
-            ));
-        }
+        is_active = match classify_activity(&out2) {
+            Ok(active) => active,
+            Err(reason) => {
+                return Err(handle.response.is_failed(
+                    request,
+                    &format!(
+                        "systemctl activity status unexpected for service({}): {}",
+                        self.service, reason
+                    ),
+                ));
+            }
+        };
 
         Ok(ServiceDetails {
             enablement,
@@ -322,6 +321,28 @@ fn classify_enablement(out: &str) -> Result<Enablement, String> {
     }
 }
 
+/// Classify the stdout of `systemctl is-active <unit>` into a running bool, kept
+/// as a free function so the parsing logic is unit-testable without a live host.
+///
+/// `activating` is treated as running: the unit has been told to start and is
+/// mid-startup (e.g. k3s-agent registering with the API server), which is not a
+/// failure for a `started: true` assertion. `reloading` is likewise running. We
+/// match the trimmed token in full rather than as a substring so that, e.g.,
+/// `inactive` is never misread via the `active` it happens to contain.
+/// Unrecognized output is an error so the caller surfaces it rather than
+/// silently coercing it to running or stopped.
+fn classify_activity(out: &str) -> Result<bool, String> {
+    match out.trim() {
+        "active" | "reloading" | "activating" => Ok(true),
+        "inactive" | "failed" | "deactivating" => Ok(false),
+        other => Err(format!(
+            "{:?} — expected one of: active, reloading, activating, inactive, \
+             failed, deactivating",
+            other
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,5 +402,35 @@ mod tests {
         assert!(classify_enablement("not-found\n").is_err());
         assert!(classify_enablement("bad").is_err());
         assert!(classify_enablement("something-unexpected").is_err());
+    }
+
+    #[test]
+    fn classifies_running_activity_states() {
+        for s in ["active", "reloading", "activating"] {
+            assert!(classify_activity(s).unwrap(), "{}", s);
+            // real systemctl output carries a trailing newline
+            assert!(classify_activity(&format!("{}\n", s)).unwrap(), "{}\\n", s);
+        }
+    }
+
+    #[test]
+    fn classifies_stopped_activity_states() {
+        for s in ["inactive", "failed", "deactivating"] {
+            assert!(!classify_activity(s).unwrap(), "{}", s);
+        }
+    }
+
+    #[test]
+    fn activity_treats_activating_as_running_not_unknown() {
+        // Regression: k3s-agent is mid-startup (registering with the API server)
+        // when jetpack inspects it, so `systemctl is-active` reports "activating".
+        // This must read as running, not blow up as an unknown state.
+        assert!(classify_activity("activating\n").unwrap());
+    }
+
+    #[test]
+    fn rejects_unrecognized_activity_states() {
+        assert!(classify_activity("something-unexpected\n").is_err());
+        assert!(classify_activity("").is_err());
     }
 }

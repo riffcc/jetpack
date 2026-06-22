@@ -773,9 +773,10 @@ fn converge_dragonfly(
         Ok(Some(m)) => {
             // Registered with Dragonfly but not yet `Installed`. Do NOT reimage:
             // the machine may be mid-imaging, or finished-but-not-yet-marked
-            // (the `Installed` mark is eventual — set by the pre-reboot workflow
-            // event or the Proxmox sync daemon). Re-imaging here cancels its
-            // workflow and wipes a freshly-installed box (#26). A stalled
+            // (the `Installed` mark is set by the workflow's reboot/kexec
+            // action_started handoff — the pre-boot agent committing to the
+            // finished OS — NOT by Proxmox power state). Re-imaging here cancels
+            // its workflow and wipes a freshly-installed box (#26). A stalled
             // install is recovered by rebooting (re-PXE → the idempotent
             // workflow resumes), not by reimage. Reimage is explicit-only.
             eprintln!(
@@ -802,16 +803,12 @@ mod converge_tests {
     /// installed box. Only an *unregistered* machine (None) is imaged here.
     #[test]
     fn converge_does_not_reimage_registered_non_installed_machine() {
-        // GET /machines returns a registered, non-Installed machine. Every other
-        // endpoint is answered so that a *wrong* re-image would fully execute
-        // and be recorded (so this test fails loudly, not silently).
+        // The by-MAC lookup returns a registered, non-Installed machine. Every
+        // other endpoint is answered so that a *wrong* re-image would fully
+        // execute and be recorded (so this test fails loudly, not silently).
         let server = MockServer::start(|req| {
-            if req.method == "GET" {
-                (
-                    200,
-                    r#"{"data":[{"id":"m1","mac_address":"bc:24:11:22:33:44","status":"Installing"}]}"#
-                        .to_string(),
-                )
+            if req.method == "GET" && req.path.starts_with("/api/machines/by-mac/") {
+                (200, r#"{"id":"m1","status":"Installing"}"#.to_string())
             } else if req.path.ends_with("/reimage") {
                 (200, "{}".to_string())
             } else if req.path.ends_with("/os") {
@@ -848,8 +845,9 @@ mod converge_tests {
     #[test]
     fn converge_images_unregistered_machine() {
         let server = MockServer::start(|req| {
-            if req.method == "GET" {
-                (200, r#"{"data":[]}"#.to_string())
+            if req.method == "GET" && req.path.starts_with("/api/machines/by-mac/") {
+                // not registered → 404 → None → image it
+                (404, r#"{"error":"Not Found"}"#.to_string())
             } else {
                 (200, r#"{"machine_id":"m1","created":true}"#.to_string())
             }
