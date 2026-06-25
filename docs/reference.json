@@ -426,7 +426,8 @@
       "syntax-check": { "description": "Statically validate playbooks/roles/tasks/templates (no execution)." },
       "inventory-check": { "description": "Validate an inventory tree (groups, group_vars, host_vars)." },
       "full-check": { "description": "Run syntax-check and inventory-check in one pass." },
-      "docs": { "description": "Build and serve this documentation site locally." }
+      "docs": { "description": "Build and serve this documentation site locally." },
+      "install": { "description": "Install the running jetpack binary to /usr/local/bin/jetpack and symlink /usr/local/bin/jetp to it." }
     },
     "flags": {
       "-p": { "description": "Playbook path(s); the automation content to run." },
