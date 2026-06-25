@@ -84,6 +84,10 @@ pub struct CliParser {
     /// `cli::config_file::locate_config` returns it verbatim; otherwise the
     /// contract is auto-discovered upward from the working directory.
     pub config_path: Option<PathBuf>,
+    /// `--profile NAME`: selects a named operator-truth preset from the
+    /// contract's `profiles:` map (overrides inventory + secrets_inventory).
+    /// When unset, `defaults.profile` is used.
+    pub profile: Option<String>,
 }
 
 // subcommands are usually required
@@ -260,6 +264,7 @@ pub enum Arguments {
     ARGUMENT_DOCS_NO_BROWSER,
     ARGUMENT_CHECK,
     ARGUMENT_NO_SECRETS,
+    ARGUMENT_PROFILE,
 }
 
 impl Arguments {
@@ -303,6 +308,7 @@ impl Arguments {
             Arguments::ARGUMENT_DOCS_NO_BROWSER => "--no-browser",
             Arguments::ARGUMENT_CHECK => "--check",
             Arguments::ARGUMENT_NO_SECRETS => "--no-secrets",
+            Arguments::ARGUMENT_PROFILE => "--profile",
         }
     }
 }
@@ -354,6 +360,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_DOCS_NO_BROWSER, "--no-browser"),
         (Arguments::ARGUMENT_CHECK, "--check"),
         (Arguments::ARGUMENT_NO_SECRETS, "--no-secrets"),
+        (Arguments::ARGUMENT_PROFILE, "--profile"),
     ];
     let mut map: HashMap<String, Arguments> = HashMap::new();
     for (e, i) in inputs.iter() {
@@ -559,6 +566,7 @@ impl CliParser {
             no_secrets: false,
             automation_root: std::env::current_dir().unwrap_or_default(),
             config_path: None,
+            profile: None,
         }
     }
 
@@ -681,6 +689,9 @@ impl CliParser {
                                     }
                                     Arguments::ARGUMENT_CONFIG => {
                                         self.store_config(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_PROFILE => {
+                                        self.store_profile(&args[arg_count])
                                     }
                                     Arguments::ARGUMENT_INVENTORY => {
                                         self.append_inventory(&args[arg_count])
@@ -1096,6 +1107,11 @@ impl CliParser {
         Ok(())
     }
 
+    fn store_profile(&mut self, value: &str) -> Result<(), String> {
+        self.profile = Some(value.to_string());
+        Ok(())
+    }
+
     fn increase_verbosity(&mut self, amount: u32) -> Result<(), String> {
         self.verbosity += amount;
         Ok(())
@@ -1149,8 +1165,30 @@ impl CliParser {
             _ => {}
         }
 
-        let defaults = self.load_jetpack_file_config(cwd)?.effective();
+        let config = self.load_jetpack_file_config(cwd)?;
+        let mut defaults = config.effective();
         let automation_root = self.automation_root.clone();
+
+        // Profile resolution (precedence: CLI --profile > defaults.profile). A
+        // selected profile overrides inventory + secrets_inventory ONLY — its
+        // playbook/roles stay from defaults. `Some(vec![])` clears that key;
+        // `None` inherits defaults. This override happens before the gated
+        // feeding below, so an explicit CLI -i still wins over the profile
+        // (the inventory feed is skipped when inventory_set).
+        let profile_name = self.profile.clone().or(defaults.profile.clone());
+        if let Some(name) = &profile_name {
+            let profile = config
+                .profiles
+                .as_ref()
+                .and_then(|p| p.get(name))
+                .ok_or_else(|| format!("profile '{}' not found in .jetpack.yml", name))?;
+            if let Some(inventory) = &profile.inventory {
+                defaults.inventory = inventory.clone();
+            }
+            if let Some(secrets) = &profile.secrets_inventory {
+                defaults.secrets_inventory = secrets.clone();
+            }
+        }
 
         // Each of playbook/inventory/roles is filled ONLY when the CLI left it
         // unset — CLI wins over the contract. For the scalar playbook the
@@ -2378,6 +2416,193 @@ mod tests {
             combined,
             vec![PathBuf::from("/main")],
             "--no-secrets drops secrets from the load list"
+        );
+    }
+
+    // Set up a temp automation root with a `.jetpack.yml` and the inventory /
+    // secrets dirs the profile tests reference, run the given args, and return
+    // the parser + parse result. TempDir lives through parse (paths resolve),
+    // then drops; we only read stored PathBuf strings afterward.
+    fn parse_with_contract(contract: &str, args: &[&str]) -> (CliParser, Result<(), String>) {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        for d in [
+            "pb",
+            "inv/default",
+            "inv/perth",
+            "inv/london",
+            "inv/nolondon",
+            "inv/dry",
+            "sec/default",
+            "sec/perth",
+            "sec/london",
+        ] {
+            fs::create_dir_all(root.join(d)).unwrap();
+        }
+        fs::write(root.join("pb/install.yml"), "---\n").unwrap();
+        fs::write(root.join(".jetpack.yml"), contract).unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(root).unwrap();
+        let mut parser = CliParser::new();
+        let mut full: Vec<String> = vec!["jetp".into()];
+        full.extend(args.iter().map(|s| s.to_string()));
+        let result = parser.parse_from_strings(full);
+        env::set_current_dir(previous_dir).unwrap();
+        (parser, result)
+    }
+
+    fn last_segment(paths: &Arc<RwLock<Vec<PathBuf>>>) -> Option<String> {
+        paths
+            .read()
+            .unwrap()
+            .last()
+            .map(|p| p.to_string_lossy().to_string())
+    }
+
+    #[test]
+    fn profile_overrides_inventory_and_secrets() {
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+profiles:
+  perth:
+    inventory: [inv/perth]
+    secrets_inventory: [sec/perth]
+";
+        let (parser, result) = parse_with_contract(contract, &["apply", "--profile", "perth"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.inventory_paths)
+                .unwrap()
+                .ends_with("inv/perth")
+        );
+        assert!(
+            last_segment(&parser.secrets_paths)
+                .unwrap()
+                .ends_with("sec/perth")
+        );
+    }
+
+    #[test]
+    fn defaults_profile_used_when_no_profile_flag() {
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  profile: london
+profiles:
+  london:
+    inventory: [inv/london]
+";
+        let (parser, result) = parse_with_contract(contract, &["apply"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.inventory_paths)
+                .unwrap()
+                .ends_with("inv/london")
+        );
+    }
+
+    #[test]
+    fn unknown_profile_errors_clearly() {
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+profiles:
+  london:
+    inventory: [inv/london]
+";
+        let (_parser, result) = parse_with_contract(contract, &["apply", "--profile", "bogus"]);
+        let err = result.unwrap_err();
+        assert!(err.contains("profile 'bogus'"), "{err}");
+        assert!(err.contains("not found"), "{err}");
+    }
+
+    #[test]
+    fn profile_with_absent_key_inherits_defaults() {
+        // A profile that omits secrets_inventory inherits defaults.secrets_inventory.
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+profiles:
+  nolondon:
+    inventory: [inv/nolondon]
+";
+        let (parser, result) = parse_with_contract(contract, &["apply", "--profile", "nolondon"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.inventory_paths)
+                .unwrap()
+                .ends_with("inv/nolondon")
+        );
+        assert!(
+            last_segment(&parser.secrets_paths)
+                .unwrap()
+                .ends_with("sec/default"),
+            "absent secrets_inventory key inherits defaults"
+        );
+    }
+
+    #[test]
+    fn profile_empty_secrets_clears_the_overlay() {
+        // A profile with secrets_inventory: [] clears secrets (distinct from absent).
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+profiles:
+  dry:
+    inventory: [inv/dry]
+    secrets_inventory: []
+";
+        let (parser, result) = parse_with_contract(contract, &["apply", "--profile", "dry"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.inventory_paths)
+                .unwrap()
+                .ends_with("inv/dry")
+        );
+        assert!(
+            parser.secrets_paths.read().unwrap().is_empty(),
+            "secrets_inventory: [] clears the overlay"
+        );
+    }
+
+    #[test]
+    fn cli_inventory_flag_beats_profile() {
+        // CLI -i wins over the profile's inventory (precedence: CLI > profile).
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+profiles:
+  perth:
+    inventory: [inv/perth]
+";
+        let (parser, result) = parse_with_contract(
+            contract,
+            &["apply", "--profile", "perth", "-i", "inv/london"],
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.inventory_paths)
+                .unwrap()
+                .ends_with("inv/london"),
+            "CLI -i must beat the profile"
         );
     }
 
