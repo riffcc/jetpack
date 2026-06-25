@@ -16,6 +16,7 @@
 
 pub mod docs;
 pub mod gen_reference;
+pub mod install;
 pub mod parser;
 pub mod playbooks;
 pub mod show;
