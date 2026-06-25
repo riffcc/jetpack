@@ -22,6 +22,7 @@ pub mod language;
 pub mod t_helpers;
 pub mod task_fsm;
 pub mod templar;
+pub mod template_refs;
 pub mod traversal;
 pub mod visitor;
 
