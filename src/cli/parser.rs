@@ -40,6 +40,10 @@ use std::vec::Vec;
 pub struct CliParser {
     pub playbook_paths: Arc<RwLock<Vec<PathBuf>>>,
     pub inventory_paths: Arc<RwLock<Vec<PathBuf>>>,
+    /// Operator-supplied secrets inventories (often gitignored / a sibling
+    /// repo), layered on top of `inventory_paths` at load time. Tracked
+    /// separately so `--no-secrets` can skip them and the summary can show them.
+    pub secrets_paths: Arc<RwLock<Vec<PathBuf>>>,
     pub role_paths: Arc<RwLock<Vec<PathBuf>>>,
     pub module_paths: Arc<RwLock<Vec<PathBuf>>>,
     pub limit_groups: Vec<String>,
@@ -70,6 +74,8 @@ pub struct CliParser {
     pub no_browser: bool,
     pub port_set: bool,
     pub check: bool,
+    /// `--no-secrets`: skip loading `secrets_inventory` overlays for this run.
+    pub no_secrets: bool,
     /// Automation-repository root — a real git checkout, a marker walk-up, or
     /// the working directory. Set in `parse()` via `util::repo::detect_automation_root`;
     /// generators (DNS today) anchor their output paths here.
@@ -253,6 +259,7 @@ pub enum Arguments {
     ARGUMENT_CHROOT,
     ARGUMENT_DOCS_NO_BROWSER,
     ARGUMENT_CHECK,
+    ARGUMENT_NO_SECRETS,
 }
 
 impl Arguments {
@@ -295,6 +302,7 @@ impl Arguments {
             Arguments::ARGUMENT_CHROOT => "--chroot",
             Arguments::ARGUMENT_DOCS_NO_BROWSER => "--no-browser",
             Arguments::ARGUMENT_CHECK => "--check",
+            Arguments::ARGUMENT_NO_SECRETS => "--no-secrets",
         }
     }
 }
@@ -345,6 +353,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_CHROOT, "--chroot"),
         (Arguments::ARGUMENT_DOCS_NO_BROWSER, "--no-browser"),
         (Arguments::ARGUMENT_CHECK, "--check"),
+        (Arguments::ARGUMENT_NO_SECRETS, "--no-secrets"),
     ];
     let mut map: HashMap<String, Arguments> = HashMap::new();
     for (e, i) in inputs.iter() {
@@ -480,6 +489,7 @@ impl CliParser {
         CliParser {
             playbook_paths: Arc::new(RwLock::new(Vec::new())),
             inventory_paths: Arc::new(RwLock::new(Vec::new())),
+            secrets_paths: Arc::new(RwLock::new(Vec::new())),
             role_paths: Arc::new(RwLock::new(Vec::new())),
             module_paths: Arc::new(RwLock::new(Vec::new())),
             needs_help: false,
@@ -546,6 +556,7 @@ impl CliParser {
             no_browser: false,
             port_set: false,
             check: false,
+            no_secrets: false,
             automation_root: std::env::current_dir().unwrap_or_default(),
             config_path: None,
         }
@@ -636,6 +647,7 @@ impl CliParser {
                             Arguments::ARGUMENT_ASYNC => self.store_async_mode(),
                             Arguments::ARGUMENT_DOCS_NO_BROWSER => self.store_no_browser(),
                             Arguments::ARGUMENT_CHECK => self.store_check(),
+                            Arguments::ARGUMENT_NO_SECRETS => self.store_no_secrets(),
                             _ => {
                                 standalone_arg_found = false;
                                 next_is_value = true;
@@ -893,6 +905,34 @@ impl CliParser {
         Ok(())
     }
 
+    /// Append a `secrets_inventory` path (from the contract or a future flag).
+    /// Does NOT flip `inventory_set` — secrets are a separate overlay, so a
+    /// `--no-secrets` run and the `Secrets:` summary line can distinguish them.
+    fn append_secrets(&mut self, value: &str) -> Result<(), String> {
+        match parse_paths(&String::from("secrets_inventory"), value) {
+            Ok(paths) => {
+                for p in paths.iter() {
+                    self.secrets_paths.write().unwrap().push(p.clone());
+                }
+            }
+            Err(err_msg) => {
+                return Err(format!("secrets_inventory {}", err_msg));
+            }
+        }
+        Ok(())
+    }
+
+    /// The inventory paths to actually load: main inventory followed by the
+    /// secrets overlay (unless `--no-secrets`). Order matters — secrets load
+    /// last so they layer with later-wins in the single propagate pass.
+    pub fn inventory_load_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = self.inventory_paths.read().unwrap().clone();
+        if !self.no_secrets {
+            paths.extend(self.secrets_paths.read().unwrap().iter().cloned());
+        }
+        paths
+    }
+
     fn store_show_groups(&mut self, value: &str) -> Result<(), String> {
         match split_string(value) {
             Ok(values) => {
@@ -1046,6 +1086,11 @@ impl CliParser {
         Ok(())
     }
 
+    fn store_no_secrets(&mut self) -> Result<(), String> {
+        self.no_secrets = true;
+        Ok(())
+    }
+
     fn store_config(&mut self, value: &str) -> Result<(), String> {
         self.config_path = Some(PathBuf::from(value));
         Ok(())
@@ -1134,6 +1179,18 @@ impl CliParser {
             for inventory in &defaults.inventory {
                 self.append_inventory(
                     &resolve_repo_relative_path(&automation_root, inventory)?
+                        .display()
+                        .to_string(),
+                )?;
+            }
+        }
+
+        // Secrets overlay (defaults.secrets_inventory) — only when --no-secrets
+        // was not passed. Loaded after the main inventory so it layers on top.
+        if !self.no_secrets {
+            for secrets in &defaults.secrets_inventory {
+                self.append_secrets(
+                    &resolve_repo_relative_path(&automation_root, secrets)?
                         .display()
                         .to_string(),
                 )?;
@@ -2225,6 +2282,103 @@ mod tests {
             .unwrap()
             .clone();
         assert!(playbook.ends_with("pb/install.yml"));
+    }
+
+    #[test]
+    fn contract_secrets_inventory_defaults_into_secrets_paths() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("pb")).unwrap();
+        fs::create_dir_all(root.join("inv")).unwrap();
+        fs::create_dir_all(root.join("secrets")).unwrap();
+        fs::write(root.join("pb/install.yml"), "---\n").unwrap();
+        fs::write(
+            root.join(".jetpack.yml"),
+            "version: 1\ndefaults:\n  playbook: pb/install.yml\n  inventory:\n    - inv\n  \
+             secrets_inventory:\n    - secrets\n",
+        )
+        .unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "apply".into()]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok(), "{:?}", result.err());
+        let secrets = parser.secrets_paths.read().unwrap().clone();
+        assert_eq!(
+            secrets.len(),
+            1,
+            "secrets_inventory defaulted from contract"
+        );
+        assert!(secrets[0].ends_with("secrets"));
+    }
+
+    #[test]
+    fn no_secrets_flag_skips_the_secrets_inventory_overlay() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("pb")).unwrap();
+        fs::create_dir_all(root.join("inv")).unwrap();
+        fs::create_dir_all(root.join("secrets")).unwrap();
+        fs::write(root.join("pb/install.yml"), "---\n").unwrap();
+        fs::write(
+            root.join(".jetpack.yml"),
+            "version: 1\ndefaults:\n  playbook: pb/install.yml\n  inventory:\n    - inv\n  \
+             secrets_inventory:\n    - secrets\n",
+        )
+        .unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result =
+            parser.parse_from_strings(vec!["jetp".into(), "apply".into(), "--no-secrets".into()]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(parser.no_secrets);
+        assert!(
+            parser.secrets_paths.read().unwrap().is_empty(),
+            "--no-secrets must not populate secrets_paths"
+        );
+    }
+
+    #[test]
+    fn inventory_load_paths_appends_secrets_unless_no_secrets() {
+        let mut parser = CliParser::new();
+        parser
+            .inventory_paths
+            .write()
+            .unwrap()
+            .push(PathBuf::from("/main"));
+        parser
+            .secrets_paths
+            .write()
+            .unwrap()
+            .push(PathBuf::from("/secrets"));
+
+        let combined = parser.inventory_load_paths();
+        assert_eq!(
+            combined,
+            vec![PathBuf::from("/main"), PathBuf::from("/secrets")],
+            "secrets append after main for overlay ordering"
+        );
+
+        parser.no_secrets = true;
+        let combined = parser.inventory_load_paths();
+        assert_eq!(
+            combined,
+            vec![PathBuf::from("/main")],
+            "--no-secrets drops secrets from the load list"
+        );
     }
 
     #[test]
