@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use jetpack::cli::confirm::confirm_destroy_if_tty;
 use jetpack::cli::docs::docs;
 use jetpack::cli::gen_reference::gen_reference;
 use jetpack::cli::install::install;
@@ -164,6 +165,13 @@ fn liftoff() -> Result<(), String> {
             .build_global()
             .expect("build global");
     };
+
+    // Destroy-action confirm (PR2 of #47): a TTY-gated prompt only when a
+    // mutating run targets hosts whose `provision.state` is absent/destroyed.
+    // No-op for non-mutating modes, non-TTY runs (CI/pipes), and runs with no
+    // destroy hosts — so a normal `apply` never prompts, and there is no
+    // `--yes`.
+    confirm_destroy_if_tty(&inventory, &cli_parser)?;
 
     let exit_status = match cli_parser.mode {
         jetpack::cli::parser::CLI_MODE_SHOW => match handle_show(&inventory, &cli_parser) {
