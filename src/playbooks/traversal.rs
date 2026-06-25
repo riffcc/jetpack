@@ -23,6 +23,7 @@ use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::language::Play;
 use crate::playbooks::language::{InstantiateSpec, Role, RoleInvocation};
 use crate::playbooks::task_fsm::{async_run_single_task, fsm_run_task};
+use crate::playbooks::templar::TemplateMode;
 use crate::playbooks::visitor::PlaybookVisitor;
 use crate::provisioners::{ProvisionConfig, ensure_host_provisioned};
 use crate::registry::list::Task;
@@ -1252,6 +1253,74 @@ fn get_host_batches(
     (batch_size, batch_count, results)
 }
 
+/// Resolve the concrete group names a play targets, after applying the
+/// `--groups` per-play-index override and templating any `{{ var }}` entries
+/// through the play-level variable scope. This is the single source of truth
+/// for play targeting — `validate_groups` and `get_play_hosts` both consume its
+/// output, so the (formerly duplicated) CLI-override ladder lives only here.
+///
+/// Scope available for templating is hostless and pre-targeting (groups select
+/// hosts, so a target group's own `group_vars` cannot resolve the group name —
+/// that would be circular). Precedence low→high: `group_vars/all` (inventory
+/// baseline) → play `defaults` → play `vars`/`vars_files` → CLI `-e` extra-vars.
+fn resolve_target_groups(run_state: &Arc<RunState>, play: &Play) -> Result<Vec<String>, String> {
+    // Pull mode targets localhost regardless of the play's declared groups.
+    if run_state.is_pull_mode {
+        return Ok(vec![String::from("all")]);
+    }
+    // CLI --groups overrides per play-index and skips templating entirely.
+    if let Some(ref play_groups) = run_state.play_groups {
+        let play_index = run_state.context.read().unwrap().play_index;
+        if let Some(group) = play_groups.get(play_index) {
+            return Ok(vec![group.clone()]);
+        }
+    }
+    // Otherwise template each declared group through the hostless play-level
+    // scope. Build the data mapping low→high: group_vars/all baseline, then the
+    // play's defaults/vars and -e extra-vars (via hostless_play_vars).
+    let mut data = serde_yaml::Value::from(serde_yaml::Mapping::new());
+    {
+        let inv = run_state.inventory.read().unwrap();
+        if inv.has_group("all") {
+            let baseline = inv.get_group("all").read().unwrap().get_variables();
+            blend_variables(&mut data, serde_yaml::Value::Mapping(baseline));
+        }
+    }
+    let ctx = run_state.context.read().unwrap();
+    blend_variables(&mut data, ctx.hostless_play_vars());
+    let templar = ctx.templar.read().unwrap();
+
+    let mut resolved: Vec<String> = Vec::with_capacity(play.groups.len());
+    for raw in play.groups.iter() {
+        // Non-templated entries pass through unchanged.
+        if !raw.contains("{{") {
+            resolved.push(raw.clone());
+            continue;
+        }
+        let mapping = match data.clone() {
+            serde_yaml::Value::Mapping(m) => m,
+            _ => serde_yaml::Mapping::new(),
+        };
+        let rendered = templar
+            .render(raw, mapping, TemplateMode::Strict)
+            .map_err(|e| {
+                format!(
+                    "play '{}': cannot resolve group '{}': {}",
+                    play.name, raw, e
+                )
+            })?;
+        let trimmed = rendered.trim();
+        if trimmed.is_empty() {
+            return Err(format!(
+                "play '{}': group '{}' resolved to an empty value",
+                play.name, raw
+            ));
+        }
+        resolved.push(trimmed.to_string());
+    }
+    Ok(resolved)
+}
+
 fn get_play_hosts(run_state: &Arc<RunState>, play: &Play) -> Vec<Arc<RwLock<Host>>> {
     // the hosts we want to talk to are the ones specified in the play but may
     // be further constrained by the parameters --limit-hosts and limit--groups
@@ -1836,4 +1905,234 @@ fn find_role(
         }
     }
     Err(format!("role not found: {}", role_name))
+}
+
+#[cfg(test)]
+mod target_groups_tests {
+    //! Tests for `resolve_target_groups` — templating `play.groups` from the
+    //! play-level variable scope (#52). See the plan in
+    //! `.claude/plans/starry-brewing-tarjan.md`.
+    use super::*;
+    use crate::cli::parser::CliParser;
+    use crate::connection::no::NoFactory;
+    use crate::inventory::inventory::Inventory;
+    use crate::playbooks::context::PlaybookContext;
+    use crate::playbooks::visitor::{CheckMode, PlaybookVisitor};
+    use std::collections::{HashMap, HashSet};
+
+    /// Build a `serde_yaml::Mapping` of string→string pairs.
+    fn vars(pairs: &[(&str, &str)]) -> serde_yaml::Mapping {
+        let mut m = serde_yaml::Mapping::new();
+        for (k, v) in pairs {
+            m.insert(
+                serde_yaml::Value::String((*k).to_string()),
+                serde_yaml::Value::String((*v).to_string()),
+            );
+        }
+        m
+    }
+
+    /// Minimal `Play` targeting the given (possibly templated) groups.
+    fn play_with_groups(name: &str, groups: &[&str]) -> Play {
+        Play {
+            name: name.to_string(),
+            groups: groups.iter().map(|g| g.to_string()).collect(),
+            roles: None,
+            defaults: None,
+            vars: None,
+            vars_files: None,
+            sudo: None,
+            sudo_template: None,
+            ssh_user: None,
+            ssh_port: None,
+            tasks: None,
+            handlers: None,
+            batch_size: None,
+            instantiate: None,
+        }
+    }
+
+    /// Build a RunState. `all_vars` → group_vars/all; `play_vars` →
+    /// context.vars_storage (as if `load_vars_into_context` had run);
+    /// `extra` → CLI `-e`. `play_groups`/`is_pull_mode` wire the CLI knobs.
+    /// Each named group gets one host `<group>-host`.
+    fn run_state(
+        groups: &[&str],
+        all_vars: serde_yaml::Mapping,
+        play_vars: serde_yaml::Mapping,
+        extra: serde_yaml::Mapping,
+        play_groups: Option<Vec<String>>,
+        is_pull_mode: bool,
+    ) -> Arc<RunState> {
+        let mut inv = Inventory::new();
+        inv.store_group("all");
+        if !all_vars.is_empty() {
+            inv.store_group_variables("all", all_vars);
+        }
+        for g in groups {
+            inv.store_group(g);
+            inv.store_host(g, &format!("{}-host", g));
+        }
+        let inventory = Arc::new(RwLock::new(inv));
+
+        let mut parser = CliParser::new();
+        parser.extra_vars = serde_yaml::Value::Mapping(extra);
+        let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
+        {
+            let mut ctx = context.write().unwrap();
+            *ctx.vars_storage.write().unwrap() = play_vars;
+            ctx.play_index = 0;
+        }
+
+        Arc::new(RunState {
+            inventory,
+            playbook_paths: Arc::new(RwLock::new(Vec::new())),
+            role_paths: Arc::new(RwLock::new(Vec::new())),
+            module_paths: Arc::new(RwLock::new(Vec::new())),
+            limit_hosts: Vec::new(),
+            limit_groups: Vec::new(),
+            batch_size: None,
+            context,
+            visitor: Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No))),
+            connection_factory: Arc::new(RwLock::new(NoFactory::new())),
+            tags: None,
+            allow_localhost_delegation: false,
+            is_pull_mode,
+            syntax_mode: false,
+            play_groups,
+            output_handler: None,
+            async_mode: false,
+            playbook_contents: Vec::new(),
+            processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+            processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
+            role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+            fetched_files: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
+
+    #[test]
+    fn play_groups_template_from_play_vars() {
+        let rs = run_state(
+            &["webservers"],
+            vars(&[]),
+            vars(&[("g", "webservers")]),
+            vars(&[]),
+            None,
+            false,
+        );
+        let play = play_with_groups("web", &["{{ g }}"]);
+        let resolved = resolve_target_groups(&rs, &play).expect("templated group resolves");
+        assert_eq!(resolved, vec!["webservers".to_string()]);
+    }
+
+    #[test]
+    fn play_groups_template_from_group_vars_all() {
+        // group_vars/all supplies the mapping (the issue's primary intent).
+        let rs = run_state(
+            &["webservers"],
+            vars(&[("g", "webservers")]),
+            vars(&[]),
+            vars(&[]),
+            None,
+            false,
+        );
+        let play = play_with_groups("web", &["{{ g }}"]);
+        let resolved = resolve_target_groups(&rs, &play).expect("group_vars/all resolves");
+        assert_eq!(resolved, vec!["webservers".to_string()]);
+    }
+
+    #[test]
+    fn play_groups_extra_vars_beat_group_vars_all() {
+        // -e extra-vars win over group_vars/all (precedence high→low).
+        let rs = run_state(
+            &["prod-cluster"],
+            vars(&[("g", "from-all")]),
+            vars(&[]),
+            vars(&[("g", "from-extra")]),
+            None,
+            false,
+        );
+        let play = play_with_groups("web", &["{{ g }}"]);
+        let resolved = resolve_target_groups(&rs, &play).expect("extra-vars resolves");
+        assert_eq!(resolved, vec!["from-extra".to_string()]);
+    }
+
+    #[test]
+    fn play_groups_undefined_var_is_a_clear_error() {
+        let rs = run_state(
+            &["webservers"],
+            vars(&[]),
+            vars(&[]),
+            vars(&[]),
+            None,
+            false,
+        );
+        let play = play_with_groups("web", &["{{ nope }}"]);
+        let err = resolve_target_groups(&rs, &play).expect_err("undefined var must error");
+        // message names the play and the offending token
+        assert!(err.contains("web"), "error names play: {}", err);
+        assert!(err.contains("nope"), "error names token: {}", err);
+    }
+
+    #[test]
+    fn play_groups_empty_resolved_is_rejected() {
+        let rs = run_state(
+            &["webservers"],
+            vars(&[]),
+            vars(&[("g", "")]),
+            vars(&[]),
+            None,
+            false,
+        );
+        let play = play_with_groups("web", &["{{ g }}"]);
+        let err = resolve_target_groups(&rs, &play).expect_err("empty group must error");
+        assert!(err.contains("empty"), "error mentions empty: {}", err);
+    }
+
+    #[test]
+    fn play_groups_static_entries_pass_through() {
+        // A group with no template markers is returned verbatim.
+        let rs = run_state(
+            &["webservers"],
+            vars(&[]),
+            vars(&[]),
+            vars(&[]),
+            None,
+            false,
+        );
+        let play = play_with_groups("web", &["webservers"]);
+        let resolved = resolve_target_groups(&rs, &play).expect("static group passes through");
+        assert_eq!(resolved, vec!["webservers".to_string()]);
+    }
+
+    #[test]
+    fn play_groups_cli_override_wins_per_play_index() {
+        // --groups for this play-index overrides templating entirely.
+        let rs = run_state(
+            &["override-group"],
+            vars(&[]),
+            vars(&[("g", "would-be-templated")]),
+            vars(&[]),
+            Some(vec!["override-group".to_string()]),
+            false,
+        );
+        let play = play_with_groups("web", &["{{ g }}"]);
+        let resolved = resolve_target_groups(&rs, &play).expect("CLI override resolves");
+        assert_eq!(resolved, vec!["override-group".to_string()]);
+    }
+
+    #[test]
+    fn play_groups_pull_mode_targets_all() {
+        let rs = run_state(
+            &["webservers"],
+            vars(&[]),
+            vars(&[("g", "ignored")]),
+            vars(&[]),
+            None,
+            true,
+        );
+        let play = play_with_groups("web", &["{{ g }}"]);
+        let resolved = resolve_target_groups(&rs, &play).expect("pull mode resolves");
+        assert_eq!(resolved, vec!["all".to_string()]);
+    }
 }
