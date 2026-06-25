@@ -52,6 +52,10 @@ pub(super) struct JetpackFileConfig {
     /// Named operator-truth presets. A profile (selected via `--profile` or
     /// `defaults.profile`) overrides `inventory` + `secrets_inventory` only.
     pub(super) profiles: Option<BTreeMap<String, JetpackProfile>>,
+    /// Named environment overlays (selected via `--environment` or
+    /// `defaults.environment`). An environment layers an env-scoped secrets
+    /// overlay on top of whatever a profile selected — orthogonal to `profile`.
+    pub(super) environments: Option<BTreeMap<String, JetpackEnvironment>>,
     /// External automation source. **Informational only** for now — parsed so
     /// the contract validates, but Jetpack does not fetch it yet.
     pub(super) automation: Option<JetpackAutomation>,
@@ -68,6 +72,10 @@ pub(super) struct JetpackDefaults {
     pub(super) roles: Option<Vec<String>>,
     /// The default profile to activate when `--profile` is not given.
     pub(super) profile: Option<String>,
+    /// The default environment to activate when `--environment` is not given.
+    /// Orthogonal to `profile`: an environment layers an env-scoped secrets
+    /// overlay on top of whatever the profile selected.
+    pub(super) environment: Option<String>,
 }
 
 /// A named operator-truth preset. When active, a profile overrides only
@@ -77,6 +85,16 @@ pub(super) struct JetpackDefaults {
 #[serde(deny_unknown_fields)]
 pub(super) struct JetpackProfile {
     pub(super) inventory: Option<Vec<String>>,
+    pub(super) secrets_inventory: Option<Vec<String>>,
+}
+
+/// A named environment overlay. Selected via `--environment` (or
+/// `defaults.environment`), it appends its `secrets_inventory` to the load list
+/// (loaded last → later-wins) on top of whatever `profile`/`defaults` selected.
+/// `None` means "inherit"; `Some(vec![])` means "set to none".
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct JetpackEnvironment {
     pub(super) secrets_inventory: Option<Vec<String>>,
 }
 
@@ -108,6 +126,9 @@ pub(super) struct EffectiveDefaults {
     /// The default profile name from `defaults.profile` (the CLI `--profile`
     /// still wins over this; resolution happens in the consumer).
     pub(super) profile: Option<String>,
+    /// The default environment name from `defaults.environment` (the CLI
+    /// `--environment` still wins over this; resolution happens in the consumer).
+    pub(super) environment: Option<String>,
 }
 
 impl JetpackFileConfig {
@@ -124,6 +145,7 @@ impl JetpackFileConfig {
                 secrets_inventory: defaults.secrets_inventory.clone().unwrap_or_default(),
                 roles: defaults.roles.clone().unwrap_or_default(),
                 profile: defaults.profile.clone(),
+                environment: defaults.environment.clone(),
             };
         }
         match &self.local {
@@ -133,6 +155,7 @@ impl JetpackFileConfig {
                 secrets_inventory: Vec::new(),
                 roles: local.roles.clone().into_iter().collect(),
                 profile: None,
+                environment: None,
             },
             None => EffectiveDefaults::default(),
         }
@@ -275,6 +298,68 @@ defaults:
             vec!["../infra-secrets/london".to_string()]
         );
         assert_eq!(eff.profile.as_deref(), Some("london"));
+    }
+
+    #[test]
+    fn defaults_environment_parses_and_surfaces_in_effective() {
+        let raw = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [labs/london]
+  secrets_inventory: [../infra-secrets/london]
+  environment: prod
+";
+        let cfg = deserialize(raw).expect("parses");
+        let eff = cfg.effective();
+        assert_eq!(eff.environment.as_deref(), Some("prod"));
+    }
+
+    #[test]
+    fn environments_map_parses_with_secrets_overlays() {
+        let raw = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [labs/london]
+  secrets_inventory: [../infra-secrets/london]
+  environment: prod
+environments:
+  test:
+    secrets_inventory: [../infra-secrets/london-test]
+  staging:
+    secrets_inventory: []
+";
+        let cfg = deserialize(raw).expect("parses");
+        let envs = cfg.environments.expect("environments parsed");
+        assert_eq!(envs.len(), 2);
+        let test = envs.get("test").expect("test env");
+        assert_eq!(
+            test.secrets_inventory,
+            Some(vec!["../infra-secrets/london-test".to_string()])
+        );
+        // staging carries an explicit empty list, distinct from None (absent).
+        let staging = envs.get("staging").expect("staging env");
+        assert_eq!(staging.secrets_inventory, Some(Vec::new()));
+    }
+
+    #[test]
+    fn environment_secrets_empty_vec_is_distinct_from_absent() {
+        // Some(vec![]) means "clear the overlay"; None means "inherit". The
+        // deserializer must preserve that distinction (mirrors profile behavior).
+        let raw = "\
+environments:
+  cleared:
+    secrets_inventory: []
+  absent: {}
+";
+        let cfg = deserialize(raw).expect("parses");
+        let envs = cfg.environments.unwrap();
+        assert_eq!(
+            envs.get("cleared").unwrap().secrets_inventory,
+            Some(Vec::new())
+        );
+        assert_eq!(envs.get("absent").unwrap().secrets_inventory, None);
     }
 
     #[test]
