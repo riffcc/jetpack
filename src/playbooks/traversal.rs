@@ -1849,16 +1849,19 @@ fn load_vars_into_context(run_state: &Arc<RunState>, play: &Play) -> Result<(), 
     Ok(())
 }
 
-fn find_role(
-    run_state: &Arc<RunState>,
-    _play: &Play,
-    role_name: String,
+/// Resolve a role name to its parsed definition and root directory by searching
+/// the configured role paths. Pure resolution — no `RunState`, no side effects —
+/// so it can be reused by both traversal and the static diagnostic collector
+/// (`ref_collector`) without re-implementing (and drifting from) role lookup.
+pub(crate) fn resolve_role(
+    role_paths: &[PathBuf],
+    role_name: &str,
 ) -> Result<(Role, PathBuf), String> {
     // when we need to find a role we look for it in the configured role paths
 
-    for path_buf in run_state.role_paths.read().unwrap().iter() {
+    for path_buf in role_paths.iter() {
         let mut pb = path_buf.clone();
-        pb.push(role_name.clone());
+        pb.push(role_name);
         let mut pb2 = pb.clone();
         pb2.push("role.yml");
 
@@ -1884,6 +1887,15 @@ fn find_role(
         }
     }
     Err(format!("role not found: {}", role_name))
+}
+
+fn find_role(
+    run_state: &Arc<RunState>,
+    _play: &Play,
+    role_name: String,
+) -> Result<(Role, PathBuf), String> {
+    let role_paths = run_state.role_paths.read().unwrap();
+    resolve_role(&role_paths, &role_name)
 }
 
 #[cfg(test)]
