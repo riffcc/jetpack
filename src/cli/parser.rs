@@ -88,6 +88,12 @@ pub struct CliParser {
     /// contract's `profiles:` map (overrides inventory + secrets_inventory).
     /// When unset, `defaults.profile` is used.
     pub profile: Option<String>,
+    /// The resolved profile name (CLI `--profile` or `defaults.profile`) after
+    /// `apply_file_defaults` — for the resolution summary.
+    pub active_profile: Option<String>,
+    /// `automation.source` from the contract, surfaced in the summary.
+    /// **Informational only** — Jetpack does not fetch it yet.
+    pub automation_source: Option<String>,
 }
 
 // subcommands are usually required
@@ -567,6 +573,8 @@ impl CliParser {
             automation_root: std::env::current_dir().unwrap_or_default(),
             config_path: None,
             profile: None,
+            active_profile: None,
+            automation_source: None,
         }
     }
 
@@ -1190,6 +1198,11 @@ impl CliParser {
             }
         }
 
+        // Surface the resolved profile + automation.source for the summary.
+        // automation.source is informational only — not fetched.
+        self.active_profile = profile_name;
+        self.automation_source = config.automation.as_ref().and_then(|a| a.source.clone());
+
         // Each of playbook/inventory/roles is filled ONLY when the CLI left it
         // unset — CLI wins over the contract. For the scalar playbook the
         // "not set" guard is folded into the Option via `filter` (a single
@@ -1276,16 +1289,33 @@ impl CliParser {
     /// resolution summary. Built from post-parse state, so it reflects CLI
     /// flags, the `.jetpack` contract, and conventions all merged together.
     pub fn resolution_summary(&self) -> Vec<(String, String)> {
-        vec![
+        let secrets = if self.no_secrets {
+            String::from("(skipped via --no-secrets)")
+        } else {
+            join_paths(&self.secrets_paths)
+        };
+        let mut rows = vec![
             (
                 String::from("Automation root"),
                 self.automation_root.display().to_string(),
             ),
             (String::from("Playbook"), join_paths(&self.playbook_paths)),
             (String::from("Inventory"), join_paths(&self.inventory_paths)),
-            (String::from("Roles"), join_paths(&self.role_paths)),
-            (String::from("Mode"), cli_mode_name(self.mode).to_string()),
-        ]
+            (String::from("Secrets"), secrets),
+        ];
+        if let Some(profile) = &self.active_profile {
+            rows.push((String::from("Profile"), profile.clone()));
+        }
+        rows.push((String::from("Roles"), join_paths(&self.role_paths)));
+        if let Some(source) = &self.automation_source {
+            // Informational: parsed but not yet fetched.
+            rows.push((
+                String::from("Automation source"),
+                format!("{source} (fetch not yet implemented)"),
+            ));
+        }
+        rows.push((String::from("Mode"), cli_mode_name(self.mode).to_string()));
+        rows
     }
 
     fn load_jetpack_file_config(&self, cwd: &Path) -> Result<JetpackFileConfig, String> {
@@ -2830,6 +2860,74 @@ profiles:
         assert_eq!(map.get("Mode").unwrap(), "ssh");
         assert!(map.get("Playbook").unwrap().ends_with("play.yml"));
         assert_eq!(map.get("Inventory").unwrap(), "(none)");
+    }
+
+    #[test]
+    fn resolution_summary_reports_secrets_profile_and_source() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("pb")).unwrap();
+        fs::create_dir_all(root.join("inv")).unwrap();
+        fs::create_dir_all(root.join("sec")).unwrap();
+        fs::write(root.join("pb/install.yml"), "---\n").unwrap();
+        fs::write(
+            root.join(".jetpack.yml"),
+            "version: 1\ndefaults:\n  playbook: pb/install.yml\n  inventory: [inv]\n  \
+             secrets_inventory: [sec]\n  profile: london\nprofiles:\n  london:\n    \
+             inventory: [inv]\nautomation:\n  source: https://example.com/moosefs\n",
+        )
+        .unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(root).unwrap();
+
+        let mut parser = CliParser::new();
+        parser
+            .parse_from_strings(vec!["jetp".into(), "apply".into()])
+            .unwrap();
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        let map: HashMap<String, String> = parser.resolution_summary().into_iter().collect();
+        assert!(map["Secrets"].ends_with("sec"));
+        assert_eq!(map["Profile"], "london");
+        assert!(map["Automation source"].contains("https://example.com/moosefs"));
+        assert!(
+            map["Automation source"].contains("not yet implemented"),
+            "source must be flagged as not-yet-fetched: {}",
+            map["Automation source"]
+        );
+    }
+
+    #[test]
+    fn resolution_summary_marks_secrets_skipped_under_no_secrets() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("pb")).unwrap();
+        fs::create_dir_all(root.join("inv")).unwrap();
+        fs::create_dir_all(root.join("sec")).unwrap();
+        fs::write(root.join("pb/install.yml"), "---\n").unwrap();
+        fs::write(
+            root.join(".jetpack.yml"),
+            "version: 1\ndefaults:\n  playbook: pb/install.yml\n  inventory: [inv]\n  \
+             secrets_inventory: [sec]\n",
+        )
+        .unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(root).unwrap();
+
+        let mut parser = CliParser::new();
+        parser
+            .parse_from_strings(vec!["jetp".into(), "apply".into(), "--no-secrets".into()])
+            .unwrap();
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        let map: HashMap<String, String> = parser.resolution_summary().into_iter().collect();
+        assert_eq!(map["Secrets"], "(skipped via --no-secrets)");
     }
 
     #[test]
