@@ -272,15 +272,24 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
         handle_instantiate(run_state, play, spec)?;
     }
 
+    // Load the play's vars/vars_files/defaults into the context BEFORE resolving
+    // groups so `play.groups` can template against them (#52). Safe to hoist:
+    // nothing between here and the former call site reads play-var storage, and
+    // load_vars overwrites-per-play so there is no cross-play leak.
+    load_vars_into_context(run_state, play)?;
+
     // make sure all host and groups used to limit exists
     validate_limit_groups(run_state, play)?;
     validate_limit_hosts(run_state, play)?;
 
+    // Resolve the concrete groups this play targets (templated + CLI-override +
+    // pull-mode handling), then validate and fan out from that resolved list.
+    let target_groups = resolve_target_groups(run_state, play)?;
+
     // make sure all hosts are valid and we have some hosts to talk to
-    validate_groups(run_state, play)?;
-    let hosts = get_play_hosts(run_state, play);
+    validate_groups(run_state, &target_groups)?;
+    let hosts = get_play_hosts(run_state, &target_groups);
     validate_hosts(run_state, play, &hosts)?;
-    load_vars_into_context(run_state, play)?;
 
     // support for serialization if using push configuration
     // means we may not configure hosts all at once but may take
@@ -1321,25 +1330,11 @@ fn resolve_target_groups(run_state: &Arc<RunState>, play: &Play) -> Result<Vec<S
     Ok(resolved)
 }
 
-fn get_play_hosts(run_state: &Arc<RunState>, play: &Play) -> Vec<Arc<RwLock<Host>>> {
-    // the hosts we want to talk to are the ones specified in the play but may
-    // be further constrained by the parameters --limit-hosts and limit--groups
-    // from the CLI.
+fn get_play_hosts(run_state: &Arc<RunState>, groups: &[String]) -> Vec<Arc<RwLock<Host>>> {
+    // the hosts we want to talk to are the resolved play groups, possibly
+    // further constrained by --limit-hosts / --limit-groups. Group resolution
+    // (templating, --groups override, pull-mode) is done by resolve_target_groups.
 
-    // In pull mode, always use localhost regardless of what the play specifies
-    // If --groups is specified, use the group for this play index
-    let groups = if run_state.is_pull_mode {
-        &vec!["all".to_string()]
-    } else if let Some(ref play_groups) = run_state.play_groups {
-        let play_index = run_state.context.read().unwrap().play_index;
-        if let Some(group) = play_groups.get(play_index) {
-            &vec![group.clone()]
-        } else {
-            &play.groups
-        }
-    } else {
-        &play.groups
-    };
     let mut results: HashMap<String, Arc<RwLock<Host>>> = HashMap::new();
 
     let has_group_limits = !matches!(run_state.limit_groups.len(), 0);
@@ -1767,29 +1762,13 @@ fn validate_limit_hosts(run_state: &Arc<RunState>, _play: &Play) -> Result<(), S
     Ok(())
 }
 
-fn validate_groups(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
-    // In pull mode, we don't validate groups since they'll all be mapped to localhost
-    if run_state.is_pull_mode {
-        return Ok(());
-    }
-
-    // If --groups is specified, validate the remapped group instead
-    let groups_to_validate = if let Some(ref play_groups) = run_state.play_groups {
-        let play_index = run_state.context.read().unwrap().play_index;
-        if let Some(group) = play_groups.get(play_index) {
-            vec![group.clone()]
-        } else {
-            play.groups.clone()
-        }
-    } else {
-        play.groups.clone()
-    };
-
-    // groups on the play can't mention any groups that aren't in inventory
-
+fn validate_groups(run_state: &Arc<RunState>, groups: &[String]) -> Result<(), String> {
+    // Groups are already resolved (templated + CLI-override applied) by the
+    // caller (resolve_target_groups), so this only checks each name exists in
+    // inventory. The pull-mode / --groups branching now lives there too.
     let inv = run_state.inventory.read().unwrap();
-    for group_name in groups_to_validate.iter() {
-        if !inv.has_group(&group_name.clone()) {
+    for group_name in groups.iter() {
+        if !inv.has_group(group_name) {
             return Err(format!(
                 "at least one referenced group ({}) is not found in inventory",
                 group_name
@@ -2134,5 +2113,50 @@ mod target_groups_tests {
         let play = play_with_groups("web", &["{{ g }}"]);
         let resolved = resolve_target_groups(&rs, &play).expect("pull mode resolves");
         assert_eq!(resolved, vec!["all".to_string()]);
+    }
+
+    #[test]
+    fn validate_groups_rejects_unknown_resolved_group() {
+        let rs = run_state(
+            &["webservers"],
+            vars(&[]),
+            vars(&[]),
+            vars(&[]),
+            None,
+            false,
+        );
+        let err = validate_groups(&rs, &["nope".to_string()]).expect_err("unknown group rejected");
+        assert!(err.contains("nope"), "error names the group: {}", err);
+    }
+
+    #[test]
+    fn validate_groups_accepts_known_group() {
+        let rs = run_state(
+            &["webservers"],
+            vars(&[]),
+            vars(&[]),
+            vars(&[]),
+            None,
+            false,
+        );
+        validate_groups(&rs, &["webservers".to_string()]).expect("known group validates");
+    }
+
+    #[test]
+    fn get_play_hosts_fans_out_resolved_group() {
+        let rs = run_state(
+            &["webservers", "dbservers"],
+            vars(&[]),
+            vars(&[]),
+            vars(&[]),
+            None,
+            false,
+        );
+        let hosts = get_play_hosts(&rs, &["webservers".to_string()]);
+        let names: Vec<String> = hosts
+            .iter()
+            .map(|h| h.read().unwrap().name.clone())
+            .collect();
+        assert_eq!(names, vec!["webservers-host".to_string()]);
     }
 }
