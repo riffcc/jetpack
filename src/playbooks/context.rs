@@ -28,7 +28,7 @@ use guid_create::GUID;
 use std::collections::HashMap;
 use std::env;
 use std::ops::Deref;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 // the playbook traversal state, and a little bit more than that.
@@ -81,6 +81,10 @@ pub struct PlaybookContext {
     pub ssh_port: i64,
     pub sudo: Option<String>,
     extra_vars: serde_yaml::Value,
+    /// Automation-repository root, copied from the parser. Generators (DNS
+    /// today) anchor their output paths here so a playbook run from a
+    /// subdirectory writes under the repo root, not the playbook dir.
+    pub repo_root: PathBuf,
 }
 
 impl PlaybookContext {
@@ -122,6 +126,7 @@ impl PlaybookContext {
             ssh_port: parser.default_port,
             sudo: parser.sudo.clone(),
             extra_vars: parser.extra_vars.clone(),
+            repo_root: parser.repo_root.clone(),
         };
         s.load_environment();
         s

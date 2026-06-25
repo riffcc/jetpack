@@ -69,6 +69,10 @@ pub struct CliParser {
     pub no_browser: bool,
     pub port_set: bool,
     pub check: bool,
+    /// Automation-repository root — a real git checkout, a marker walk-up, or
+    /// the working directory. Set in `parse()` via `util::repo::detect_repo_root`;
+    /// generators (DNS today) anchor their output paths here.
+    pub repo_root: PathBuf,
 }
 
 // subcommands are usually required
@@ -474,6 +478,7 @@ impl CliParser {
             no_browser: false,
             port_set: false,
             check: false,
+            repo_root: std::env::current_dir().unwrap_or_default(),
         }
     }
 
@@ -674,7 +679,16 @@ impl CliParser {
             _ => {}
         }
 
-        self.apply_local_bootstrap_defaults()?;
+        // Resolve the automation-repository root once (git checkout → marker
+        // walk-up → current directory). DNS generators and upcoming kubectl/helm
+        // file resolution anchor their output paths here instead of the bare
+        // working directory, so a playbook run from a subdirectory writes zone
+        // files under the repo root rather than next to the playbook.
+        let cwd = fs::canonicalize(env::current_dir().map_err(|e| e.to_string())?)
+            .map_err(|e| format!("failed to canonicalize current directory: {e}"))?;
+        self.repo_root = crate::util::repo::detect_repo_root(&cwd);
+
+        self.apply_local_bootstrap_defaults(&cwd)?;
 
         if self.playbook_set {
             self.add_role_paths_from_environment()?;
@@ -682,6 +696,18 @@ impl CliParser {
             self.add_module_paths_from_environment()?;
             self.add_implicit_module_paths()?;
         }
+
+        // Surface JET_* builtins (JET_REPO_ROOT, JET_PLAYBOOK_DIR, …) for every
+        // playbook-executing mode — not just local. Pure-utility modes do no
+        // templating and skip this.
+        match self.mode {
+            CLI_MODE_SHOW | CLI_MODE_DOCS | CLI_MODE_GEN_REFERENCE | CLI_MODE_INSTALL => {}
+            _ => {
+                let repo_root = self.repo_root.clone();
+                self.inject_builtin_vars(&cwd, &repo_root)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -979,22 +1005,19 @@ impl CliParser {
         Ok(())
     }
 
-    fn apply_local_bootstrap_defaults(&mut self) -> Result<(), String> {
+    fn apply_local_bootstrap_defaults(&mut self, cwd: &Path) -> Result<(), String> {
         match self.mode {
             CLI_MODE_LOCAL | CLI_MODE_CHECK_LOCAL => {}
             _ => return Ok(()),
         }
 
-        let cwd = fs::canonicalize(env::current_dir().map_err(|e| e.to_string())?)
-            .map_err(|e| format!("failed to canonicalize current directory: {e}"))?;
-
-        let file_config = self.load_jetpack_file_config(&cwd)?;
+        let file_config = self.load_jetpack_file_config(cwd)?;
         let local_config = file_config.local.unwrap_or_default();
 
         if !self.playbook_set {
             if let Some(playbook) = local_config.playbook.as_ref() {
                 self.append_playbook(
-                    &resolve_repo_relative_path(&cwd, playbook)?
+                    &resolve_repo_relative_path(cwd, playbook)?
                         .display()
                         .to_string(),
                 )?;
@@ -1009,7 +1032,7 @@ impl CliParser {
         if self.playbook_set && self.role_paths.read().unwrap().is_empty() {
             if let Some(roles) = local_config.roles.as_ref() {
                 self.append_roles(
-                    &resolve_repo_relative_path(&cwd, roles)?
+                    &resolve_repo_relative_path(cwd, roles)?
                         .display()
                         .to_string(),
                 )?;
@@ -1024,7 +1047,7 @@ impl CliParser {
         if !self.inventory_set {
             if let Some(inventory) = local_config.inventory.as_ref() {
                 self.append_inventory(
-                    &resolve_repo_relative_path(&cwd, inventory)?
+                    &resolve_repo_relative_path(cwd, inventory)?
                         .display()
                         .to_string(),
                 )?;
@@ -1036,7 +1059,6 @@ impl CliParser {
             }
         }
 
-        self.inject_local_builtins(&cwd)?;
         Ok(())
     }
 
@@ -1055,8 +1077,7 @@ impl CliParser {
         parsed.map_err(|_| format!("invalid .jetpack.yml: {}", config_path.display()))
     }
 
-    fn inject_local_builtins(&mut self, cwd: &Path) -> Result<(), String> {
-        let repo_root = cwd;
+    fn inject_builtin_vars(&mut self, cwd: &Path, repo_root: &Path) -> Result<(), String> {
         let playbook_dir = self
             .playbook_paths
             .read()
@@ -1577,6 +1598,42 @@ mod tests {
                 .unwrap()
                 .as_str()
                 .unwrap(),
+            repo_root.canonicalize().unwrap().display().to_string()
+        );
+    }
+
+    #[test]
+    fn test_non_local_mode_injects_jet_repo_root() {
+        // JET_REPO_ROOT (and the other JET_* builtins) must be available in
+        // ssh mode too — not just local — so templates and generators anchored
+        // to the repo root work regardless of execution mode.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        fs::write(repo_root.join("play.yml"), "---\n").unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(repo_root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec![
+            "jetp".into(),
+            "ssh".into(),
+            "--playbook".into(),
+            "play.yml".into(),
+        ]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok());
+        let extra = parser.extra_vars.as_mapping().unwrap();
+        let injected = extra
+            .get(serde_yaml::Value::String("JET_REPO_ROOT".into()))
+            .expect("JET_REPO_ROOT must be injected in ssh mode")
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            injected,
             repo_root.canonicalize().unwrap().display().to_string()
         );
     }
