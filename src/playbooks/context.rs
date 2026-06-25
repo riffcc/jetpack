@@ -84,7 +84,7 @@ pub struct PlaybookContext {
     /// Automation-repository root, copied from the parser. Generators (DNS
     /// today) anchor their output paths here so a playbook run from a
     /// subdirectory writes under the repo root, not the playbook dir.
-    pub repo_root: PathBuf,
+    pub automation_root: PathBuf,
 }
 
 impl PlaybookContext {
@@ -126,7 +126,7 @@ impl PlaybookContext {
             ssh_port: parser.default_port,
             sudo: parser.sudo.clone(),
             extra_vars: parser.extra_vars.clone(),
-            repo_root: parser.repo_root.clone(),
+            automation_root: parser.automation_root.clone(),
         };
         s.load_environment();
         s

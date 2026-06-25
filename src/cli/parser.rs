@@ -70,9 +70,9 @@ pub struct CliParser {
     pub port_set: bool,
     pub check: bool,
     /// Automation-repository root — a real git checkout, a marker walk-up, or
-    /// the working directory. Set in `parse()` via `util::repo::detect_repo_root`;
+    /// the working directory. Set in `parse()` via `util::repo::detect_automation_root`;
     /// generators (DNS today) anchor their output paths here.
-    pub repo_root: PathBuf,
+    pub automation_root: PathBuf,
 }
 
 // subcommands are usually required
@@ -478,7 +478,7 @@ impl CliParser {
             no_browser: false,
             port_set: false,
             check: false,
-            repo_root: std::env::current_dir().unwrap_or_default(),
+            automation_root: std::env::current_dir().unwrap_or_default(),
         }
     }
 
@@ -686,7 +686,7 @@ impl CliParser {
         // files under the repo root rather than next to the playbook.
         let cwd = fs::canonicalize(env::current_dir().map_err(|e| e.to_string())?)
             .map_err(|e| format!("failed to canonicalize current directory: {e}"))?;
-        self.repo_root = crate::util::repo::detect_repo_root(&cwd);
+        self.automation_root = crate::util::repo::detect_automation_root(&cwd);
 
         self.apply_local_bootstrap_defaults(&cwd)?;
 
@@ -697,14 +697,14 @@ impl CliParser {
             self.add_implicit_module_paths()?;
         }
 
-        // Surface JET_* builtins (JET_REPO_ROOT, JET_PLAYBOOK_DIR, …) for every
+        // Surface JET_* builtins (JET_AUTOMATION_ROOT, JET_PLAYBOOK_DIR, …) for every
         // playbook-executing mode — not just local. Pure-utility modes do no
         // templating and skip this.
         match self.mode {
             CLI_MODE_SHOW | CLI_MODE_DOCS | CLI_MODE_GEN_REFERENCE | CLI_MODE_INSTALL => {}
             _ => {
-                let repo_root = self.repo_root.clone();
-                self.inject_builtin_vars(&cwd, &repo_root)?;
+                let automation_root = self.automation_root.clone();
+                self.inject_builtin_vars(&cwd, &automation_root)?;
             }
         }
 
@@ -1077,7 +1077,7 @@ impl CliParser {
         parsed.map_err(|_| format!("invalid .jetpack.yml: {}", config_path.display()))
     }
 
-    fn inject_builtin_vars(&mut self, cwd: &Path, repo_root: &Path) -> Result<(), String> {
+    fn inject_builtin_vars(&mut self, cwd: &Path, automation_root: &Path) -> Result<(), String> {
         let playbook_dir = self
             .playbook_paths
             .read()
@@ -1106,8 +1106,8 @@ impl CliParser {
             serde_yaml::Value::String(cwd.display().to_string()),
         );
         builtins.insert(
-            serde_yaml::Value::String("JET_REPO_ROOT".to_string()),
-            serde_yaml::Value::String(repo_root.display().to_string()),
+            serde_yaml::Value::String("JET_AUTOMATION_ROOT".to_string()),
+            serde_yaml::Value::String(automation_root.display().to_string()),
         );
         builtins.insert(
             serde_yaml::Value::String("JET_PLAYBOOK_DIR".to_string()),
@@ -1264,12 +1264,12 @@ impl CliParser {
     }
 }
 
-fn resolve_repo_relative_path(repo_root: &Path, value: &str) -> Result<PathBuf, String> {
+fn resolve_repo_relative_path(automation_root: &Path, value: &str) -> Result<PathBuf, String> {
     let candidate = PathBuf::from(value);
     if candidate.is_absolute() {
         return Ok(candidate);
     }
-    Ok(repo_root.join(candidate))
+    Ok(automation_root.join(candidate))
 }
 
 #[cfg(test)]
@@ -1572,14 +1572,18 @@ mod tests {
     fn test_local_mode_infers_convention_paths_from_cwd() {
         let _lock = ENV_LOCK.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let repo_root = temp_dir.path();
-        fs::create_dir_all(repo_root.join("deploy/playbooks")).unwrap();
-        fs::create_dir_all(repo_root.join("deploy/roles")).unwrap();
-        fs::create_dir_all(repo_root.join("deploy/inventory")).unwrap();
-        fs::write(repo_root.join("deploy/playbooks/bootstrap.yml"), "---\n").unwrap();
+        let automation_root = temp_dir.path();
+        fs::create_dir_all(automation_root.join("deploy/playbooks")).unwrap();
+        fs::create_dir_all(automation_root.join("deploy/roles")).unwrap();
+        fs::create_dir_all(automation_root.join("deploy/inventory")).unwrap();
+        fs::write(
+            automation_root.join("deploy/playbooks/bootstrap.yml"),
+            "---\n",
+        )
+        .unwrap();
 
         let previous_dir = env::current_dir().unwrap();
-        env::set_current_dir(repo_root).unwrap();
+        env::set_current_dir(automation_root).unwrap();
 
         let mut parser = CliParser::new();
         let result = parser.parse_from_strings(vec!["jetp".into(), "local".into()]);
@@ -1594,26 +1598,30 @@ mod tests {
         let extra = parser.extra_vars.as_mapping().unwrap();
         assert_eq!(
             extra
-                .get(serde_yaml::Value::String("JET_REPO_ROOT".into()))
+                .get(serde_yaml::Value::String("JET_AUTOMATION_ROOT".into()))
                 .unwrap()
                 .as_str()
                 .unwrap(),
-            repo_root.canonicalize().unwrap().display().to_string()
+            automation_root
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()
         );
     }
 
     #[test]
-    fn test_non_local_mode_injects_jet_repo_root() {
-        // JET_REPO_ROOT (and the other JET_* builtins) must be available in
+    fn test_non_local_mode_injects_jet_automation_root() {
+        // JET_AUTOMATION_ROOT (and the other JET_* builtins) must be available in
         // ssh mode too — not just local — so templates and generators anchored
         // to the repo root work regardless of execution mode.
         let _lock = ENV_LOCK.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let repo_root = temp_dir.path();
-        fs::write(repo_root.join("play.yml"), "---\n").unwrap();
+        let automation_root = temp_dir.path();
+        fs::write(automation_root.join("play.yml"), "---\n").unwrap();
 
         let previous_dir = env::current_dir().unwrap();
-        env::set_current_dir(repo_root).unwrap();
+        env::set_current_dir(automation_root).unwrap();
 
         let mut parser = CliParser::new();
         let result = parser.parse_from_strings(vec![
@@ -1628,13 +1636,17 @@ mod tests {
         assert!(result.is_ok());
         let extra = parser.extra_vars.as_mapping().unwrap();
         let injected = extra
-            .get(serde_yaml::Value::String("JET_REPO_ROOT".into()))
-            .expect("JET_REPO_ROOT must be injected in ssh mode")
+            .get(serde_yaml::Value::String("JET_AUTOMATION_ROOT".into()))
+            .expect("JET_AUTOMATION_ROOT must be injected in ssh mode")
             .as_str()
             .unwrap();
         assert_eq!(
             injected,
-            repo_root.canonicalize().unwrap().display().to_string()
+            automation_root
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()
         );
     }
 
@@ -1642,15 +1654,15 @@ mod tests {
     fn test_local_mode_uses_jetpack_yml_overrides() {
         let _lock = ENV_LOCK.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let repo_root = temp_dir.path();
-        fs::create_dir_all(repo_root.join("custom/pb")).unwrap();
-        fs::create_dir_all(repo_root.join("custom/roles")).unwrap();
-        fs::create_dir_all(repo_root.join("custom/inventory")).unwrap();
-        fs::write(repo_root.join("custom/pb/install.yml"), "---\n").unwrap();
-        fs::write(repo_root.join(".jetpack.yml"), "local:\n  playbook: custom/pb/install.yml\n  roles: custom/roles\n  inventory: custom/inventory\n").unwrap();
+        let automation_root = temp_dir.path();
+        fs::create_dir_all(automation_root.join("custom/pb")).unwrap();
+        fs::create_dir_all(automation_root.join("custom/roles")).unwrap();
+        fs::create_dir_all(automation_root.join("custom/inventory")).unwrap();
+        fs::write(automation_root.join("custom/pb/install.yml"), "---\n").unwrap();
+        fs::write(automation_root.join(".jetpack.yml"), "local:\n  playbook: custom/pb/install.yml\n  roles: custom/roles\n  inventory: custom/inventory\n").unwrap();
 
         let previous_dir = env::current_dir().unwrap();
-        env::set_current_dir(repo_root).unwrap();
+        env::set_current_dir(automation_root).unwrap();
 
         let mut parser = CliParser::new();
         let result = parser.parse_from_strings(vec!["jetp".into(), "local".into()]);
@@ -1682,16 +1694,20 @@ mod tests {
     fn test_cli_flags_override_local_defaults() {
         let _lock = ENV_LOCK.lock().unwrap();
         let temp_dir = TempDir::new().unwrap();
-        let repo_root = temp_dir.path();
-        fs::create_dir_all(repo_root.join("deploy/playbooks")).unwrap();
-        fs::create_dir_all(repo_root.join("deploy/roles")).unwrap();
-        fs::create_dir_all(repo_root.join("deploy/inventory")).unwrap();
-        fs::create_dir_all(repo_root.join("manual")).unwrap();
-        fs::write(repo_root.join("deploy/playbooks/bootstrap.yml"), "---\n").unwrap();
-        fs::write(repo_root.join("manual/explicit.yml"), "---\n").unwrap();
+        let automation_root = temp_dir.path();
+        fs::create_dir_all(automation_root.join("deploy/playbooks")).unwrap();
+        fs::create_dir_all(automation_root.join("deploy/roles")).unwrap();
+        fs::create_dir_all(automation_root.join("deploy/inventory")).unwrap();
+        fs::create_dir_all(automation_root.join("manual")).unwrap();
+        fs::write(
+            automation_root.join("deploy/playbooks/bootstrap.yml"),
+            "---\n",
+        )
+        .unwrap();
+        fs::write(automation_root.join("manual/explicit.yml"), "---\n").unwrap();
 
         let previous_dir = env::current_dir().unwrap();
-        env::set_current_dir(repo_root).unwrap();
+        env::set_current_dir(automation_root).unwrap();
 
         let mut parser = CliParser::new();
         let result = parser.parse_from_strings(vec![

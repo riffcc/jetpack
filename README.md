@@ -53,7 +53,7 @@ Paths are resolved relative to the current repository root.
 When `jetp local` runs, Jetpack injects a small set of built-in variables for bootstrap-oriented repos:
 
 - `JET_CWD`
-- `JET_REPO_ROOT`
+- `JET_AUTOMATION_ROOT`
 - `JET_PLAYBOOK_DIR`
 - `JET_ROLES_DIR`
 - `JET_INVENTORY_DIR`

@@ -130,27 +130,30 @@ impl DnsConfig {
         self.gravity.is_some()
     }
 
-    /// Anchor a relative `path` to `repo_root`, making it absolute. Absolute
+    /// Anchor a relative `path` to `automation_root`, making it absolute. Absolute
     /// paths are left untouched. This makes the README's "resolved relative to
     /// the current repository root" promise hold, and it defeats a race where a
     /// process `chdir` mid-batch would otherwise re-target
     /// `current_dir(&config.path)` in [`sync`]. Uses [`Path::join`], never
     /// `canonicalize`, so a not-yet-existing `dns/` tree still resolves.
-    pub fn resolve_path_against(&mut self, repo_root: &Path) {
+    pub fn resolve_path_against(&mut self, automation_root: &Path) {
         let candidate = PathBuf::from(&self.path);
         if !candidate.is_absolute() {
-            self.path = repo_root.join(&candidate).display().to_string();
+            self.path = automation_root.join(&candidate).display().to_string();
         }
     }
 }
 
 /// Deserialize a [`DnsConfig`] from host variables and immediately anchor its
-/// `path` to `repo_root`. Returns `None` when the `dns:` block is absent or
+/// `path` to `automation_root`. Returns `None` when the `dns:` block is absent or
 /// fails to deserialize. Centralizes resolution so every call site in
 /// `playbooks::traversal` produces paths anchored to the repo root.
-pub fn dns_config_from_vars(value: &serde_yaml::Value, repo_root: &Path) -> Option<DnsConfig> {
+pub fn dns_config_from_vars(
+    value: &serde_yaml::Value,
+    automation_root: &Path,
+) -> Option<DnsConfig> {
     let mut config: DnsConfig = serde_yaml::from_value(value.clone()).ok()?;
-    config.resolve_path_against(repo_root);
+    config.resolve_path_against(automation_root);
     Some(config)
 }
 
@@ -381,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_path_joins_relative_path_to_repo_root() {
+    fn resolve_path_joins_relative_path_to_automation_root() {
         let mut config = make_config("dns/riff.cc");
         config.resolve_path_against(std::path::Path::new("/repo"));
         assert_eq!(config.path, "/repo/dns/riff.cc");
@@ -403,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn from_vars_anchors_relative_path_to_repo_root() {
+    fn from_vars_anchors_relative_path_to_automation_root() {
         let mut mapping = serde_yaml::Mapping::new();
         mapping.insert(
             serde_yaml::Value::String("path".to_string()),
