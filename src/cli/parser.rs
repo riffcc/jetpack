@@ -95,6 +95,13 @@ pub struct CliParser {
     /// The resolved profile name (CLI `--profile` or `defaults.profile`) after
     /// `apply_file_defaults` — for the resolution summary.
     pub active_profile: Option<String>,
+    /// `--environment NAME`: selects a named env overlay from the contract's
+    /// `environments:` map (appends its secrets_inventory on top of whatever a
+    /// profile selected). When unset, `defaults.environment` is used.
+    pub environment: Option<String>,
+    /// The resolved environment name (CLI `--environment` or
+    /// `defaults.environment`) after `apply_file_defaults` — for the summary.
+    pub active_environment: Option<String>,
     /// `automation.source` from the contract, surfaced in the summary.
     /// **Informational only** — Jetpack does not fetch it yet.
     pub automation_source: Option<String>,
@@ -287,6 +294,8 @@ pub enum Arguments {
     ARGUMENT_CHECK,
     ARGUMENT_NO_SECRETS,
     ARGUMENT_PROFILE,
+    ARGUMENT_ENVIRONMENT,
+    ARGUMENT_ENVIRONMENT_SHORT,
 }
 
 impl Arguments {
@@ -331,6 +340,8 @@ impl Arguments {
             Arguments::ARGUMENT_CHECK => "--check",
             Arguments::ARGUMENT_NO_SECRETS => "--no-secrets",
             Arguments::ARGUMENT_PROFILE => "--profile",
+            Arguments::ARGUMENT_ENVIRONMENT => "--environment",
+            Arguments::ARGUMENT_ENVIRONMENT_SHORT => "-E",
         }
     }
 }
@@ -383,6 +394,8 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_CHECK, "--check"),
         (Arguments::ARGUMENT_NO_SECRETS, "--no-secrets"),
         (Arguments::ARGUMENT_PROFILE, "--profile"),
+        (Arguments::ARGUMENT_ENVIRONMENT, "--environment"),
+        (Arguments::ARGUMENT_ENVIRONMENT_SHORT, "-E"),
     ];
     let mut map: HashMap<String, Arguments> = HashMap::new();
     for (e, i) in inputs.iter() {
@@ -591,6 +604,8 @@ impl CliParser {
             config_path: None,
             profile: None,
             active_profile: None,
+            environment: None,
+            active_environment: None,
             automation_source: None,
         }
     }
@@ -717,6 +732,10 @@ impl CliParser {
                                     }
                                     Arguments::ARGUMENT_PROFILE => {
                                         self.store_profile(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_ENVIRONMENT
+                                    | Arguments::ARGUMENT_ENVIRONMENT_SHORT => {
+                                        self.store_environment(&args[arg_count])
                                     }
                                     Arguments::ARGUMENT_INVENTORY => {
                                         self.append_inventory(&args[arg_count])
@@ -1137,6 +1156,11 @@ impl CliParser {
         Ok(())
     }
 
+    fn store_environment(&mut self, value: &str) -> Result<(), String> {
+        self.environment = Some(value.to_string());
+        Ok(())
+    }
+
     fn increase_verbosity(&mut self, amount: u32) -> Result<(), String> {
         self.verbosity += amount;
         Ok(())
@@ -1215,9 +1239,32 @@ impl CliParser {
             }
         }
 
-        // Surface the resolved profile + automation.source for the summary.
-        // automation.source is informational only — not fetched.
+        // Environment resolution (precedence: CLI --environment >
+        // defaults.environment). Orthogonal to profile: an environment layers an
+        // env-scoped secrets overlay ON TOP of whatever profile/defaults selected
+        // — its `secrets_inventory` is appended (loaded last → later-wins). It
+        // affects secrets only, so `--no-secrets` skips the whole step (no error,
+        // no append); without `--no-secrets` an unknown environment is a clear
+        // error, since the operator asked for an overlay we can't find.
+        let environment_name = self.environment.clone().or(defaults.environment.clone());
+        // The environment affects secrets only, so `--no-secrets` skips the
+        // overlay entirely (folded into the Option to avoid a nested boolean
+        // `if`); an unknown environment is otherwise a clear error.
+        if let Some(name) = environment_name.as_ref().filter(|_| !self.no_secrets) {
+            let env = config
+                .environments
+                .as_ref()
+                .and_then(|e| e.get(name))
+                .ok_or_else(|| format!("environment '{}' not found in .jetpack.yml", name))?;
+            if let Some(secrets) = &env.secrets_inventory {
+                defaults.secrets_inventory.extend(secrets.iter().cloned());
+            }
+        }
+
+        // Surface the resolved profile/environment + automation.source for the
+        // summary. automation.source is informational only — not fetched.
         self.active_profile = profile_name;
+        self.active_environment = environment_name;
         self.automation_source = config.automation.as_ref().and_then(|a| a.source.clone());
 
         // Each of playbook/inventory/roles is filled ONLY when the CLI left it
@@ -1349,6 +1396,9 @@ impl CliParser {
         ];
         if let Some(profile) = &self.active_profile {
             rows.push((String::from("Profile"), profile.clone()));
+        }
+        if let Some(environment) = &self.active_environment {
+            rows.push((String::from("Environment"), environment.clone()));
         }
         rows.push((String::from("Roles"), join_paths(&self.role_paths)));
         if let Some(source) = &self.automation_source {
@@ -2696,6 +2746,7 @@ mod tests {
             "sec/default",
             "sec/perth",
             "sec/london",
+            "sec/envtest",
         ] {
             fs::create_dir_all(root.join(d)).unwrap();
         }
@@ -2718,6 +2769,14 @@ mod tests {
             .unwrap()
             .last()
             .map(|p| p.to_string_lossy().to_string())
+    }
+
+    fn has_segment(paths: &Arc<RwLock<Vec<PathBuf>>>, suffix: &str) -> bool {
+        paths
+            .read()
+            .unwrap()
+            .iter()
+            .any(|p| p.to_string_lossy().ends_with(suffix))
     }
 
     #[test]
@@ -2837,6 +2896,164 @@ profiles:
         assert!(
             parser.secrets_paths.read().unwrap().is_empty(),
             "secrets_inventory: [] clears the overlay"
+        );
+    }
+
+    #[test]
+    fn environment_appends_secrets_overlay_last() {
+        // The env overlay is appended after the base secrets (loaded last →
+        // later-wins), so both are present and the env one is last.
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+environments:
+  test:
+    secrets_inventory: [sec/envtest]
+";
+        let (parser, result) = parse_with_contract(contract, &["apply", "--environment", "test"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            has_segment(&parser.secrets_paths, "sec/default"),
+            "base secrets still present under an environment"
+        );
+        assert!(
+            last_segment(&parser.secrets_paths)
+                .unwrap()
+                .ends_with("sec/envtest"),
+            "environment overlay appended last (later-wins)"
+        );
+        assert_eq!(parser.active_environment.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn environment_short_alias_works() {
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+environments:
+  test:
+    secrets_inventory: [sec/envtest]
+";
+        let (parser, result) = parse_with_contract(contract, &["apply", "-E", "test"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.secrets_paths)
+                .unwrap()
+                .ends_with("sec/envtest"),
+            "-E selects the environment like --environment"
+        );
+    }
+
+    #[test]
+    fn defaults_environment_used_when_no_flag() {
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+  environment: test
+environments:
+  test:
+    secrets_inventory: [sec/envtest]
+";
+        let (parser, result) = parse_with_contract(contract, &["apply"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.secrets_paths)
+                .unwrap()
+                .ends_with("sec/envtest"),
+            "defaults.environment activates the overlay without --environment"
+        );
+    }
+
+    #[test]
+    fn environment_orthogonal_to_profile() {
+        // --profile selects inventory+secrets; --environment layers its overlay
+        // on top. Both the profile's secrets and the env overlay load.
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+profiles:
+  london:
+    inventory: [inv/london]
+    secrets_inventory: [sec/london]
+environments:
+  test:
+    secrets_inventory: [sec/envtest]
+";
+        let (parser, result) = parse_with_contract(
+            contract,
+            &["apply", "--profile", "london", "--environment", "test"],
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            last_segment(&parser.inventory_paths)
+                .unwrap()
+                .ends_with("inv/london"),
+            "profile still drives inventory"
+        );
+        assert!(
+            has_segment(&parser.secrets_paths, "sec/london"),
+            "profile secrets present"
+        );
+        assert!(
+            last_segment(&parser.secrets_paths)
+                .unwrap()
+                .ends_with("sec/envtest"),
+            "environment overlay layered on top of the profile secrets"
+        );
+    }
+
+    #[test]
+    fn unknown_environment_errors_clearly() {
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+environments:
+  test:
+    secrets_inventory: [sec/envtest]
+";
+        let (_parser, result) = parse_with_contract(contract, &["apply", "--environment", "bogus"]);
+        let err = result.unwrap_err();
+        assert!(err.contains("environment 'bogus'"), "{err}");
+        assert!(err.contains("not found"), "{err}");
+    }
+
+    #[test]
+    fn no_secrets_skips_the_environment_overlay() {
+        // --no-secrets skips the entire secrets machinery, including the env
+        // overlay — so an environment that would append is a no-op (and an
+        // unknown environment under --no-secrets does not error).
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+  secrets_inventory: [sec/default]
+environments:
+  test:
+    secrets_inventory: [sec/envtest]
+";
+        let (parser, result) = parse_with_contract(
+            contract,
+            &["apply", "--environment", "test", "--no-secrets"],
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            parser.secrets_paths.read().unwrap().is_empty(),
+            "--no-secrets skips the environment overlay too"
         );
     }
 
