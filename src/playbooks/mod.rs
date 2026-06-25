@@ -20,6 +20,7 @@ pub mod barrier;
 pub mod context;
 pub mod language;
 pub mod ref_collector;
+pub mod role_tree;
 pub mod t_helpers;
 pub mod task_fsm;
 pub mod templar;

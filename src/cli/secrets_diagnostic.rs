@@ -41,7 +41,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::inventory::hosts::Host;
 use crate::inventory::inventory::Inventory;
-use crate::playbooks::ref_collector::{PerPlayVars, collect_per_play};
+use crate::playbooks::ref_collector::collect_per_play;
 
 // Builtins injected at render time (per host / per sudo template), which are NOT
 // in `extra_vars` (that only carries the control-node `JET_*` vars). Always

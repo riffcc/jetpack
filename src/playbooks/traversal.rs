@@ -21,7 +21,10 @@ use crate::playbooks::async_exec::AsyncExecutionContext;
 use crate::playbooks::async_ui::{AsyncUi, HostEvent, TaskDisplayStatus};
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::language::Play;
-use crate::playbooks::language::{InstantiateSpec, Role, RoleInvocation};
+use crate::playbooks::language::{InstantiateSpec, RoleInvocation};
+use crate::playbooks::role_tree::{
+    RoleSection, RoleWalkState, resolve_role_file, resolve_template_src, walk_role_tree,
+};
 use crate::playbooks::task_fsm::{async_run_single_task, fsm_run_task};
 use crate::playbooks::templar::TemplateMode;
 use crate::playbooks::visitor::PlaybookVisitor;
@@ -77,6 +80,49 @@ pub struct RunState {
     pub role_processing_stack: Arc<RwLock<Vec<String>>>,
     // Files fetched by !fetch tasks (remote_path → bytes)
     pub fetched_files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+}
+
+// RunState backs the shared role walk with its existing per-section "processed"
+// sets and cycle stack, so `walk_role_tree` drives execution exactly as the old
+// hand-written `process_role` walk did.
+impl RoleWalkState for RunState {
+    fn is_processed(&self, role: &str, section: RoleSection) -> bool {
+        let set = match section {
+            RoleSection::Tasks => self.processed_role_tasks.read().unwrap(),
+            RoleSection::Handlers => self.processed_role_handlers.read().unwrap(),
+        };
+        set.contains(role)
+    }
+
+    fn mark_processed(&self, role: &str, section: RoleSection) {
+        let mut set = match section {
+            RoleSection::Tasks => self.processed_role_tasks.write().unwrap(),
+            RoleSection::Handlers => self.processed_role_handlers.write().unwrap(),
+        };
+        set.insert(role.to_string());
+    }
+
+    fn in_stack(&self, role: &str) -> bool {
+        self.role_processing_stack
+            .read()
+            .unwrap()
+            .contains(&role.to_string())
+    }
+
+    fn push_stack(&self, role: &str) {
+        self.role_processing_stack
+            .write()
+            .unwrap()
+            .push(role.to_string());
+    }
+
+    fn pop_stack(&self) {
+        self.role_processing_stack.write().unwrap().pop();
+    }
+
+    fn stack_snapshot(&self) -> Vec<String> {
+        self.role_processing_stack.read().unwrap().clone()
+    }
 }
 
 // this is the top end traversal function that is called from cli/playbooks.rs
@@ -394,11 +440,7 @@ fn syntax_validate_task(task: &Task) -> Result<(), String> {
     if let Task::Template(template_task) = task {
         let cwd =
             env::current_dir().map_err(|e| format!("could not determine role directory: {}", e))?;
-        let candidates = [
-            cwd.join(&template_task.src),
-            cwd.join("templates").join(&template_task.src),
-        ];
-        let src_path = candidates.iter().find(|p| p.is_file()).ok_or_else(|| {
+        let src_path = resolve_template_src(&cwd, &template_task.src).ok_or_else(|| {
             format!(
                 "template source '{}' not found in role root or templates/",
                 template_task.src
@@ -1029,173 +1071,93 @@ fn process_role(
     invocation: &RoleInvocation,
     are_handlers: HandlerMode,
 ) -> Result<(), String> {
-    // traversal code for roles.  This is called twice, once for normal tasks and again when processing handler tasks.
-
-    // we traverse roles by seeing the 'invocation' in the playbook, which is different from the definition.
-    // the definition involves all of the role files in the role directory
-    let role_name = invocation.role.clone();
-
-    // check if this role has already been processed (via dependency resolution)
-    {
-        let processed = match are_handlers {
-            HandlerMode::NormalTasks => run_state.processed_role_tasks.read().unwrap(),
-            HandlerMode::Handlers => run_state.processed_role_handlers.read().unwrap(),
-        };
-        if processed.contains(&role_name) {
-            return Ok(());
-        }
-    }
-
-    // check for circular dependencies
-    {
-        let stack = run_state.role_processing_stack.read().unwrap();
-        if stack.contains(&role_name) {
-            let cycle: Vec<String> = stack.iter().cloned().collect();
-            return Err(format!(
-                "circular role dependency detected: {} -> {}",
-                cycle.join(" -> "),
-                role_name
-            ));
-        }
-    }
-
-    // add to processing stack for cycle detection
-    run_state
-        .role_processing_stack
-        .write()
-        .unwrap()
-        .push(role_name.clone());
-
-    // can we find a role directory in the configured role paths?
-    let (role, role_path) = find_role(run_state, play, role_name.clone())?;
-
-    // process dependencies first
-    if let Some(dependencies) = role.dependencies.as_ref() {
-        for dep_name in dependencies.iter() {
-            // create a synthetic invocation for the dependency
-            let dep_invocation = RoleInvocation {
-                role: dep_name.clone(),
-                vars: None,
-                tags: invocation.tags.clone(),
-            };
-            process_role(run_state, play, &dep_invocation, are_handlers)?;
-        }
-    }
-
-    // remove from processing stack (we're done checking for cycles for this role)
-    run_state.role_processing_stack.write().unwrap().pop();
-    {
-        // we're good.
-        let mut ctx = run_state.context.write().unwrap();
-        let str_path = directory_as_string(&role_path);
-        ctx.set_role(&role, invocation, &str_path);
-        if are_handlers == HandlerMode::NormalTasks {
-            ctx.increment_role_count();
-        }
-    }
-    run_state
-        .visitor
-        .read()
-        .unwrap()
-        .on_role_start(&run_state.context);
-
-    // roles contain two list of files to include, which one we're processing now
-    // depends on whether we are in handler mode or not
-
-    let files = match are_handlers {
-        HandlerMode::NormalTasks => role.tasks,
-        HandlerMode::Handlers => role.handlers,
+    // Roles are walked twice — once for normal tasks, again for handlers. The
+    // walk shape (resolution, deps-first ordering, cycle detection, per-section
+    // dedup) is shared with static analysis via `walk_role_tree`; this function
+    // supplies only the execution action per resolved role.
+    let section = match are_handlers {
+        HandlerMode::NormalTasks => RoleSection::Tasks,
+        HandlerMode::Handlers => RoleSection::Handlers,
     };
-
-    // the file sections are optional...
-
-    if let Some(files) = files {
-        // prepare to chdir into the role, this makes operating on template and file paths easier
-
-        let p1 = env::current_dir().expect("could not get current directory");
-        let previous = p1.as_path();
-        match env::set_current_dir(&role_path) {
-            Ok(_) => {}
-            Err(s) => {
-                return Err(format!(
-                    "could not chdir into role directory {:?}, {}",
-                    role_path, s
-                ));
+    let role_paths = run_state.role_paths.read().unwrap().clone();
+    walk_role_tree(
+        &**run_state,
+        &role_paths,
+        invocation,
+        section,
+        |inv, role_path, role| {
+            // set per-role context and notify the visitor
+            {
+                let mut ctx = run_state.context.write().unwrap();
+                let str_path = directory_as_string(role_path);
+                ctx.set_role(role, inv, &str_path);
+                if are_handlers == HandlerMode::NormalTasks {
+                    ctx.increment_role_count();
+                }
             }
-        }
+            run_state
+                .visitor
+                .read()
+                .unwrap()
+                .on_role_start(&run_state.context);
 
-        // for each task file path that is mentioned
+            // which file section we process depends on whether we are in handler mode
+            let files = match are_handlers {
+                HandlerMode::NormalTasks => role.tasks.as_ref(),
+                HandlerMode::Handlers => role.handlers.as_ref(),
+            };
 
-        for task_file in files.iter() {
-            // find the likely path location, which is organized into subdirectories for relative paths
+            if let Some(files) = files {
+                // chdir into the role so template and file paths resolve easily
+                let p1 = env::current_dir().expect("could not get current directory");
+                let previous = p1.as_path();
+                match env::set_current_dir(role_path) {
+                    Ok(_) => {}
+                    Err(s) => {
+                        return Err(format!(
+                            "could not chdir into role directory {:?}, {}",
+                            role_path, s
+                        ));
+                    }
+                }
 
-            let task_buf = match task_file.starts_with("/") {
-                true => Path::new(task_file).to_path_buf(),
-                false => {
-                    let mut pb = PathBuf::new();
-                    pb.push(role_path.clone());
-                    match are_handlers {
-                        HandlerMode::NormalTasks => {
-                            pb.push("tasks");
-                        }
-                        HandlerMode::Handlers => {
-                            pb.push("handlers");
+                for task_file in files.iter() {
+                    let task_buf = resolve_role_file(role_path, task_file, section);
+                    let task_fh = jet_file_open(task_buf.as_path())?;
+                    let parsed: Result<Vec<Task>, serde_yaml::Error> =
+                        serde_yaml::from_reader(task_fh);
+                    let tasks = match parsed {
+                        Ok(tasks) => tasks,
+                        Err(e) => {
+                            show_yaml_error_in_context(&e, task_buf.as_path());
+                            return Err("edit the file and try again?".to_string());
                         }
                     };
-                    pb.push(task_file);
-                    pb
+                    for task in tasks.iter() {
+                        // process_task is the same function used for loose tasks
+                        process_task(run_state, play, task, are_handlers, Some(inv))?;
+                    }
                 }
-            };
 
-            // parse the YAML file
-
-            let task_fh = jet_file_open(task_buf.as_path())?;
-            let parsed: Result<Vec<Task>, serde_yaml::Error> = serde_yaml::from_reader(task_fh);
-            let tasks = match parsed {
-                Ok(tasks) => tasks,
-                Err(e) => {
-                    show_yaml_error_in_context(&e, task_buf.as_path());
-                    return Err("edit the file and try again?".to_string());
+                match env::set_current_dir(previous) {
+                    Ok(_) => {}
+                    Err(s) => {
+                        return Err(format!(
+                            "could not restore previous directory after role evaluation: {:?}, {}",
+                            previous, s
+                        ));
+                    }
                 }
-            };
-            for task in tasks.iter() {
-                // process all tasks in the YAML file, this is the same function used
-                // for processing loose tasks outside of roles
-
-                process_task(run_state, play, task, are_handlers, Some(invocation))?;
             }
-        }
 
-        // we're done with the role so flip back to the previous directory
-
-        match env::set_current_dir(previous) {
-            Ok(_) => {}
-            Err(s) => {
-                return Err(format!(
-                    "could not restore previous directory after role evaluation: {:?}, {}",
-                    previous, s
-                ));
-            }
-        }
-    }
-
-    run_state
-        .visitor
-        .read()
-        .unwrap()
-        .on_role_stop(&run_state.context);
-
-    // mark role as processed so it won't run again if referenced as a dependency
-    {
-        let role_name = invocation.role.clone();
-        let mut processed = match are_handlers {
-            HandlerMode::NormalTasks => run_state.processed_role_tasks.write().unwrap(),
-            HandlerMode::Handlers => run_state.processed_role_handlers.write().unwrap(),
-        };
-        processed.insert(role_name);
-    }
-
-    Ok(())
+            run_state
+                .visitor
+                .read()
+                .unwrap()
+                .on_role_stop(&run_state.context);
+            Ok(())
+        },
+    )
 }
 
 // Factored types would require restructuring shared closures across the module
@@ -1847,55 +1809,6 @@ fn load_vars_into_context(run_state: &Arc<RunState>, play: &Play) -> Result<(), 
     }
 
     Ok(())
-}
-
-/// Resolve a role name to its parsed definition and root directory by searching
-/// the configured role paths. Pure resolution — no `RunState`, no side effects —
-/// so it can be reused by both traversal and the static diagnostic collector
-/// (`ref_collector`) without re-implementing (and drifting from) role lookup.
-pub(crate) fn resolve_role(
-    role_paths: &[PathBuf],
-    role_name: &str,
-) -> Result<(Role, PathBuf), String> {
-    // when we need to find a role we look for it in the configured role paths
-
-    for path_buf in role_paths.iter() {
-        let mut pb = path_buf.clone();
-        pb.push(role_name);
-        let mut pb2 = pb.clone();
-        pb2.push("role.yml");
-
-        // a role.yml file must exist in a directory once we find a directory with a matching
-        // name
-
-        if pb2.exists() {
-            let path = pb2.as_path();
-            let role_file = jet_file_open(path)?;
-
-            // deserialize the role file and make sure it is valid before returning
-
-            let parsed: Result<Role, serde_yaml::Error> = serde_yaml::from_reader(role_file);
-            let role = match parsed {
-                Ok(role) => role,
-                Err(e) => {
-                    show_yaml_error_in_context(&e, path);
-                    return Err("edit the file and try again?".to_string());
-                }
-            };
-
-            return Ok((role, pb));
-        }
-    }
-    Err(format!("role not found: {}", role_name))
-}
-
-fn find_role(
-    run_state: &Arc<RunState>,
-    _play: &Play,
-    role_name: String,
-) -> Result<(Role, PathBuf), String> {
-    let role_paths = run_state.role_paths.read().unwrap();
-    resolve_role(&role_paths, &role_name)
 }
 
 #[cfg(test)]

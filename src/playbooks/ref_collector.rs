@@ -14,35 +14,26 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Read-only walk of a playbook (and the roles it pulls in) that collects, per
-//! play, the variables the missing-secrets diagnostic needs:
+//! Per-play variable collection for the missing-secrets diagnostic — what each
+//! play references, defines, and targets — using the **same role walk as
+//! execution** (`role_tree::walk_role_tree`), so the two can never diverge.
 //!
-//! - **referenced** — variables the play references, inline in task fields or in
-//!   `!template` source files;
-//! - **defined** — variables the play itself defines (play `vars`/`defaults`,
-//!   role `defaults`, role-invocation `vars`, `vars_files`);
-//! - **groups** — the raw `play.groups` entries, so the diagnostic can resolve
-//!   the play's targeted hosts.
-//!
-//! The diagnostic applies the exact per-play scope formula
-//! `R(p) \ ( D(p) ∪ G ∪ B ∪ ⋂_{h ∈ H(p)} I(h) )` — proven equivalent to the
-//! per-(play, host) semantics in `secrets_diagnostic` (Lean: `missing_per_play_exact`).
-//! Keeping the data per-play (rather than a run-wide union) is what makes the
-//! diagnostic exact instead of over- or under-reporting.
-//!
-//! The walk mirrors `traversal`'s role/task/template resolution (reusing
-//! [`resolve_role`]) with no `chdir` and no execution — paths are joined
-//! explicitly. Each task file is parsed twice: once as a generic YAML value (so
-//! inline templated fields of *any* task type are walked uniformly), and once as
-//! typed tasks (to follow `!template` `src` files at their known field).
+//! Each task file is parsed twice: once as a generic YAML value (so inline
+//! templated fields of *any* task type are walked uniformly) and once as typed
+//! tasks (to follow `!template` `src` files). Variable extraction itself is the
+//! one operation the engine does not do — it discards the raw value and renders
+//! per host — so that part stays here.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::playbooks::language::Play;
+use crate::playbooks::role_tree::{
+    RoleSection, RoleWalkState, resolve_role_file, resolve_template_src, walk_role_tree,
+};
 use crate::playbooks::template_refs::{referenced_variables, referenced_variables_in_value};
-use crate::playbooks::traversal::resolve_role;
 use crate::registry::list::Task;
 
 /// Per-play collected variables: what a single play references, what it defines,
@@ -60,13 +51,10 @@ pub struct PerPlayVars {
     pub defined: BTreeSet<String>,
 }
 
-/// Walk the given playbooks (and the roles they pull in, dependencies resolved
-/// recursively) and collect each play's referenced and defined variables.
-///
-/// Pure: reads files, changes nothing. A genuinely broken playbook (missing
-/// role, unreadable file, circular role dependency) yields an `Err` matching
-/// what a real run would hit; the caller decides whether to tolerate it for a
-/// best-effort diagnostic.
+/// Walk the given playbooks (and the roles they pull in) and collect each play's
+/// referenced and defined variables. Pure: reads files, changes nothing. A
+/// genuinely broken playbook (missing role, unreadable file, circular role
+/// dependency) yields an `Err` matching what a real run would hit.
 pub fn collect_per_play(
     playbook_paths: &[PathBuf],
     role_paths: &[PathBuf],
@@ -132,30 +120,48 @@ fn collect_from_playbook(
         }
         if let Some(vars_files) = play.vars_files.as_ref() {
             for file in vars_files.iter() {
-                collect_defined_from_vars_file(playbook_dir, file, &mut acc);
+                collect_defined_from_vars_file(playbook_dir, file, &mut acc.defined);
             }
         }
 
         // Loose tasks and handlers: follow any `!template` source files.
-        follow_template_tasks(play.tasks.as_ref(), playbook_dir, &mut acc);
-        follow_template_tasks(play.handlers.as_ref(), playbook_dir, &mut acc);
+        follow_template_tasks(play.tasks.as_ref(), playbook_dir, &mut acc.referenced);
+        follow_template_tasks(play.handlers.as_ref(), playbook_dir, &mut acc.referenced);
 
-        // Roles: walk each one's task/handler files (and their templates),
-        // resolving dependencies recursively with cycle detection.
+        // Roles: walk with the SAME traversal the engine uses (deps-first,
+        // cycle-detect, per-section dedup), collecting references + role-defined
+        // defaults from each task/handler file.
         if let Some(roles) = play.roles.as_ref() {
-            let mut seen: HashSet<String> = HashSet::new();
-            let mut stack: Vec<String> = Vec::new();
+            let state = CollectorWalkState::default();
             for invocation in roles.iter() {
                 if let Some(vars) = invocation.vars.as_ref() {
                     acc.defined.extend(mapping_keys(vars));
                 }
-                collect_from_role(
-                    &invocation.role,
-                    role_paths,
-                    &mut seen,
-                    &mut stack,
-                    &mut acc,
-                )?;
+                for section in [RoleSection::Tasks, RoleSection::Handlers] {
+                    let acc_ref = &mut acc;
+                    walk_role_tree(
+                        &state,
+                        role_paths,
+                        invocation,
+                        section,
+                        |_inv, role_root, role| {
+                            if let Some(defaults) = role.defaults.as_ref() {
+                                acc_ref.defined.extend(mapping_keys(defaults));
+                            }
+                            let files = match section {
+                                RoleSection::Tasks => role.tasks.as_ref(),
+                                RoleSection::Handlers => role.handlers.as_ref(),
+                            };
+                            if let Some(files) = files {
+                                for file in files.iter() {
+                                    let path = resolve_role_file(role_root, file, section);
+                                    collect_from_task_file(&path, role_root, acc_ref);
+                                }
+                            }
+                            Ok(())
+                        },
+                    )?;
+                }
             }
         }
 
@@ -164,85 +170,17 @@ fn collect_from_playbook(
     Ok(())
 }
 
-fn collect_from_role(
-    role_name: &str,
-    role_paths: &[PathBuf],
-    seen: &mut HashSet<String>,
-    stack: &mut Vec<String>,
-    acc: &mut PerPlayVars,
-) -> Result<(), String> {
-    // A role already on the current chain is a cycle (check before the dedup, so
-    // a cycle is never masked by a partial visit — mirroring `process_role`).
-    if stack.iter().any(|r| r == role_name) {
-        let cycle: Vec<String> = stack
-            .iter()
-            .cloned()
-            .chain([role_name.to_string()])
-            .collect();
-        return Err(format!(
-            "circular role dependency detected: {}",
-            cycle.join(" -> ")
-        ));
-    }
-    // A role already fully processed can be skipped.
-    if seen.contains(role_name) {
-        return Ok(());
-    }
-    stack.push(role_name.to_string());
-
-    let (role, role_path) = resolve_role(role_paths, role_name)?;
-    if let Some(defaults) = role.defaults.as_ref() {
-        acc.defined.extend(mapping_keys(defaults));
-    }
-
-    // Dependencies first, mirroring traversal.
-    if let Some(deps) = role.dependencies.as_ref() {
-        for dep in deps.iter() {
-            collect_from_role(dep, role_paths, seen, stack, acc)?;
-        }
-    }
-
-    // Walk both task and handler files; templates under either can reference
-    // variables the secrets overlay would supply.
-    if let Some(files) = role.tasks.as_ref() {
-        for file in files.iter() {
-            let path = resolve_role_file(&role_path, file, "tasks");
-            collect_from_task_file(&path, &role_path, acc)?;
-        }
-    }
-    if let Some(files) = role.handlers.as_ref() {
-        for file in files.iter() {
-            let path = resolve_role_file(&role_path, file, "handlers");
-            collect_from_task_file(&path, &role_path, acc)?;
-        }
-    }
-
-    stack.pop();
-    seen.insert(role_name.to_string());
-    Ok(())
-}
-
-fn collect_from_task_file(
-    path: &Path,
-    role_root: &Path,
-    acc: &mut PerPlayVars,
-) -> Result<(), String> {
-    let source = match fs::read_to_string(path) {
-        Ok(s) => s,
-        // A referenced task file that is absent is a real playbook error, but it
-        // is not what this diagnostic is about — skip it and keep collecting.
-        Err(_) => return Ok(()),
+// Collect references from one task/handler file: inline templated fields (via a
+// generic value walk) plus any `!template` source files it references.
+fn collect_from_task_file(path: &Path, role_root: &Path, acc: &mut PerPlayVars) {
+    let Ok(source) = fs::read_to_string(path) else {
+        return; // an absent referenced file is a different error than this diagnostic
     };
-
-    // Inline references across the whole task file (any task type's fields).
     if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&source) {
         acc.referenced.extend(referenced_variables_in_value(&value));
     }
-
-    // `!template` source files: read and extract their references too.
-    let tasks: Vec<Task> = match serde_yaml::from_str(&source) {
-        Ok(tasks) => tasks,
-        Err(_) => return Ok(()),
+    let Ok(tasks) = serde_yaml::from_str::<Vec<Task>>(&source) else {
+        return;
     };
     for task in tasks {
         if let Task::Template(template_task) = task {
@@ -250,13 +188,41 @@ fn collect_from_task_file(
                 .extend(template_file_refs(role_root, &template_task.src));
         }
     }
-    Ok(())
+}
+
+// Follow `!template` source files in a list of typed tasks (loose play tasks /
+// handlers), resolving `src` against the playbook directory.
+fn follow_template_tasks(
+    tasks: Option<&Vec<Task>>,
+    root: &Path,
+    referenced: &mut BTreeSet<String>,
+) {
+    if let Some(tasks) = tasks {
+        for task in tasks {
+            if let Task::Template(template_task) = task {
+                referenced.extend(template_file_refs(root, &template_task.src));
+            }
+        }
+    }
+}
+
+// Variables referenced inside a `!template` source file. Resolution, read, and
+// extraction failures all collapse to an empty set — a missing or malformed
+// template is a different error than the one this diagnostic reports.
+fn template_file_refs(root: &Path, src: &str) -> BTreeSet<String> {
+    let Some(path) = resolve_template_src(root, src) else {
+        return BTreeSet::new();
+    };
+    let Ok(content) = fs::read_to_string(&path) else {
+        return BTreeSet::new();
+    };
+    referenced_variables(&content).unwrap_or_default()
 }
 
 // Add a vars_file's top-level keys to the `defined` set. Relative paths resolve
 // against the playbook directory (as traversal does); unreadable or unparseable
 // files are skipped — not what this diagnostic reports.
-fn collect_defined_from_vars_file(playbook_dir: &Path, file: &str, acc: &mut PerPlayVars) {
+fn collect_defined_from_vars_file(playbook_dir: &Path, file: &str, defined: &mut BTreeSet<String>) {
     let path = Path::new(file);
     let resolved = if path.is_absolute() {
         path.to_path_buf()
@@ -270,58 +236,7 @@ fn collect_defined_from_vars_file(playbook_dir: &Path, file: &str, acc: &mut Per
         return;
     };
     if let serde_yaml::Value::Mapping(map) = value {
-        acc.defined.extend(mapping_keys(&map));
-    }
-}
-
-// Absolute task/handler filenames are used as-is; relative ones live under the
-// role's `tasks/` or `handlers/` subdir (exactly as `process_role` resolves).
-fn resolve_role_file(role_root: &Path, file: &str, subdir: &str) -> PathBuf {
-    let p = Path::new(file);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        role_root.join(subdir).join(file)
-    }
-}
-
-// `!template` `src` resolves against the role/playbook root, or its `templates/`
-// subdir — the same two candidates `syntax_validate_task` checks.
-fn resolve_template_src(root: &Path, src: &str) -> Option<PathBuf> {
-    let p = Path::new(src);
-    if p.is_absolute() {
-        return p.is_file().then(|| p.to_path_buf());
-    }
-    [root.join(src), root.join("templates").join(src)]
-        .into_iter()
-        .find(|c| c.is_file())
-}
-
-// Variables referenced inside a `!template` source file. Resolution, read, and
-// extraction failures all collapse to an empty set — a missing or malformed
-// template is a different error than the one this diagnostic reports.
-fn template_file_refs(root: &Path, src: &str) -> BTreeSet<String> {
-    let path = match resolve_template_src(root, src) {
-        Some(p) => p,
-        None => return BTreeSet::new(),
-    };
-    let content = match fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return BTreeSet::new(),
-    };
-    referenced_variables(&content).unwrap_or_default()
-}
-
-// Follow `!template` source files in a list of typed tasks (loose play tasks /
-// handlers), resolving `src` against the playbook directory.
-fn follow_template_tasks(tasks: Option<&Vec<Task>>, root: &Path, acc: &mut PerPlayVars) {
-    if let Some(tasks) = tasks {
-        for task in tasks {
-            if let Task::Template(template_task) = task {
-                acc.referenced
-                    .extend(template_file_refs(root, &template_task.src));
-            }
-        }
+        defined.extend(mapping_keys(&map));
     }
 }
 
@@ -330,6 +245,49 @@ fn mapping_keys(mapping: &serde_yaml::Mapping) -> impl Iterator<Item = String> +
     mapping
         .keys()
         .filter_map(|k| k.as_str().map(|s| s.to_string()))
+}
+
+// Local walk state for static analysis — mirrors the per-section dedup and cycle
+// stack `RunState` provides to execution, so both drive `walk_role_tree` with
+// identical semantics.
+#[derive(Default)]
+struct CollectorWalkState {
+    processed_tasks: RefCell<HashSet<String>>,
+    processed_handlers: RefCell<HashSet<String>>,
+    stack: RefCell<Vec<String>>,
+}
+
+impl RoleWalkState for CollectorWalkState {
+    fn is_processed(&self, role: &str, section: RoleSection) -> bool {
+        match section {
+            RoleSection::Tasks => self.processed_tasks.borrow().contains(role),
+            RoleSection::Handlers => self.processed_handlers.borrow().contains(role),
+        }
+    }
+
+    fn mark_processed(&self, role: &str, section: RoleSection) {
+        let set = match section {
+            RoleSection::Tasks => &self.processed_tasks,
+            RoleSection::Handlers => &self.processed_handlers,
+        };
+        set.borrow_mut().insert(role.to_string());
+    }
+
+    fn in_stack(&self, role: &str) -> bool {
+        self.stack.borrow().iter().any(|r| r == role)
+    }
+
+    fn push_stack(&self, role: &str) {
+        self.stack.borrow_mut().push(role.to_string());
+    }
+
+    fn pop_stack(&self) {
+        self.stack.borrow_mut().pop();
+    }
+
+    fn stack_snapshot(&self) -> Vec<String> {
+        self.stack.borrow().clone()
+    }
 }
 
 #[cfg(test)]
