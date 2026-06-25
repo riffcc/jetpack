@@ -2160,3 +2160,182 @@ mod target_groups_tests {
         assert_eq!(names, vec!["webservers-host".to_string()]);
     }
 }
+
+#[cfg(test)]
+mod env_axis_groups_composition_tests {
+    //! End-to-end composition of the **environment axis** (#60) with templated
+    //! `play.groups` (#52). An environment's `secrets_inventory` overlay is
+    //! loaded last → later-wins, so a var it pins (e.g. `target`) lands in
+    //! `group_vars/all`, exactly where `resolve_target_groups` reads it to
+    //! template the targeted group. One playbook then fans out to the
+    //! environment-specific cluster with no per-env playbook duplication.
+    //!
+    //! This stitches the real layers the runtime chains — `load_inventory` →
+    //! `resolve_target_groups` → `get_play_hosts` — with no mocks and no
+    //! injected context vars. The load list is exactly the shape
+    //! `CliParser::inventory_load_paths()` yields once the selected environment
+    //! appends its overlay (main inventory first, env secrets last). The
+    //! `--environment` flag → append step is covered by the parser's own unit
+    //! tests; this module owns the previously-untested seam between them: that a
+    //! var arriving via a loaded overlay is visible to templating.
+    use super::*;
+    use crate::cli::parser::CliParser;
+    use crate::connection::no::NoFactory;
+    use crate::inventory::inventory::Inventory;
+    use crate::inventory::loading::load_inventory;
+    use crate::playbooks::context::PlaybookContext;
+    use crate::playbooks::visitor::{CheckMode, PlaybookVisitor};
+    use std::collections::{HashMap, HashSet};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
+
+    /// Write a topology group `name` (with `members`) under `<dir>/groups/`.
+    fn write_group(dir: &Path, name: &str, members: &[&str]) {
+        let groups = dir.join("groups");
+        fs::create_dir_all(&groups).unwrap();
+        let mut body = String::from("hosts:\n");
+        for m in members {
+            body.push_str(&format!("  - {}\n", m));
+        }
+        fs::write(groups.join(name), body).unwrap();
+    }
+
+    /// Write a vars-only overlay (the `secrets_inventory` shape — no `groups/`
+    /// dir) carrying `group_vars/all`. This is what an environment overlay path
+    /// looks like on disk.
+    fn write_all_vars_overlay(dir: &Path, all_yaml: &str) {
+        let gv = dir.join("group_vars");
+        fs::create_dir_all(&gv).unwrap();
+        fs::write(gv.join("all"), all_yaml).unwrap();
+    }
+
+    /// Minimal `Play` targeting the given (possibly templated) groups.
+    fn play_with_groups(name: &str, groups: &[&str]) -> Play {
+        Play {
+            name: name.to_string(),
+            groups: groups.iter().map(|g| g.to_string()).collect(),
+            roles: None,
+            defaults: None,
+            vars: None,
+            vars_files: None,
+            sudo: None,
+            sudo_template: None,
+            ssh_user: None,
+            ssh_port: None,
+            tasks: None,
+            handlers: None,
+            batch_size: None,
+            instantiate: None,
+        }
+    }
+
+    /// Build a `RunState` around an already-loaded inventory. No vars are
+    /// injected into the context — the templated group name must come from the
+    /// inventory's merged `group_vars/all` (populated by the loaded environment
+    /// overlay), not from play/CLI vars. That isolates the overlay as the sole
+    /// var source, so the test's causality is unambiguous.
+    fn run_state_with_inventory(inventory: Arc<RwLock<Inventory>>) -> Arc<RunState> {
+        let mut parser = CliParser::new();
+        parser.extra_vars = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+        let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
+        {
+            let mut ctx = context.write().unwrap();
+            *ctx.vars_storage.write().unwrap() = serde_yaml::Mapping::new();
+            ctx.play_index = 0;
+        }
+        Arc::new(RunState {
+            inventory,
+            playbook_paths: Arc::new(RwLock::new(Vec::new())),
+            role_paths: Arc::new(RwLock::new(Vec::new())),
+            module_paths: Arc::new(RwLock::new(Vec::new())),
+            limit_hosts: Vec::new(),
+            limit_groups: Vec::new(),
+            batch_size: None,
+            context,
+            visitor: Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No))),
+            connection_factory: Arc::new(RwLock::new(NoFactory::new())),
+            tags: None,
+            allow_localhost_delegation: false,
+            is_pull_mode: false,
+            syntax_mode: false,
+            play_groups: None,
+            output_handler: None,
+            async_mode: false,
+            playbook_contents: Vec::new(),
+            processed_role_tasks: Arc::new(RwLock::new(HashSet::new())),
+            processed_role_handlers: Arc::new(RwLock::new(HashSet::new())),
+            role_processing_stack: Arc::new(RwLock::new(Vec::new())),
+            fetched_files: Arc::new(Mutex::new(HashMap::new())),
+        })
+    }
+
+    #[test]
+    fn environment_overlay_supplies_templated_group_var() {
+        // On-disk world: one site inventory carrying both clusters' topology,
+        // plus a vars-only environment overlay pinning which cluster this run
+        // targets. Loaded exactly as the runtime would once `--environment test`
+        // appends the overlay: main first, env overlay last (later-wins).
+        let root = TempDir::new().unwrap();
+        let main = root.path().join("inv");
+        write_group(&main, "webservers", &["web1"]);
+        write_group(&main, "test-webservers", &["testweb1"]);
+        let overlay = root.path().join("sec-env");
+        write_all_vars_overlay(&overlay, "target: test-webservers\n");
+
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        let load_list: Arc<RwLock<Vec<PathBuf>>> =
+            Arc::new(RwLock::new(vec![main.clone(), overlay.clone()]));
+        load_inventory(&inventory, load_list).expect("main + env overlay load");
+
+        // The environment overlay's var reached group_vars/all (later-wins merge).
+        let all_vars = inventory
+            .read()
+            .unwrap()
+            .get_group("all")
+            .read()
+            .unwrap()
+            .get_variables();
+        assert_eq!(all_vars["target"], "test-webservers");
+
+        // Templated play.groups resolves the env-supplied name → the
+        // environment-specific cluster → correct host fan-out.
+        let rs = run_state_with_inventory(inventory);
+        let play = play_with_groups("k3s", &["{{ target }}"]);
+        let groups = resolve_target_groups(&rs, &play)
+            .expect("env-overlay var resolves the templated group");
+        assert_eq!(groups, vec!["test-webservers".to_string()]);
+
+        let hosts = get_play_hosts(&rs, &groups);
+        let names: Vec<String> = hosts
+            .iter()
+            .map(|h| h.read().unwrap().name.clone())
+            .collect();
+        assert_eq!(names, vec!["testweb1".to_string()]);
+    }
+
+    #[test]
+    fn templated_group_fails_without_the_environment_overlay() {
+        // Causality check: with NO environment overlay in the load list, `target`
+        // is undefined and Strict templating must reject it with a clear error —
+        // proving the var above genuinely came from the overlay, not elsewhere.
+        let root = TempDir::new().unwrap();
+        let main = root.path().join("inv");
+        write_group(&main, "webservers", &["web1"]);
+        write_group(&main, "test-webservers", &["testweb1"]);
+
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        load_inventory(
+            &inventory,
+            Arc::new(RwLock::new(vec![main.clone()])),
+        )
+        .expect("main inventory alone loads");
+
+        let rs = run_state_with_inventory(inventory);
+        let play = play_with_groups("k3s", &["{{ target }}"]);
+        let err = resolve_target_groups(&rs, &play)
+            .expect_err("undefined var without the overlay must error");
+        assert!(err.contains("k3s"), "error names the play: {}", err);
+        assert!(err.contains("target"), "error names the token: {}", err);
+    }
+}
