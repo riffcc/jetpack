@@ -17,7 +17,7 @@
 use jetpack::cli::docs::docs;
 use jetpack::cli::gen_reference::gen_reference;
 use jetpack::cli::install::install;
-use jetpack::cli::parser::CliParser;
+use jetpack::cli::parser::{CliParser, is_execution_mode};
 use jetpack::cli::playbooks::{
     full_check, inventory_check, playbook_check_local, playbook_check_ssh, playbook_local,
     playbook_pull, playbook_simulate, playbook_ssh, playbook_syntax_check,
@@ -26,6 +26,7 @@ use jetpack::cli::show::{show_inventory_group, show_inventory_host};
 use jetpack::inventory::inventory::Inventory;
 use jetpack::inventory::loading::load_inventory;
 use jetpack::util::io::quit;
+use jetpack::util::terminal::two_column_table;
 use std::process;
 use std::sync::{Arc, RwLock};
 
@@ -47,6 +48,15 @@ fn liftoff() -> Result<(), String> {
     if cli_parser.needs_version {
         cli_parser.show_version();
         return Ok(());
+    }
+
+    // The resolution summary is a verbose-only diagnostic: automation root,
+    // playbook, inventory, roles, and mode after CLI flags + the .jetpack
+    // contract + conventions have merged. It is informational, so it goes to
+    // stdout (never stderr) and only when the user asks for verbosity in a mode
+    // that actually resolves a playbook.
+    if cli_parser.verbosity > 0 && is_execution_mode(cli_parser.mode) {
+        two_column_table("field", "value", &cli_parser.resolution_summary());
     }
 
     let inventory: Arc<RwLock<Inventory>> = Arc::new(RwLock::new(Inventory::new()));

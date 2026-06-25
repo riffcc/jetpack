@@ -146,6 +146,44 @@ pub fn all_mode_names() -> &'static [&'static str] {
     ]
 }
 
+/// The inverse of [`cli_mode_from_string`]: the canonical name for a mode
+/// constant. Used by the resolution summary and any other user-facing display.
+/// Returns `"unset"` for an unrecognized value rather than panicking.
+pub fn cli_mode_name(mode: u32) -> &'static str {
+    match mode {
+        CLI_MODE_LOCAL => "local",
+        CLI_MODE_CHECK_LOCAL => "check-local",
+        CLI_MODE_SSH => "ssh",
+        CLI_MODE_CHECK_SSH => "check-ssh",
+        CLI_MODE_SIMULATE => "__simulate",
+        CLI_MODE_SHOW => "show-inventory",
+        CLI_MODE_PULL => "pull",
+        CLI_MODE_SYNTAX => "syntax-check",
+        CLI_MODE_INVENTORY_CHECK => "inventory-check",
+        CLI_MODE_FULL_CHECK => "full-check",
+        CLI_MODE_DOCS => "docs",
+        CLI_MODE_GEN_REFERENCE => "gen-reference",
+        CLI_MODE_INSTALL => "install",
+        _ => "unset",
+    }
+}
+
+/// Whether `mode` executes automation against hosts (the human-facing run modes).
+/// The resolution summary prints only for these, so validation/utility modes —
+/// whose stdout may be machine-consumed or where a summary is just noise — stay
+/// clean. Nothing informational is ever routed to stderr.
+pub fn is_execution_mode(mode: u32) -> bool {
+    matches!(
+        mode,
+        CLI_MODE_SSH
+            | CLI_MODE_CHECK_SSH
+            | CLI_MODE_LOCAL
+            | CLI_MODE_CHECK_LOCAL
+            | CLI_MODE_PULL
+            | CLI_MODE_SIMULATE
+    )
+}
+
 // all the supported flags
 
 #[derive(Clone, Debug, strum::EnumIter)]
@@ -1104,6 +1142,22 @@ impl CliParser {
         Ok(())
     }
 
+    /// The resolved run configuration as `(field, value)` rows for the
+    /// resolution summary. Built from post-parse state, so it reflects CLI
+    /// flags, the `.jetpack` contract, and conventions all merged together.
+    pub fn resolution_summary(&self) -> Vec<(String, String)> {
+        vec![
+            (
+                String::from("Automation root"),
+                self.automation_root.display().to_string(),
+            ),
+            (String::from("Playbook"), join_paths(&self.playbook_paths)),
+            (String::from("Inventory"), join_paths(&self.inventory_paths)),
+            (String::from("Roles"), join_paths(&self.role_paths)),
+            (String::from("Mode"), cli_mode_name(self.mode).to_string()),
+        ]
+    }
+
     fn load_jetpack_file_config(&self, cwd: &Path) -> Result<JetpackFileConfig, String> {
         let Some(config_path) = config_file::locate_config(cwd, self.config_path.as_deref()) else {
             return Ok(JetpackFileConfig::default());
@@ -1335,6 +1389,20 @@ fn resolve_repo_relative_path(automation_root: &Path, value: &str) -> Result<Pat
         return Ok(candidate);
     }
     Ok(automation_root.join(candidate))
+}
+
+/// Render the paths in a shared path-list as a comma-separated string, or
+/// "(none)" when empty — used by the resolution summary.
+fn join_paths(paths: &Arc<RwLock<Vec<PathBuf>>>) -> String {
+    let guard = paths.read().unwrap();
+    if guard.is_empty() {
+        return String::from("(none)");
+    }
+    guard
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -2082,6 +2150,75 @@ mod tests {
             .unwrap()
             .clone();
         assert!(playbook.ends_with("pb/install.yml"));
+    }
+
+    #[test]
+    fn cli_mode_name_round_trips_known_modes() {
+        for &name in all_mode_names() {
+            let mode = cli_mode_from_string(name).unwrap();
+            assert_eq!(cli_mode_name(mode), name);
+        }
+        assert_eq!(cli_mode_name(CLI_MODE_UNSET), "unset");
+    }
+
+    #[test]
+    fn is_execution_mode_flags_only_run_modes() {
+        for mode in [
+            CLI_MODE_SSH,
+            CLI_MODE_CHECK_SSH,
+            CLI_MODE_LOCAL,
+            CLI_MODE_CHECK_LOCAL,
+            CLI_MODE_PULL,
+            CLI_MODE_SIMULATE,
+        ] {
+            assert!(
+                is_execution_mode(mode),
+                "{mode} should be an execution mode"
+            );
+        }
+        for mode in [
+            CLI_MODE_SHOW,
+            CLI_MODE_SYNTAX,
+            CLI_MODE_INVENTORY_CHECK,
+            CLI_MODE_FULL_CHECK,
+            CLI_MODE_DOCS,
+            CLI_MODE_GEN_REFERENCE,
+            CLI_MODE_INSTALL,
+        ] {
+            assert!(
+                !is_execution_mode(mode),
+                "{mode} should NOT be an execution mode"
+            );
+        }
+    }
+
+    #[test]
+    fn resolution_summary_reports_resolved_state() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let automation_root = temp_dir.path();
+        fs::write(automation_root.join("play.yml"), "---\n").unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(automation_root).unwrap();
+
+        let mut parser = CliParser::new();
+        parser
+            .parse_from_strings(vec![
+                "jetp".into(),
+                "ssh".into(),
+                "--playbook".into(),
+                "play.yml".into(),
+            ])
+            .unwrap();
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        let summary = parser.resolution_summary();
+        let map: HashMap<String, String> = summary.into_iter().collect();
+        assert_eq!(map.get("Mode").unwrap(), "ssh");
+        assert!(map.get("Playbook").unwrap().ends_with("play.yml"));
+        assert_eq!(map.get("Inventory").unwrap(), "(none)");
     }
 
     #[test]
