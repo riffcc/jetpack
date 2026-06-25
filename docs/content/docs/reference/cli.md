@@ -15,13 +15,14 @@ cascade:
 |---|---|
 | `local` | Manage the local machine. |
 | `check-local` | Show configuration differences on the local machine (no changes). |
-| `ssh` | Manage multiple remote hosts over SSH. |
-| `check-ssh` | Show configuration differences over SSH (no changes). |
+| `apply` | Converge multiple remote hosts over SSH to the declared state. |
+| `run` | Same converge path as apply, under a less-loaded name. |
+| `plan` | Show intended operations over SSH without changing anything (dry-run). |
+| `check` | Run syntax-check and inventory-check in one pass. |
 | `show-inventory` | Display resolved inventory hosts and groups. |
 | `pull` | Pull and apply configuration locally, with optional inventory for variables. |
 | `syntax-check` | Statically validate playbooks/roles/tasks/templates (no execution). |
 | `inventory-check` | Validate an inventory tree (groups, group_vars, host_vars). |
-| `full-check` | Run syntax-check and inventory-check in one pass. |
 | `docs` | Build and serve this documentation site locally. |
 | `install` | Install the running jetpack binary to /usr/local/bin/jetpack and symlink /usr/local/bin/jetp to it. |
 
@@ -35,6 +36,7 @@ cascade:
 | `--batch-size` | yes | — |
 | `--check` | yes | — |
 | `--chroot` | yes | — |
+| `--config` | yes | — |
 | `--extra-vars` | yes | Inject extra variables from a YAML file or quoted JSON. |
 | `--forward-agent` | no | Enable SSH agent forwarding for specific tasks (e.g. git). |
 | `--groups` | yes | — |

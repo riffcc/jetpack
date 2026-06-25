@@ -97,6 +97,13 @@ pub const CLI_MODE_FULL_CHECK: u32 = 10;
 pub const CLI_MODE_DOCS: u32 = 11;
 pub const CLI_MODE_GEN_REFERENCE: u32 = 12;
 pub const CLI_MODE_INSTALL: u32 = 13;
+// #49 verb family — name the intent, not the transport. `apply`/`run` converge
+// over SSH (run is apply under a less-loaded term, kept distinct so it can grow
+// an ad-hoc path later without a rename); `plan` is the dry-run. The old
+// transport-named verbs (`ssh`/`check-ssh`) stay parseable as silent aliases.
+pub const CLI_MODE_APPLY: u32 = 14;
+pub const CLI_MODE_RUN: u32 = 15;
+pub const CLI_MODE_PLAN: u32 = 16;
 
 const DEFAULT_LOCAL_PLAYBOOK: &str = "deploy/playbooks/bootstrap.yml";
 const DEFAULT_LOCAL_ROLES: &str = "deploy/roles";
@@ -113,14 +120,23 @@ fn cli_mode_from_string(s: &str) -> Result<u32, String> {
     match s {
         "local" => Ok(CLI_MODE_LOCAL),
         "check-local" => Ok(CLI_MODE_CHECK_LOCAL),
+        // Intent-named verbs (#49) — the canonical, advertised converge/dry-run
+        // surface. `apply` and `run` both converge over SSH; `plan` is the
+        // dry-run; `check` validates (alias of the legacy `full-check`).
+        "apply" => Ok(CLI_MODE_APPLY),
+        "run" => Ok(CLI_MODE_RUN),
+        "plan" => Ok(CLI_MODE_PLAN),
+        "check" => Ok(CLI_MODE_FULL_CHECK),
+        // Legacy transport-named verbs — silent aliases (still work, not
+        // advertised, no deprecation warning in v1).
         "ssh" => Ok(CLI_MODE_SSH),
         "check-ssh" => Ok(CLI_MODE_CHECK_SSH),
+        "full-check" => Ok(CLI_MODE_FULL_CHECK),
         "__simulate" => Ok(CLI_MODE_SIMULATE),
         "show-inventory" => Ok(CLI_MODE_SHOW),
         "pull" => Ok(CLI_MODE_PULL),
         "syntax-check" => Ok(CLI_MODE_SYNTAX),
         "inventory-check" => Ok(CLI_MODE_INVENTORY_CHECK),
-        "full-check" => Ok(CLI_MODE_FULL_CHECK),
         "docs" => Ok(CLI_MODE_DOCS),
         "gen-reference" => Ok(CLI_MODE_GEN_REFERENCE),
         "install" => Ok(CLI_MODE_INSTALL),
@@ -129,30 +145,39 @@ fn cli_mode_from_string(s: &str) -> Result<u32, String> {
 }
 
 /// User-facing CLI mode names, for the docs reference. Excludes the internal
-/// `__simulate` mode and the `UNSET` sentinel.
+/// `__simulate` mode, the `UNSET` sentinel, and the legacy transport-named
+/// verbs (`ssh`/`check-ssh`/`full-check`) — those stay parseable as silent
+/// aliases but are no longer advertised, so the docs steer users to the
+/// intent-named verbs (`apply`/`run`/`plan`/`check`).
 pub fn all_mode_names() -> &'static [&'static str] {
     &[
         "local",
         "check-local",
-        "ssh",
-        "check-ssh",
+        "apply",
+        "run",
+        "plan",
+        "check",
         "show-inventory",
         "pull",
         "syntax-check",
         "inventory-check",
-        "full-check",
         "docs",
         "install",
     ]
 }
 
-/// The inverse of [`cli_mode_from_string`]: the canonical name for a mode
-/// constant. Used by the resolution summary and any other user-facing display.
-/// Returns `"unset"` for an unrecognized value rather than panicking.
+/// The canonical name for a mode constant — round-trips with
+/// [`cli_mode_from_string`] for every name in [`all_mode_names`]. Used by the
+/// resolution summary and any other user-facing display. Returns `"unset"` for
+/// an unrecognized value rather than panicking.
 pub fn cli_mode_name(mode: u32) -> &'static str {
     match mode {
         CLI_MODE_LOCAL => "local",
         CLI_MODE_CHECK_LOCAL => "check-local",
+        CLI_MODE_APPLY => "apply",
+        CLI_MODE_RUN => "run",
+        CLI_MODE_PLAN => "plan",
+        CLI_MODE_FULL_CHECK => "check",
         CLI_MODE_SSH => "ssh",
         CLI_MODE_CHECK_SSH => "check-ssh",
         CLI_MODE_SIMULATE => "__simulate",
@@ -160,7 +185,6 @@ pub fn cli_mode_name(mode: u32) -> &'static str {
         CLI_MODE_PULL => "pull",
         CLI_MODE_SYNTAX => "syntax-check",
         CLI_MODE_INVENTORY_CHECK => "inventory-check",
-        CLI_MODE_FULL_CHECK => "full-check",
         CLI_MODE_DOCS => "docs",
         CLI_MODE_GEN_REFERENCE => "gen-reference",
         CLI_MODE_INSTALL => "install",
@@ -177,6 +201,9 @@ pub fn is_execution_mode(mode: u32) -> bool {
         mode,
         CLI_MODE_SSH
             | CLI_MODE_CHECK_SSH
+            | CLI_MODE_APPLY
+            | CLI_MODE_RUN
+            | CLI_MODE_PLAN
             | CLI_MODE_LOCAL
             | CLI_MODE_CHECK_LOCAL
             | CLI_MODE_PULL
@@ -366,7 +393,7 @@ fn show_help() {
                       | |\n\
                       | | inventory-check | validate an inventory tree (groups/group_vars/host_vars)\n\
                       | |\n\
-                      | | full-check | run syntax-check and inventory-check in one pass\n\
+                      | | check | run syntax-check and inventory-check in one pass\n\
                       | |\n\
                       | --- | --- | ---\n\
                       | local machine management: |\n\
@@ -378,9 +405,11 @@ fn show_help() {
                       | |\n\
                       | --- | --- | ---\n\
                       | remote machine management: |\n\
-                      | | check-ssh | looks for configuration differences over SSH\n\
+                      | | plan | shows intended operations over SSH without changing anything (dry-run)\n\
                       | |\n\
-                      | | ssh| manages multiple machines over SSH\n\
+                      | | apply | converges multiple machines over SSH to the declared state (with a .jetpack.yml, runs zero-arg)\n\
+                      | |\n\
+                      | | run | same converge path as apply, under a less-loaded name\n\
                       |-|-";
 
     crate::util::terminal::markdown_print(&String::from(mode_table));
@@ -392,7 +421,7 @@ fn show_help() {
                        | Basics:\n\
                        | | -p, --playbook path1:path2| specifies automation content\n\
                        | |\n\
-                       | | -i, --inventory path1:path2| (required for ssh only) specifies which systems to manage\n\
+                       | | -i, --inventory path1:path2| (required for apply/plan) specifies which systems to manage\n\
                        | |\n\
                        | | -r, --roles path1:path2| adds additional role search paths. Also uses $JET_ROLES_PATH\n\
                        | |\n\
@@ -765,7 +794,13 @@ impl CliParser {
             self.mode = cli_mode_from_string(value).unwrap();
             return Ok(());
         }
-        Err(format!("jetp mode ({}) is not valid, see --help", value))
+        // Echo the bad verb and list the canonical modes so the user can
+        // self-correct without digging through --help.
+        Err(format!(
+            "unknown jetpack mode '{}' — valid modes are: {} (see --help)",
+            value,
+            all_mode_names().join(", ")
+        ))
     }
 
     fn append_playbook(&mut self, value: &str) -> Result<(), String> {
@@ -1466,6 +1501,25 @@ mod tests {
             CLI_MODE_INSTALL
         );
 
+        // #49 verb family — the intent-named verbs (apply/run/plan/check).
+        assert_eq!(
+            cli_mode_from_string(&"apply".to_string()).unwrap(),
+            CLI_MODE_APPLY
+        );
+        assert_eq!(
+            cli_mode_from_string(&"run".to_string()).unwrap(),
+            CLI_MODE_RUN
+        );
+        assert_eq!(
+            cli_mode_from_string(&"plan".to_string()).unwrap(),
+            CLI_MODE_PLAN
+        );
+        // `check` aliases `full-check` (validate playbook + inventory).
+        assert_eq!(
+            cli_mode_from_string(&"check".to_string()).unwrap(),
+            CLI_MODE_FULL_CHECK
+        );
+
         assert!(cli_mode_from_string(&"invalid".to_string()).is_err());
     }
 
@@ -1484,8 +1538,29 @@ mod tests {
         assert!(is_cli_mode_valid(&"docs".to_string()));
         assert!(is_cli_mode_valid(&"install".to_string()));
 
+        // #49 verb family — the intent-named verbs are valid modes.
+        assert!(is_cli_mode_valid(&"apply".to_string()));
+        assert!(is_cli_mode_valid(&"run".to_string()));
+        assert!(is_cli_mode_valid(&"plan".to_string()));
+        assert!(is_cli_mode_valid(&"check".to_string()));
+
         assert!(!is_cli_mode_valid(&"invalid".to_string()));
         assert!(!is_cli_mode_valid(&"".to_string()));
+    }
+
+    #[test]
+    fn invalid_mode_error_lists_the_valid_modes() {
+        // An unknown verb should echo the bad input AND list the canonical modes
+        // so the user can self-correct without digging through --help.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let mut parser = CliParser::new();
+        let err = parser
+            .parse_from_strings(vec!["jetp".into(), "bogus".into()])
+            .unwrap_err();
+        assert!(err.contains("bogus"), "echoes the bad mode: {err}");
+        assert!(err.contains("apply"), "lists apply: {err}");
+        assert!(err.contains("plan"), "lists plan: {err}");
+        assert!(err.contains("local"), "lists local: {err}");
     }
 
     #[test]
@@ -2170,6 +2245,9 @@ mod tests {
             CLI_MODE_CHECK_LOCAL,
             CLI_MODE_PULL,
             CLI_MODE_SIMULATE,
+            CLI_MODE_APPLY,
+            CLI_MODE_RUN,
+            CLI_MODE_PLAN,
         ] {
             assert!(
                 is_execution_mode(mode),
@@ -2190,6 +2268,61 @@ mod tests {
                 "{mode} should NOT be an execution mode"
             );
         }
+    }
+
+    #[test]
+    fn apply_run_plan_check_round_trip_through_canonical_names() {
+        // The intent-named verbs are the canonical, advertised set: each parses
+        // to its own constant, displays back under its own name, and appears in
+        // the docs reference list. `check` is the validate verb.
+        for (name, constant) in [
+            ("apply", CLI_MODE_APPLY),
+            ("run", CLI_MODE_RUN),
+            ("plan", CLI_MODE_PLAN),
+        ] {
+            assert_eq!(cli_mode_from_string(name).unwrap(), constant);
+            assert_eq!(cli_mode_name(constant), name);
+            assert!(
+                all_mode_names().contains(&name),
+                "{name} should be advertised in all_mode_names"
+            );
+        }
+        // The three new converge/dry-run verbs must be distinct constants, so a
+        // future divergence (e.g. run → ad-hoc exec) needs no rename.
+        assert_ne!(CLI_MODE_APPLY, CLI_MODE_RUN);
+        assert_ne!(CLI_MODE_APPLY, CLI_MODE_PLAN);
+        assert_ne!(CLI_MODE_RUN, CLI_MODE_PLAN);
+    }
+
+    #[test]
+    fn check_is_an_alias_of_full_check() {
+        // `check` is the validate verb — the canonical name for what `full-check`
+        // already did. Same constant, canonical display name "check".
+        assert_eq!(
+            cli_mode_from_string("check").unwrap(),
+            cli_mode_from_string("full-check").unwrap()
+        );
+        assert_eq!(cli_mode_from_string("check").unwrap(), CLI_MODE_FULL_CHECK);
+        assert_eq!(cli_mode_name(CLI_MODE_FULL_CHECK), "check");
+        assert!(all_mode_names().contains(&"check"));
+    }
+
+    #[test]
+    fn legacy_transport_verbs_still_parse_but_are_not_advertised() {
+        // The old transport-named verbs keep working (silent aliases, no
+        // deprecation warning in v1) but are NOT in the advertised canonical
+        // set, so the docs/help steer users to the intent-named verbs.
+        assert_eq!(cli_mode_from_string("ssh").unwrap(), CLI_MODE_SSH);
+        assert_eq!(
+            cli_mode_from_string("check-ssh").unwrap(),
+            CLI_MODE_CHECK_SSH
+        );
+        assert!(is_cli_mode_valid("ssh"));
+        assert!(is_cli_mode_valid("check-ssh"));
+        assert!(!all_mode_names().contains(&"ssh"));
+        assert!(!all_mode_names().contains(&"check-ssh"));
+        // `full-check` is also retired from the advertised set (canonical: check).
+        assert!(!all_mode_names().contains(&"full-check"));
     }
 
     #[test]

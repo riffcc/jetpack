@@ -64,11 +64,17 @@ fn liftoff() -> Result<(), String> {
     match cli_parser.mode {
         jetpack::cli::parser::CLI_MODE_SSH
         | jetpack::cli::parser::CLI_MODE_CHECK_SSH
+        | jetpack::cli::parser::CLI_MODE_APPLY
+        | jetpack::cli::parser::CLI_MODE_RUN
+        | jetpack::cli::parser::CLI_MODE_PLAN
         | jetpack::cli::parser::CLI_MODE_SHOW
         | jetpack::cli::parser::CLI_MODE_SIMULATE => {
             load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
             if !cli_parser.inventory_set {
-                return Err(String::from("--inventory is required"));
+                return Err(String::from(
+                    "--inventory is required (pass -i PATH; for zero-arg runs, declare \
+                     `inventory:` in a .jetpack.yml)",
+                ));
             }
             if inventory.read().expect("inventory read").hosts.is_empty() {
                 return Err(String::from("no hosts found in --inventory"));
@@ -121,7 +127,10 @@ fn liftoff() -> Result<(), String> {
         }
         _ => {
             if !cli_parser.playbook_set {
-                return Err(String::from("--playbook is required"));
+                return Err(String::from(
+                    "--playbook is required (pass -p PATH; for zero-arg runs, declare \
+                     `playbook:` in a .jetpack.yml)",
+                ));
             }
         }
     };
@@ -141,8 +150,15 @@ fn liftoff() -> Result<(), String> {
                 1
             }
         },
-        jetpack::cli::parser::CLI_MODE_SSH => playbook_ssh(&inventory, &cli_parser),
-        jetpack::cli::parser::CLI_MODE_CHECK_SSH => playbook_check_ssh(&inventory, &cli_parser),
+        // #49: `apply`/`run` converge over SSH (run is apply under a less-loaded
+        // term), grouped with the legacy `ssh` alias; `plan` is the dry-run,
+        // grouped with the legacy `check-ssh` alias.
+        jetpack::cli::parser::CLI_MODE_APPLY
+        | jetpack::cli::parser::CLI_MODE_RUN
+        | jetpack::cli::parser::CLI_MODE_SSH => playbook_ssh(&inventory, &cli_parser),
+        jetpack::cli::parser::CLI_MODE_PLAN | jetpack::cli::parser::CLI_MODE_CHECK_SSH => {
+            playbook_check_ssh(&inventory, &cli_parser)
+        }
         jetpack::cli::parser::CLI_MODE_LOCAL => playbook_local(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => playbook_check_local(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_SIMULATE => playbook_simulate(&inventory, &cli_parser),

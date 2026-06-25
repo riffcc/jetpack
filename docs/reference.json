@@ -419,13 +419,14 @@
     "modes": {
       "local": { "description": "Manage the local machine." },
       "check-local": { "description": "Show configuration differences on the local machine (no changes)." },
-      "ssh": { "description": "Manage multiple remote hosts over SSH." },
-      "check-ssh": { "description": "Show configuration differences over SSH (no changes)." },
+      "apply": { "description": "Converge multiple remote hosts over SSH to the declared state." },
+      "run": { "description": "Same converge path as apply, under a less-loaded name." },
+      "plan": { "description": "Show intended operations over SSH without changing anything (dry-run)." },
+      "check": { "description": "Run syntax-check and inventory-check in one pass." },
       "pull": { "description": "Pull and apply configuration locally, with optional inventory for variables." },
       "show-inventory": { "description": "Display resolved inventory hosts and groups." },
       "syntax-check": { "description": "Statically validate playbooks/roles/tasks/templates (no execution)." },
       "inventory-check": { "description": "Validate an inventory tree (groups, group_vars, host_vars)." },
-      "full-check": { "description": "Run syntax-check and inventory-check in one pass." },
       "docs": { "description": "Build and serve this documentation site locally." },
       "install": { "description": "Install the running jetpack binary to /usr/local/bin/jetpack and symlink /usr/local/bin/jetp to it." }
     },
