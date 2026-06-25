@@ -1290,6 +1290,11 @@ impl CliParser {
 
     fn load_jetpack_file_config(&self, cwd: &Path) -> Result<JetpackFileConfig, String> {
         let Some(config_path) = config_file::locate_config(cwd, self.config_path.as_deref()) else {
+            // No .jetpack.yml found — fall back to the contrib/jetpack/ tree
+            // convention (a vendored automation namespace) before giving up.
+            if let Some(synth) = synth_contrib_defaults(&self.automation_root) {
+                return Ok(synth);
+            }
             return Ok(JetpackFileConfig::default());
         };
         if !config_path.is_file() {
@@ -1519,6 +1524,45 @@ fn resolve_repo_relative_path(automation_root: &Path, value: &str) -> Result<Pat
         return Ok(candidate);
     }
     Ok(automation_root.join(candidate))
+}
+
+/// When no `.jetpack.yml` exists, synthesize a contract from a `contrib/jetpack/`
+/// convention tree under the automation root — the documented namespace for
+/// vendored in-tree automation (kept apart from a project's own `playbooks/`/
+/// `roles/`). The documented entry is `contrib/jetpack/playbooks/install.yml`
+/// (falling back to `main.yml`/`main.yaml`), with `contrib/jetpack/roles` and
+/// `contrib/jetpack/inventory/example` added when present. Returns `None` when
+/// there is no usable tree (caller then has no contract).
+fn synth_contrib_defaults(automation_root: &Path) -> Option<JetpackFileConfig> {
+    let contrib = automation_root.join("contrib").join("jetpack");
+    let playbooks_dir = contrib.join("playbooks");
+    if !playbooks_dir.is_dir() {
+        return None;
+    }
+    let entry = ["install.yml", "main.yml", "main.yaml"]
+        .iter()
+        .map(|name| playbooks_dir.join(name))
+        .find(|p| p.is_file())?;
+    let playbook = entry
+        .strip_prefix(automation_root)
+        .unwrap_or(&entry)
+        .to_string_lossy()
+        .to_string();
+
+    let mut defaults = config_file::JetpackDefaults {
+        playbook: Some(playbook),
+        ..Default::default()
+    };
+    if contrib.join("roles").is_dir() {
+        defaults.roles = Some(vec!["contrib/jetpack/roles".to_string()]);
+    }
+    if contrib.join("inventory").join("example").exists() {
+        defaults.inventory = Some(vec!["contrib/jetpack/inventory/example".to_string()]);
+    }
+    Some(JetpackFileConfig {
+        defaults: Some(defaults),
+        ..Default::default()
+    })
 }
 
 /// Render the paths in a shared path-list as a comma-separated string, or
@@ -2604,6 +2648,61 @@ profiles:
                 .ends_with("inv/london"),
             "CLI -i must beat the profile"
         );
+    }
+
+    #[test]
+    fn contrib_jetpack_discovered_when_no_contract() {
+        // No .jetpack.yml, but a contrib/jetpack/ tree with the documented
+        // install playbook → zero-arg `apply` resolves it as the default.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("contrib/jetpack/playbooks")).unwrap();
+        fs::create_dir_all(root.join("contrib/jetpack/roles")).unwrap();
+        fs::write(root.join("contrib/jetpack/playbooks/install.yml"), "---\n").unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "apply".into()]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(parser.playbook_set, "contrib/jetpack playbook discovered");
+        let playbook = parser
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
+            .cloned()
+            .unwrap();
+        assert!(
+            playbook
+                .to_string_lossy()
+                .ends_with("contrib/jetpack/playbooks/install.yml")
+        );
+        assert!(
+            parser
+                .role_paths
+                .read()
+                .unwrap()
+                .iter()
+                .any(|r| r.to_string_lossy().ends_with("contrib/jetpack/roles")),
+            "contrib roles discovered"
+        );
+    }
+
+    #[test]
+    fn no_contract_and_no_contrib_yields_empty_config() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        let mut parser = CliParser::new();
+        parser.automation_root = root.to_path_buf();
+        let cfg = parser.load_jetpack_file_config(root).unwrap();
+        assert_eq!(cfg, JetpackFileConfig::default());
     }
 
     #[test]
