@@ -71,7 +71,10 @@ fn liftoff() -> Result<(), String> {
         | jetpack::cli::parser::CLI_MODE_SIMULATE => {
             load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
             if !cli_parser.inventory_set {
-                return Err(String::from("--inventory is required"));
+                return Err(String::from(
+                    "--inventory is required (pass -i PATH; for zero-arg runs, declare \
+                     `inventory:` in a .jetpack.yml)",
+                ));
             }
             if inventory.read().expect("inventory read").hosts.is_empty() {
                 return Err(String::from("no hosts found in --inventory"));
@@ -124,7 +127,10 @@ fn liftoff() -> Result<(), String> {
         }
         _ => {
             if !cli_parser.playbook_set {
-                return Err(String::from("--playbook is required"));
+                return Err(String::from(
+                    "--playbook is required (pass -p PATH; for zero-arg runs, declare \
+                     `playbook:` in a .jetpack.yml)",
+                ));
             }
         }
     };

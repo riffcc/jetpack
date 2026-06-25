@@ -794,7 +794,13 @@ impl CliParser {
             self.mode = cli_mode_from_string(value).unwrap();
             return Ok(());
         }
-        Err(format!("jetp mode ({}) is not valid, see --help", value))
+        // Echo the bad verb and list the canonical modes so the user can
+        // self-correct without digging through --help.
+        Err(format!(
+            "unknown jetpack mode '{}' — valid modes are: {} (see --help)",
+            value,
+            all_mode_names().join(", ")
+        ))
     }
 
     fn append_playbook(&mut self, value: &str) -> Result<(), String> {
@@ -1540,6 +1546,21 @@ mod tests {
 
         assert!(!is_cli_mode_valid(&"invalid".to_string()));
         assert!(!is_cli_mode_valid(&"".to_string()));
+    }
+
+    #[test]
+    fn invalid_mode_error_lists_the_valid_modes() {
+        // An unknown verb should echo the bad input AND list the canonical modes
+        // so the user can self-correct without digging through --help.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let mut parser = CliParser::new();
+        let err = parser
+            .parse_from_strings(vec!["jetp".into(), "bogus".into()])
+            .unwrap_err();
+        assert!(err.contains("bogus"), "echoes the bad mode: {err}");
+        assert!(err.contains("apply"), "lists apply: {err}");
+        assert!(err.contains("plan"), "lists plan: {err}");
+        assert!(err.contains("local"), "lists local: {err}");
     }
 
     #[test]
