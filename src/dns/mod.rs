@@ -409,9 +409,11 @@ mod tests {
             serde_yaml::Value::String("path".to_string()),
             serde_yaml::Value::String("dns/riff.cc".to_string()),
         );
-        let config =
-            dns_config_from_vars(&serde_yaml::Value::Mapping(mapping), std::path::Path::new("/repo"))
-                .expect("dns block deserializes");
+        let config = dns_config_from_vars(
+            &serde_yaml::Value::Mapping(mapping),
+            std::path::Path::new("/repo"),
+        )
+        .expect("dns block deserializes");
         assert_eq!(config.path, "/repo/dns/riff.cc");
         // downstream paths inherit the anchored root — this is the bug fix
         assert_eq!(
@@ -427,9 +429,11 @@ mod tests {
             serde_yaml::Value::String("path".to_string()),
             serde_yaml::Value::String("/srv/dns/riff.cc".to_string()),
         );
-        let config =
-            dns_config_from_vars(&serde_yaml::Value::Mapping(mapping), std::path::Path::new("/repo"))
-                .expect("dns block deserializes");
+        let config = dns_config_from_vars(
+            &serde_yaml::Value::Mapping(mapping),
+            std::path::Path::new("/repo"),
+        )
+        .expect("dns block deserializes");
         assert_eq!(config.path, "/srv/dns/riff.cc");
     }
 

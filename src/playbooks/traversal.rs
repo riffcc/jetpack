@@ -741,9 +741,9 @@ fn async_handle_batch(
                 if needs_provision && let Some(ref config) = provision_config {
                     let dns_key = serde_yaml::Value::String("dns".to_string());
                     let repo_root = run_state.context.read().unwrap().repo_root.clone();
-                    let dns_config = host_vars.get(&dns_key).and_then(|v| {
-                        crate::dns::dns_config_from_vars(v, &repo_root)
-                    });
+                    let dns_config = host_vars
+                        .get(&dns_key)
+                        .and_then(|v| crate::dns::dns_config_from_vars(v, &repo_root));
 
                     match ensure_host_provisioned(
                         config,
