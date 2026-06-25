@@ -87,6 +87,7 @@ pub const CLI_MODE_INVENTORY_CHECK: u32 = 9;
 pub const CLI_MODE_FULL_CHECK: u32 = 10;
 pub const CLI_MODE_DOCS: u32 = 11;
 pub const CLI_MODE_GEN_REFERENCE: u32 = 12;
+pub const CLI_MODE_INSTALL: u32 = 13;
 
 const DEFAULT_LOCAL_PLAYBOOK: &str = "deploy/playbooks/bootstrap.yml";
 const DEFAULT_LOCAL_ROLES: &str = "deploy/roles";
@@ -122,6 +123,7 @@ fn cli_mode_from_string(s: &str) -> Result<u32, String> {
         "full-check" => Ok(CLI_MODE_FULL_CHECK),
         "docs" => Ok(CLI_MODE_DOCS),
         "gen-reference" => Ok(CLI_MODE_GEN_REFERENCE),
+        "install" => Ok(CLI_MODE_INSTALL),
         _ => Err(format!("invalid mode: {}", s)),
     }
 }
@@ -140,6 +142,7 @@ pub fn all_mode_names() -> &'static [&'static str] {
         "inventory-check",
         "full-check",
         "docs",
+        "install",
     ]
 }
 
@@ -313,6 +316,8 @@ fn show_help() {
                       | | show-inventory | displays inventory, specify --show-groups group1:group2 or --show-hosts host1:host2\n\
                       | |\n\
                       | | docs | builds and serves the documentation site locally (opens in your browser; use --no-browser over SSH)\n\
+                      | |\n\
+                      | | install | copies the running jetpack binary to /usr/local/bin/jetpack and symlinks /usr/local/bin/jetp to it\n\
                       | |\n\
                       | --- | --- | ---\n\
                       | validation: |\n\
@@ -662,6 +667,7 @@ impl CliParser {
             CLI_MODE_PULL => self.threads = 1,
             CLI_MODE_DOCS => self.threads = 1,
             CLI_MODE_GEN_REFERENCE => self.threads = 1,
+            CLI_MODE_INSTALL => self.threads = 1,
             CLI_MODE_UNSET => {
                 self.needs_help = true;
             }
@@ -1301,6 +1307,10 @@ mod tests {
             cli_mode_from_string(&"docs".to_string()).unwrap(),
             CLI_MODE_DOCS
         );
+        assert_eq!(
+            cli_mode_from_string(&"install".to_string()).unwrap(),
+            CLI_MODE_INSTALL
+        );
 
         assert!(cli_mode_from_string(&"invalid".to_string()).is_err());
     }
@@ -1318,6 +1328,7 @@ mod tests {
         assert!(is_cli_mode_valid(&"inventory-check".to_string()));
         assert!(is_cli_mode_valid(&"full-check".to_string()));
         assert!(is_cli_mode_valid(&"docs".to_string()));
+        assert!(is_cli_mode_valid(&"install".to_string()));
 
         assert!(!is_cli_mode_valid(&"invalid".to_string()));
         assert!(!is_cli_mode_valid(&"".to_string()));
