@@ -16,6 +16,7 @@
 
 use jetpack::cli::docs::docs;
 use jetpack::cli::gen_reference::gen_reference;
+use jetpack::cli::install::install;
 use jetpack::cli::parser::CliParser;
 use jetpack::cli::playbooks::{
     full_check, inventory_check, playbook_check_local, playbook_check_ssh, playbook_local,
@@ -80,10 +81,12 @@ fn liftoff() -> Result<(), String> {
         | jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK
         | jetpack::cli::parser::CLI_MODE_FULL_CHECK
         | jetpack::cli::parser::CLI_MODE_DOCS
-        | jetpack::cli::parser::CLI_MODE_GEN_REFERENCE => {
+        | jetpack::cli::parser::CLI_MODE_GEN_REFERENCE
+        | jetpack::cli::parser::CLI_MODE_INSTALL => {
             // validation modes load inventory on demand inside the check
             // functions; do not seed localhost so inventory-check inspects the
-            // on-disk tree exactly as declared.
+            // on-disk tree exactly as declared. install is a local self-setup
+            // utility and needs no inventory.
         }
         _ => {
             inventory
@@ -97,7 +100,8 @@ fn liftoff() -> Result<(), String> {
         jetpack::cli::parser::CLI_MODE_SHOW
         | jetpack::cli::parser::CLI_MODE_INVENTORY_CHECK
         | jetpack::cli::parser::CLI_MODE_DOCS
-        | jetpack::cli::parser::CLI_MODE_GEN_REFERENCE => {}
+        | jetpack::cli::parser::CLI_MODE_GEN_REFERENCE
+        | jetpack::cli::parser::CLI_MODE_INSTALL => {}
         jetpack::cli::parser::CLI_MODE_PULL => {
             if !cli_parser.playbook_set && cli_parser.pull_url.is_none() {
                 return Err(String::from(
@@ -138,6 +142,7 @@ fn liftoff() -> Result<(), String> {
         jetpack::cli::parser::CLI_MODE_FULL_CHECK => full_check(&inventory, &cli_parser),
         jetpack::cli::parser::CLI_MODE_DOCS => docs(&cli_parser),
         jetpack::cli::parser::CLI_MODE_GEN_REFERENCE => gen_reference(&cli_parser),
+        jetpack::cli::parser::CLI_MODE_INSTALL => install(&cli_parser),
 
         _ => {
             println!("invalid CLI mode");

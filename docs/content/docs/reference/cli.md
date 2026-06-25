@@ -23,6 +23,7 @@ cascade:
 | `inventory-check` | Validate an inventory tree (groups, group_vars, host_vars). |
 | `full-check` | Run syntax-check and inventory-check in one pass. |
 | `docs` | Build and serve this documentation site locally. |
+| `install` | Install the running jetpack binary to /usr/local/bin/jetpack and symlink /usr/local/bin/jetp to it. |
 
 ## Flags
 
