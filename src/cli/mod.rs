@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+pub mod config_file;
 pub mod docs;
 pub mod gen_reference;
 pub mod install;

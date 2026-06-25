@@ -18,12 +18,13 @@
 // this may change later.
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
+use crate::cli::config_file::{self, JetpackFileConfig};
 use crate::inventory::loading::convert_json_vars;
 use crate::util::io::directory_as_string;
 use crate::util::io::jet_file_open;
+use crate::util::io::read_local_file;
 use crate::util::yaml::blend_variables;
 use crate::util::yaml::show_yaml_error_in_context;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -73,6 +74,10 @@ pub struct CliParser {
     /// the working directory. Set in `parse()` via `util::repo::detect_automation_root`;
     /// generators (DNS today) anchor their output paths here.
     pub automation_root: PathBuf,
+    /// Explicit `--config PATH` override for the automation contract. When set,
+    /// `cli::config_file::locate_config` returns it verbatim; otherwise the
+    /// contract is auto-discovered upward from the working directory.
+    pub config_path: Option<PathBuf>,
 }
 
 // subcommands are usually required
@@ -97,17 +102,8 @@ const DEFAULT_LOCAL_PLAYBOOK: &str = "deploy/playbooks/bootstrap.yml";
 const DEFAULT_LOCAL_ROLES: &str = "deploy/roles";
 const DEFAULT_LOCAL_INVENTORY: &str = "deploy/inventory";
 
-#[derive(Debug, Default, Deserialize)]
-struct JetpackFileConfig {
-    local: Option<JetpackLocalConfig>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct JetpackLocalConfig {
-    playbook: Option<String>,
-    roles: Option<String>,
-    inventory: Option<String>,
-}
+// The `.jetpack.yml`/`.jetpack.yaml` contract schema, version gate, and search
+// order live in `cli::config_file`. Parser methods here load and consume it.
 
 fn is_cli_mode_valid(value: &str) -> bool {
     cli_mode_from_string(value).is_ok()
@@ -162,6 +158,7 @@ pub enum Arguments {
     ARGUMENT_PLAYBOOK_SHORT,
     ARGUMENT_ROLES,
     ARGUMENT_ROLES_SHORT,
+    ARGUMENT_CONFIG,
     ARGUMENT_SHOW_GROUPS,
     ARGUMENT_SHOW_HOSTS,
     ARGUMENT_LIMIT_GROUPS,
@@ -203,6 +200,7 @@ impl Arguments {
             Arguments::ARGUMENT_PLAYBOOK_SHORT => "-p",
             Arguments::ARGUMENT_ROLES => "--roles",
             Arguments::ARGUMENT_ROLES_SHORT => "-r",
+            Arguments::ARGUMENT_CONFIG => "--config",
             Arguments::ARGUMENT_MODULES => "--modules",
             Arguments::ARGUMENT_MODULES_SHORT => "-m",
             Arguments::ARGUMENT_SHOW_GROUPS => "--show-groups",
@@ -245,6 +243,7 @@ fn build_argument_map() -> HashMap<String, Arguments> {
         (Arguments::ARGUMENT_PLAYBOOK, "--playbook"),
         (Arguments::ARGUMENT_PLAYBOOK_SHORT, "-p"),
         (Arguments::ARGUMENT_ROLES, "--roles"),
+        (Arguments::ARGUMENT_CONFIG, "--config"),
         (Arguments::ARGUMENT_MODULES, "--modules"),
         (Arguments::ARGUMENT_MODULES_SHORT, "-m"),
         (Arguments::ARGUMENT_ROLES_SHORT, "-r"),
@@ -358,6 +357,8 @@ fn show_help() {
                        | | -i, --inventory path1:path2| (required for ssh only) specifies which systems to manage\n\
                        | |\n\
                        | | -r, --roles path1:path2| adds additional role search paths. Also uses $JET_ROLES_PATH\n\
+                       | |\n\
+                       | | --config path| explicit .jetpack.yml/.yaml contract (auto-discovered upward from the automation root by default)\n\
                        | |\n\
                        | --- | ---\n\
                        | SSH options:\n\
@@ -479,6 +480,7 @@ impl CliParser {
             port_set: false,
             check: false,
             automation_root: std::env::current_dir().unwrap_or_default(),
+            config_path: None,
         }
     }
 
@@ -597,6 +599,9 @@ impl CliParser {
                                     }
                                     Arguments::ARGUMENT_MODULES_SHORT => {
                                         self.append_modules(&args[arg_count])
+                                    }
+                                    Arguments::ARGUMENT_CONFIG => {
+                                        self.store_config(&args[arg_count])
                                     }
                                     Arguments::ARGUMENT_INVENTORY => {
                                         self.append_inventory(&args[arg_count])
@@ -966,6 +971,11 @@ impl CliParser {
         Ok(())
     }
 
+    fn store_config(&mut self, value: &str) -> Result<(), String> {
+        self.config_path = Some(PathBuf::from(value));
+        Ok(())
+    }
+
     fn increase_verbosity(&mut self, amount: u32) -> Result<(), String> {
         self.verbosity += amount;
         Ok(())
@@ -1012,10 +1022,10 @@ impl CliParser {
         }
 
         let file_config = self.load_jetpack_file_config(cwd)?;
-        let local_config = file_config.local.unwrap_or_default();
+        let defaults = file_config.effective();
 
         if !self.playbook_set {
-            if let Some(playbook) = local_config.playbook.as_ref() {
+            if let Some(playbook) = defaults.playbook.as_ref() {
                 self.append_playbook(
                     &resolve_repo_relative_path(cwd, playbook)?
                         .display()
@@ -1030,12 +1040,14 @@ impl CliParser {
         }
 
         if self.playbook_set && self.role_paths.read().unwrap().is_empty() {
-            if let Some(roles) = local_config.roles.as_ref() {
-                self.append_roles(
-                    &resolve_repo_relative_path(cwd, roles)?
-                        .display()
-                        .to_string(),
-                )?;
+            if !defaults.roles.is_empty() {
+                for roles in &defaults.roles {
+                    self.append_roles(
+                        &resolve_repo_relative_path(cwd, roles)?
+                            .display()
+                            .to_string(),
+                    )?;
+                }
             } else {
                 let default_roles = cwd.join(DEFAULT_LOCAL_ROLES);
                 if default_roles.is_dir() {
@@ -1045,12 +1057,14 @@ impl CliParser {
         }
 
         if !self.inventory_set {
-            if let Some(inventory) = local_config.inventory.as_ref() {
-                self.append_inventory(
-                    &resolve_repo_relative_path(cwd, inventory)?
-                        .display()
-                        .to_string(),
-                )?;
+            if !defaults.inventory.is_empty() {
+                for inventory in &defaults.inventory {
+                    self.append_inventory(
+                        &resolve_repo_relative_path(cwd, inventory)?
+                            .display()
+                            .to_string(),
+                    )?;
+                }
             } else {
                 let default_inventory = cwd.join(DEFAULT_LOCAL_INVENTORY);
                 if default_inventory.exists() {
@@ -1063,18 +1077,41 @@ impl CliParser {
     }
 
     fn load_jetpack_file_config(&self, cwd: &Path) -> Result<JetpackFileConfig, String> {
-        let config_path = cwd.join(".jetpack.yml");
+        let Some(config_path) = config_file::locate_config(cwd, self.config_path.as_deref()) else {
+            return Ok(JetpackFileConfig::default());
+        };
         if !config_path.is_file() {
+            return Err(format!(
+                "configuration file not found: {}",
+                config_path.display()
+            ));
+        }
+
+        // An empty/whitespace-only file is a valid marker-only contract — no
+        // defaults, just "this is the automation root". serde_yaml rejects an
+        // empty document when deserializing a struct, so handle it up front.
+        let raw = read_local_file(&config_path)?;
+        if raw.trim().is_empty() {
             return Ok(JetpackFileConfig::default());
         }
 
-        let config_file = jet_file_open(&config_path)?;
-        let parsed: Result<JetpackFileConfig, serde_yaml::Error> =
-            serde_yaml::from_reader(config_file);
+        // Phase 1 — schema-version gate: read the version leniently, then reject
+        // unknown future schemas BEFORE the strict body parse, so a version-2 file
+        // carrying as-yet-unknown keys fails with "upgrade Jetpack" rather than
+        // tripping `deny_unknown_fields` on a key it doesn't know about yet.
+        let version = config_file::probe_version(&raw).map_err(|err| {
+            show_yaml_error_in_context(&err, &config_path);
+            format!("invalid configuration: {}", config_path.display())
+        })?;
+        config_file::validate_version(version)?;
+
+        // Phase 2 — strict within-version parse: `deny_unknown_fields` catches
+        // typos against the pinned schema.
+        let parsed = config_file::deserialize(&raw);
         if let Err(err) = parsed.as_ref() {
             show_yaml_error_in_context(err, &config_path);
         }
-        parsed.map_err(|_| format!("invalid .jetpack.yml: {}", config_path.display()))
+        parsed.map_err(|_| format!("invalid configuration: {}", config_path.display()))
     }
 
     fn inject_builtin_vars(&mut self, cwd: &Path, automation_root: &Path) -> Result<(), String> {
@@ -1728,6 +1765,68 @@ mod tests {
             .unwrap()
             .clone();
         assert!(playbook.ends_with("manual/explicit.yml"));
+    }
+
+    #[test]
+    fn load_rejects_future_schema_before_unknown_field_errors() {
+        // A version-2 contract carrying an as-yet-unknown `profiles:` key must be
+        // rejected by the schema-version gate ("upgrade Jetpack") — NOT by
+        // deny_unknown_fields choking on `profiles`. This is the contract-vs-
+        // config distinction: the version gates the body parse.
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(
+            temp_dir.path().join(".jetpack.yml"),
+            "version: 2\nprofiles:\n  - prod\n",
+        )
+        .unwrap();
+
+        let parser = CliParser::new();
+        let err = parser
+            .load_jetpack_file_config(temp_dir.path())
+            .unwrap_err();
+        assert!(err.contains("version 2"), "gate names the version: {err}");
+        assert!(
+            err.contains("Upgrade Jetpack"),
+            "gate points to upgrade: {err}"
+        );
+        assert!(
+            !err.contains("unknown field"),
+            "must not surface a deny_unknown_fields error: {err}"
+        );
+    }
+
+    #[test]
+    fn config_flag_is_authoritative_over_auto_discovery() {
+        let temp_dir = TempDir::new().unwrap();
+        // an auto-discoverable contract that would load fine on its own
+        fs::write(temp_dir.path().join(".jetpack.yml"), "version: 1\n").unwrap();
+        // --config points elsewhere (missing) → authoritative, so it surfaces a
+        // clear "not found" rather than silently falling back to discovery
+        let explicit = temp_dir.path().join("explicit.yml");
+        let mut parser = CliParser::new();
+        parser.config_path = Some(explicit.clone());
+
+        let err = parser
+            .load_jetpack_file_config(temp_dir.path())
+            .unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+    }
+
+    #[test]
+    fn load_treats_empty_contract_as_marker_only() {
+        // a zero-byte contract is a valid marker-only file → empty defaults, no
+        // serde error from deserializing an empty document
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join(".jetpack.yml"), "").unwrap();
+
+        let parser = CliParser::new();
+        let config = parser
+            .load_jetpack_file_config(temp_dir.path())
+            .expect("empty contract is valid");
+        assert_eq!(
+            config.effective(),
+            config_file::EffectiveDefaults::default()
+        );
     }
 
     #[test]

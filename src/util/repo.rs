@@ -96,9 +96,11 @@ fn find_automation_root_by_marker(start: &Path) -> Option<PathBuf> {
 }
 
 /// Whether `dir` carries any automation-repository marker (see
-/// [`find_automation_root_by_marker`] for the priority order).
+/// [`find_automation_root_by_marker`] for the priority order). Either contract
+/// extension — `.jetpack.yml` or `.jetpack.yaml` — marks a root, matching the
+/// search order in `cli::config_file::locate_config`.
 fn has_marker(dir: &Path) -> bool {
-    if dir.join(".jetpack.yml").is_file() {
+    if dir.join(".jetpack.yml").is_file() || dir.join(".jetpack.yaml").is_file() {
         return true;
     }
     if dir.join(".git").exists() {
@@ -139,6 +141,21 @@ mod tests {
         let root = TempDir::new().unwrap();
         touch(&root.path().join(".jetpack.yml"));
         let nested = root.path().join("playbooks").join("gravity");
+        mkdir(&nested);
+        assert_eq!(
+            find_automation_root_by_marker(&nested),
+            Some(root.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn marker_finds_jetpack_yaml_from_nested_dir() {
+        // `.jetpack.yaml` marks a root just as much as `.jetpack.yml`, so a
+        // yaml-only tree is detected — keeping it consistent with the contract
+        // search order in cli::config_file::locate_config.
+        let root = TempDir::new().unwrap();
+        touch(&root.path().join(".jetpack.yaml"));
+        let nested = root.path().join("deploy").join("playbooks");
         mkdir(&nested);
         assert_eq!(
             find_automation_root_by_marker(&nested),
