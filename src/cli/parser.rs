@@ -393,7 +393,7 @@ fn show_help() {
                       | |\n\
                       | | inventory-check | validate an inventory tree (groups/group_vars/host_vars)\n\
                       | |\n\
-                      | | full-check | run syntax-check and inventory-check in one pass\n\
+                      | | check | run syntax-check and inventory-check in one pass\n\
                       | |\n\
                       | --- | --- | ---\n\
                       | local machine management: |\n\
@@ -405,9 +405,11 @@ fn show_help() {
                       | |\n\
                       | --- | --- | ---\n\
                       | remote machine management: |\n\
-                      | | check-ssh | looks for configuration differences over SSH\n\
+                      | | plan | shows intended operations over SSH without changing anything (dry-run)\n\
                       | |\n\
-                      | | ssh| manages multiple machines over SSH\n\
+                      | | apply | converges multiple machines over SSH to the declared state (with a .jetpack.yml, runs zero-arg)\n\
+                      | |\n\
+                      | | run | same converge path as apply, under a less-loaded name\n\
                       |-|-";
 
     crate::util::terminal::markdown_print(&String::from(mode_table));
@@ -419,7 +421,7 @@ fn show_help() {
                        | Basics:\n\
                        | | -p, --playbook path1:path2| specifies automation content\n\
                        | |\n\
-                       | | -i, --inventory path1:path2| (required for ssh only) specifies which systems to manage\n\
+                       | | -i, --inventory path1:path2| (required for apply/plan) specifies which systems to manage\n\
                        | |\n\
                        | | -r, --roles path1:path2| adds additional role search paths. Also uses $JET_ROLES_PATH\n\
                        | |\n\
