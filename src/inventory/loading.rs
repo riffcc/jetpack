@@ -74,14 +74,19 @@ pub fn load_inventory(
     for inventory_path_buf in inventory_paths.read().unwrap().iter() {
         let inventory_path = inventory_path_buf.as_path();
         if inventory_path.is_dir() {
-            let groups_pathbuf = inventory_path_buf.join("groups");
-            let groups_path = groups_pathbuf.as_path();
-
-            if groups_path.exists() && groups_path.is_dir() {
+            let has_groups = inventory_path_buf.join("groups").is_dir();
+            // A directory with group_vars/ or host_vars/ but no groups/ is a
+            // vars-only overlay (the secrets_inventory shape) — load it without
+            // requiring topology. Only a directory with none of the three errors.
+            let has_vars = inventory_path_buf.join("group_vars").exists()
+                || inventory_path_buf.join("host_vars").exists();
+            if has_groups {
                 load_on_disk_inventory_tree(inventory, true, inventory_path)?;
+            } else if has_vars {
+                load_on_disk_inventory_tree(inventory, false, inventory_path)?;
             } else {
                 return Err(format!(
-                    "missing groups/ in --inventory path parameter ({})",
+                    "inventory path has no groups/, group_vars/, or host_vars/ ({})",
                     inventory_path.display()
                 ));
             }
@@ -304,30 +309,18 @@ fn load_vars_directory(
             false => {
                 let host = inv.get_host(&effective_name);
 
-                // Start with existing host variables (from previous inventory paths)
+                // Start with existing host-specific variables (host_vars from
+                // previous inventory paths). Group vars are deliberately NOT
+                // blended in here — that is the sole job of the
+                // `propagate_group_vars_to_hosts` pass at the end of load. Baking
+                // group vars into the host store here would let an earlier path's
+                // value shadow a later path's group_vars override (the
+                // secrets_inventory case), because propagate treats the host's
+                // stored vars as host-owned and layers them on top.
                 let mut merged_vars = {
                     let h = host.read().unwrap();
                     h.get_variables()
                 };
-
-                // Get all groups this host belongs to
-                let host_groups = {
-                    let h = host.read().unwrap();
-                    h.get_group_names()
-                };
-
-                // Merge group_vars in order (all group first, then more specific groups)
-                for group_name in &host_groups {
-                    if let Some(group_arc) = inv.groups.get(group_name) {
-                        let group = group_arc.read().unwrap();
-                        let group_vars = group.get_variables();
-
-                        // Merge group vars into merged_vars
-                        for (k, v) in group_vars.iter() {
-                            merged_vars.insert(k.clone(), v.clone());
-                        }
-                    }
-                }
 
                 // Check for provision block and extract it specially
                 let provision_key = serde_yaml::Value::String("provision".to_string());
@@ -592,6 +585,64 @@ mod tests {
             host_vars.get(&dns_key).is_some(),
             "dns block from secrets group_vars must propagate to host variables; got: {:?}",
             host_vars
+        );
+    }
+
+    // A directory with group_vars/ but no groups/ is a vars-only overlay — the
+    // `secrets_inventory` shape — and must load in the same pass as the main
+    // inventory (single propagate) so it layers with later-wins on conflicts.
+    #[test]
+    fn vars_only_inventory_path_overlays_without_groups_dir() {
+        let (_keep_main, main_path) = inventory_tree_with_host(
+            "webservers",
+            &["web1"],
+            Some("public: from-main\nshared: from-main\n"),
+            &[("web1", "host_key: from-host\n")],
+        );
+
+        // Overlay path: group_vars only, NO groups/ dir at all.
+        let sec_dir = TempDir::new().unwrap();
+        let sec_gv = sec_dir.path().join("group_vars");
+        fs::create_dir_all(&sec_gv).unwrap();
+        fs::write(
+            sec_gv.join("webservers"),
+            "secret_token: s3cr3t\nshared: from-secrets\n",
+        )
+        .unwrap();
+
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        load_inventory(
+            &inventory,
+            Arc::new(RwLock::new(vec![main_path, sec_dir.path().to_path_buf()])),
+        )
+        .expect("combined main + overlay load succeeds");
+
+        let host_vars = inventory
+            .read()
+            .unwrap()
+            .get_host("web1")
+            .read()
+            .unwrap()
+            .get_variables();
+        assert_eq!(host_vars["public"], "from-main"); // main var survives
+        assert_eq!(host_vars["secret_token"], "s3cr3t"); // overlay var reaches host
+        assert_eq!(host_vars["shared"], "from-secrets"); // overlay wins on conflict
+    }
+
+    #[test]
+    fn inventory_path_with_no_content_errors() {
+        // A directory with none of groups/, group_vars/, host_vars/ is not a
+        // usable inventory — error clearly rather than silently loading nothing.
+        let empty = TempDir::new().unwrap();
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        let err = load_inventory(
+            &inventory,
+            Arc::new(RwLock::new(vec![empty.path().to_path_buf()])),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("no groups/") && err.contains("group_vars"),
+            "{err}"
         );
     }
 }
