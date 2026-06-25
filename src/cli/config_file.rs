@@ -30,6 +30,7 @@
 //! "unknown field" on a newer schema it simply doesn't implement yet.
 
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The schema version this Jetpack implements. A contract may omit `version:`
@@ -48,6 +49,12 @@ pub(super) struct JetpackFileConfig {
     /// Legacy back-compat alias (scalar values). Promoted into the defaults
     /// shape by [`JetpackFileConfig::effective`] when `defaults` is absent.
     pub(super) local: Option<JetpackLocalConfig>,
+    /// Named operator-truth presets. A profile (selected via `--profile` or
+    /// `defaults.profile`) overrides `inventory` + `secrets_inventory` only.
+    pub(super) profiles: Option<BTreeMap<String, JetpackProfile>>,
+    /// External automation source. **Informational only** for now — parsed so
+    /// the contract validates, but Jetpack does not fetch it yet.
+    pub(super) automation: Option<JetpackAutomation>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
@@ -55,7 +62,30 @@ pub(super) struct JetpackFileConfig {
 pub(super) struct JetpackDefaults {
     pub(super) playbook: Option<String>,
     pub(super) inventory: Option<Vec<String>>,
+    /// Operator-supplied secrets overlay (often gitignored / a sibling repo),
+    /// layered on top of `inventory` at load time.
+    pub(super) secrets_inventory: Option<Vec<String>>,
     pub(super) roles: Option<Vec<String>>,
+    /// The default profile to activate when `--profile` is not given.
+    pub(super) profile: Option<String>,
+}
+
+/// A named operator-truth preset. When active, a profile overrides only
+/// `inventory` and `secrets_inventory` (playbook/roles stay from `defaults`).
+/// `None` means "inherit defaults"; `Some(vec![])` means "set to none".
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct JetpackProfile {
+    pub(super) inventory: Option<Vec<String>>,
+    pub(super) secrets_inventory: Option<Vec<String>>,
+}
+
+/// External automation source declaration. **Informational**: parsed and
+/// surfaced in the resolution summary, but Jetpack does not yet clone/fetch it.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct JetpackAutomation {
+    pub(super) source: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
@@ -73,26 +103,36 @@ pub(super) struct JetpackLocalConfig {
 pub(super) struct EffectiveDefaults {
     pub(super) playbook: Option<String>,
     pub(super) inventory: Vec<String>,
+    pub(super) secrets_inventory: Vec<String>,
     pub(super) roles: Vec<String>,
+    /// The default profile name from `defaults.profile` (the CLI `--profile`
+    /// still wins over this; resolution happens in the consumer).
+    pub(super) profile: Option<String>,
 }
 
 impl JetpackFileConfig {
     /// `defaults` wins outright when present; otherwise `local:` is normalized
     /// (scalars → single-element lists). Returns empty defaults when neither is
-    /// set (a marker-only contract).
+    /// set (a marker-only contract). Profile override (applying a selected
+    /// profile's inventory/secrets) is the consumer's job, since it depends on
+    /// the CLI `--profile` flag.
     pub(super) fn effective(&self) -> EffectiveDefaults {
         if let Some(defaults) = &self.defaults {
             return EffectiveDefaults {
                 playbook: defaults.playbook.clone(),
                 inventory: defaults.inventory.clone().unwrap_or_default(),
+                secrets_inventory: defaults.secrets_inventory.clone().unwrap_or_default(),
                 roles: defaults.roles.clone().unwrap_or_default(),
+                profile: defaults.profile.clone(),
             };
         }
         match &self.local {
             Some(local) => EffectiveDefaults {
                 playbook: local.playbook.clone(),
                 inventory: local.inventory.clone().into_iter().collect(),
+                secrets_inventory: Vec::new(),
                 roles: local.roles.clone().into_iter().collect(),
+                profile: None,
             },
             None => EffectiveDefaults::default(),
         }
@@ -214,6 +254,107 @@ local:
 ";
         let cfg = deserialize(raw).expect("parses");
         assert_eq!(cfg.effective().playbook.as_deref(), Some("from-defaults"));
+    }
+
+    #[test]
+    fn defaults_secrets_inventory_and_profile_parse_and_effective() {
+        let raw = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [labs/london]
+  secrets_inventory:
+    - ../infra-secrets/london
+  roles: [roles]
+  profile: london
+";
+        let cfg = deserialize(raw).expect("parses");
+        let eff = cfg.effective();
+        assert_eq!(
+            eff.secrets_inventory,
+            vec!["../infra-secrets/london".to_string()]
+        );
+        assert_eq!(eff.profile.as_deref(), Some("london"));
+    }
+
+    #[test]
+    fn profiles_map_parses() {
+        let raw = "\
+version: 1
+profiles:
+  london:
+    inventory: [labs/london]
+    secrets_inventory: [../infra-secrets/london]
+  ci:
+    inventory: [inventory/ephemeral]
+";
+        let cfg = deserialize(raw).expect("parses");
+        let profiles = cfg.profiles.expect("profiles present");
+        let london = profiles.get("london").expect("london profile");
+        assert_eq!(
+            london.inventory.clone(),
+            Some(vec!["labs/london".to_string()])
+        );
+        assert_eq!(
+            london.secrets_inventory.clone(),
+            Some(vec!["../infra-secrets/london".to_string()])
+        );
+        let ci = profiles.get("ci").expect("ci profile");
+        assert_eq!(
+            ci.inventory.clone(),
+            Some(vec!["inventory/ephemeral".to_string()])
+        );
+        assert!(
+            ci.secrets_inventory.is_none(),
+            "ci has no secrets (inherits)"
+        );
+    }
+
+    #[test]
+    fn profile_secrets_empty_vec_is_distinct_from_absent() {
+        // Some([]) means "clear secrets"; None means "inherit defaults". The
+        // schema must preserve the distinction so a profile can opt out.
+        let with_empty = "\
+profiles:
+  clean:
+    secrets_inventory: []
+";
+        let cfg = deserialize(with_empty).expect("parses");
+        let profiles = cfg.profiles.unwrap();
+        let clean = profiles.get("clean").unwrap();
+        assert_eq!(clean.secrets_inventory.clone(), Some(vec![]));
+
+        let without = "\
+profiles:
+  inherit:
+    inventory: [x]
+";
+        let cfg2 = deserialize(without).expect("parses");
+        let profiles2 = cfg2.profiles.unwrap();
+        let inherit = profiles2.get("inherit").unwrap();
+        assert!(inherit.secrets_inventory.is_none());
+    }
+
+    #[test]
+    fn automation_source_parses() {
+        let raw = "\
+version: 1
+automation:
+  source: https://github.com/riffcc/moosefs-automation
+";
+        let cfg = deserialize(raw).expect("parses");
+        assert_eq!(
+            cfg.automation.unwrap().source.as_deref(),
+            Some("https://github.com/riffcc/moosefs-automation")
+        );
+    }
+
+    #[test]
+    fn deny_unknown_fields_still_rejects_typos_with_new_fields() {
+        // Adding new v1 fields must not weaken typo detection.
+        assert!(deserialize("version: 1\nplayboook: oops\n").is_err());
+        assert!(deserialize("version: 1\ndefaults:\n  inventroy: [x]\n").is_err());
+        assert!(deserialize("version: 1\nprofiles:\n  x:\n    inventry: [y]\n").is_err());
     }
 
     #[test]
