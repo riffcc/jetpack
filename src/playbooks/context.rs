@@ -297,6 +297,28 @@ impl PlaybookContext {
         blended
     }
 
+    /// Hostless variable blend for resolving play-level fields (notably
+    /// `play.groups`, see #52) *before* any host is targeted. Mirrors the
+    /// precedence of `get_complete_blended_variables_as_value` but omits the
+    /// host slice (no host selected yet — groups select hosts) and the role
+    /// slices (roles are processed after targeting): `defaults_storage` →
+    /// `vars_storage` → `extra_vars` (highest).
+    pub fn hostless_play_vars(&self) -> serde_yaml::Value {
+        let mut blended = serde_yaml::Value::from(serde_yaml::Mapping::new());
+        let src1 = self.defaults_storage.read().unwrap();
+        blend_variables(
+            &mut blended,
+            serde_yaml::Value::Mapping(src1.deref().clone()),
+        );
+        let src2 = self.vars_storage.read().unwrap();
+        blend_variables(
+            &mut blended,
+            serde_yaml::Value::Mapping(src2.deref().clone()),
+        );
+        blend_variables(&mut blended, self.extra_vars.clone());
+        blended
+    }
+
     // template code is not used here directly, but in handle/template.rs, which passes back through here, since
     // only the context knows all the variables from the playbook traversal to fill in and how to blend
     // variables in the correct order.
