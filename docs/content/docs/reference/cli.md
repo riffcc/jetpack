@@ -46,8 +46,10 @@ cascade:
 | `--limit-hosts` | yes | Restrict the run to these hosts. |
 | `--modules` | yes | — |
 | `--no-browser` | no | (docs mode) Print the local docs URL instead of opening a browser. |
+| `--no-secrets` | yes | — |
 | `--playbook` | yes | Playbook path(s); the automation content to run. |
 | `--port` | yes | SSH port (ssh modes) or HTTP port (docs mode). |
+| `--profile` | yes | — |
 | `--roles` | yes | — |
 | `--show-groups` | yes | — |
 | `--show-hosts` | yes | — |

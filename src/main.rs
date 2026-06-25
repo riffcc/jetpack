@@ -69,7 +69,10 @@ fn liftoff() -> Result<(), String> {
         | jetpack::cli::parser::CLI_MODE_PLAN
         | jetpack::cli::parser::CLI_MODE_SHOW
         | jetpack::cli::parser::CLI_MODE_SIMULATE => {
-            load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
+            load_inventory(
+                &inventory,
+                Arc::new(RwLock::new(cli_parser.inventory_load_paths())),
+            )?;
             if !cli_parser.inventory_set {
                 return Err(String::from(
                     "--inventory is required (pass -i PATH; for zero-arg runs, declare \
@@ -85,7 +88,10 @@ fn liftoff() -> Result<(), String> {
         | jetpack::cli::parser::CLI_MODE_CHECK_LOCAL => {
             // In pull/local modes, inventory is optional. If provided, it's used for variables/groups
             if cli_parser.inventory_set {
-                load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))?;
+                load_inventory(
+                    &inventory,
+                    Arc::new(RwLock::new(cli_parser.inventory_load_paths())),
+                )?;
             }
             // Ensure localhost is in the inventory for local execution
             inventory

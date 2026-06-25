@@ -200,12 +200,23 @@ fn inventory_check_valid_passes() {
 }
 
 #[test]
-fn inventory_check_missing_groups_dir_fails() {
+fn inventory_check_with_no_inventory_content_fails() {
     let tmp = TempDir::new().unwrap();
-    // inventory path exists but has no groups/
-    fs::create_dir_all(tmp.path().join("host_vars")).unwrap();
+    // An inventory path with no groups/, group_vars/, or host_vars/ is not a
+    // usable inventory. (A vars-only path — group_vars/ or host_vars/ present
+    // but no groups/ — IS valid now, as a secrets_inventory overlay.)
     let parser = inventory_parser(vec![tmp.path().to_path_buf()]);
     assert_eq!(inventory_check(&empty_inventory(), &parser), 1);
+}
+
+#[test]
+fn inventory_check_accepts_vars_only_overlay() {
+    let tmp = TempDir::new().unwrap();
+    // host_vars/ present, no groups/ — a valid vars-only overlay (secrets shape).
+    fs::create_dir_all(tmp.path().join("group_vars")).unwrap();
+    write(&tmp.path().join("group_vars/all"), "foo: bar\n");
+    let parser = inventory_parser(vec![tmp.path().to_path_buf()]);
+    assert_eq!(inventory_check(&empty_inventory(), &parser), 0);
 }
 
 #[test]
