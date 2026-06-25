@@ -19,6 +19,7 @@ pub mod async_ui;
 pub mod barrier;
 pub mod context;
 pub mod language;
+pub mod ref_collector;
 pub mod t_helpers;
 pub mod task_fsm;
 pub mod templar;
