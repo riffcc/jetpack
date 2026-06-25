@@ -18,7 +18,7 @@
 //!
 //! Jetpack anchors generated artifacts (DNS zone files today; future `!kubectl`
 //! manifests and `!helm` values files) to a single "automation repository" root
-//! rather than the bare process working directory. [`detect_repo_root`] resolves
+//! rather than the bare process working directory. [`detect_automation_root`] resolves
 //! that root in priority order: a real `git` checkout first, then a marker-file
 //! walk-up, then the current directory as a last resort — so the README's
 //! promise that paths resolve "relative to the current repository root" is
@@ -38,11 +38,11 @@ use std::process::Command;
 /// current directory. Resolution uses [`Path::join`], never `canonicalize`, so
 /// it works for directories that do not exist yet (e.g. a freshly-declared
 /// `dns/` tree a playbook is about to populate).
-pub fn detect_repo_root(start: &Path) -> PathBuf {
+pub fn detect_automation_root(start: &Path) -> PathBuf {
     if let Some(root) = git_toplevel(start) {
         return root;
     }
-    if let Some(root) = find_repo_root_by_marker(start) {
+    if let Some(root) = find_automation_root_by_marker(start) {
         return root;
     }
     // No git checkout and no marker: anchor to the working directory. If `start`
@@ -84,9 +84,9 @@ fn git_toplevel(start: &Path) -> Option<PathBuf> {
 ///
 /// Known limitation: this is a single innermost-first walk, so an inner `.git`
 /// shadows an outer `.jetpack.yml`. In real checkouts the `git` fast path in
-/// [`detect_repo_root`] dominates, so this only matters in unusual non-git
+/// [`detect_automation_root`] dominates, so this only matters in unusual non-git
 /// trees — acceptable for now.
-fn find_repo_root_by_marker(start: &Path) -> Option<PathBuf> {
+fn find_automation_root_by_marker(start: &Path) -> Option<PathBuf> {
     for ancestor in start.ancestors() {
         if has_marker(ancestor) {
             return Some(ancestor.to_path_buf());
@@ -96,9 +96,11 @@ fn find_repo_root_by_marker(start: &Path) -> Option<PathBuf> {
 }
 
 /// Whether `dir` carries any automation-repository marker (see
-/// [`find_repo_root_by_marker`] for the priority order).
+/// [`find_automation_root_by_marker`] for the priority order). Either contract
+/// extension — `.jetpack.yml` or `.jetpack.yaml` — marks a root, matching the
+/// search order in `cli::config_file::locate_config`.
 fn has_marker(dir: &Path) -> bool {
-    if dir.join(".jetpack.yml").is_file() {
+    if dir.join(".jetpack.yml").is_file() || dir.join(".jetpack.yaml").is_file() {
         return true;
     }
     if dir.join(".git").exists() {
@@ -141,7 +143,22 @@ mod tests {
         let nested = root.path().join("playbooks").join("gravity");
         mkdir(&nested);
         assert_eq!(
-            find_repo_root_by_marker(&nested),
+            find_automation_root_by_marker(&nested),
+            Some(root.path().to_path_buf())
+        );
+    }
+
+    #[test]
+    fn marker_finds_jetpack_yaml_from_nested_dir() {
+        // `.jetpack.yaml` marks a root just as much as `.jetpack.yml`, so a
+        // yaml-only tree is detected — keeping it consistent with the contract
+        // search order in cli::config_file::locate_config.
+        let root = TempDir::new().unwrap();
+        touch(&root.path().join(".jetpack.yaml"));
+        let nested = root.path().join("deploy").join("playbooks");
+        mkdir(&nested);
+        assert_eq!(
+            find_automation_root_by_marker(&nested),
             Some(root.path().to_path_buf())
         );
     }
@@ -153,7 +170,7 @@ mod tests {
         let nested = root.path().join("sub");
         mkdir(&nested);
         assert_eq!(
-            find_repo_root_by_marker(&nested),
+            find_automation_root_by_marker(&nested),
             Some(root.path().to_path_buf())
         );
     }
@@ -166,7 +183,7 @@ mod tests {
         let nested = root.path().join("sub");
         mkdir(&nested);
         assert_eq!(
-            find_repo_root_by_marker(&nested),
+            find_automation_root_by_marker(&nested),
             Some(root.path().to_path_buf())
         );
     }
@@ -179,7 +196,7 @@ mod tests {
         let nested = root.path().join("playbooks").join("x");
         mkdir(&nested);
         assert_eq!(
-            find_repo_root_by_marker(&nested),
+            find_automation_root_by_marker(&nested),
             Some(root.path().to_path_buf())
         );
     }
@@ -189,7 +206,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         let nested = root.path().join("a").join("b");
         mkdir(&nested);
-        assert_eq!(find_repo_root_by_marker(&nested), None);
+        assert_eq!(find_automation_root_by_marker(&nested), None);
     }
 
     #[test]
@@ -197,7 +214,7 @@ mod tests {
         let root = TempDir::new().unwrap();
         touch(&root.path().join(".jetpack.yml"));
         assert_eq!(
-            find_repo_root_by_marker(root.path()),
+            find_automation_root_by_marker(root.path()),
             Some(root.path().to_path_buf())
         );
     }
@@ -206,7 +223,10 @@ mod tests {
     fn detect_falls_back_to_start_without_markers_or_git() {
         let root = TempDir::new().unwrap();
         // a tempdir is neither a git checkout nor a marker-bearing tree
-        assert_eq!(detect_repo_root(root.path()), root.path().to_path_buf());
+        assert_eq!(
+            detect_automation_root(root.path()),
+            root.path().to_path_buf()
+        );
     }
 
     #[test]
@@ -215,7 +235,7 @@ mod tests {
         touch(&root.path().join(".jetpack.yml"));
         let nested = root.path().join("deploy").join("playbooks");
         mkdir(&nested);
-        assert_eq!(detect_repo_root(&nested), root.path().to_path_buf());
+        assert_eq!(detect_automation_root(&nested), root.path().to_path_buf());
     }
 
     #[test]
@@ -248,7 +268,7 @@ mod tests {
         if !git_init(&inner) {
             return; // git assumed present in dev/CI; no-op if unavailable
         }
-        let detected = detect_repo_root(&inner);
+        let detected = detect_automation_root(&inner);
         assert_eq!(
             detected.canonicalize().unwrap(),
             inner.canonicalize().unwrap()

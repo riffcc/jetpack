@@ -438,10 +438,10 @@ fn handle_batch(
 
         // Parse dns config from host variables
         let dns_key = serde_yaml::Value::String("dns".to_string());
-        let repo_root = run_state.context.read().unwrap().repo_root.clone();
+        let automation_root = run_state.context.read().unwrap().automation_root.clone();
         if let Some(dns_config) = host_vars
             .get(&dns_key)
-            .and_then(|v| crate::dns::dns_config_from_vars(v, &repo_root))
+            .and_then(|v| crate::dns::dns_config_from_vars(v, &automation_root))
         {
             // Look up IP from zone file
             if let Ok(Some(zone_ip)) = dns_config.lookup_ip(&host_name) {
@@ -561,10 +561,10 @@ fn handle_batch(
                 continue;
             }
             let dns_key = serde_yaml::Value::String("dns".to_string());
-            let repo_root = run_state.context.read().unwrap().repo_root.clone();
+            let automation_root = run_state.context.read().unwrap().automation_root.clone();
             let dns_config = host_vars
                 .get(&dns_key)
-                .and_then(|v| crate::dns::dns_config_from_vars(v, &repo_root));
+                .and_then(|v| crate::dns::dns_config_from_vars(v, &automation_root));
 
             match ensure_host_provisioned(
                 config,
@@ -740,10 +740,10 @@ fn async_handle_batch(
 
                 if needs_provision && let Some(ref config) = provision_config {
                     let dns_key = serde_yaml::Value::String("dns".to_string());
-                    let repo_root = run_state.context.read().unwrap().repo_root.clone();
+                    let automation_root = run_state.context.read().unwrap().automation_root.clone();
                     let dns_config = host_vars
                         .get(&dns_key)
-                        .and_then(|v| crate::dns::dns_config_from_vars(v, &repo_root));
+                        .and_then(|v| crate::dns::dns_config_from_vars(v, &automation_root));
 
                     match ensure_host_provisioned(
                         config,

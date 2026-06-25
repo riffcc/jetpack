@@ -25,7 +25,7 @@ use std::fs;
 use tempfile::TempDir;
 
 #[test]
-fn dns_record_lands_at_repo_root_not_playbook_dir() {
+fn dns_record_lands_at_automation_root_not_playbook_dir() {
     let repo = TempDir::new().unwrap();
     // a marker so detection, started from a subdirectory, walks up to here
     fs::write(repo.path().join(".jetpack.yml"), "").unwrap();
@@ -35,9 +35,9 @@ fn dns_record_lands_at_repo_root_not_playbook_dir() {
 
     // exactly what playbooks::traversal does: detect the repo root, then build
     // the DNS config from host vars anchored to that root.
-    let repo_root = jetpack::util::repo::detect_repo_root(&playbook_dir);
+    let automation_root = jetpack::util::repo::detect_automation_root(&playbook_dir);
     assert_eq!(
-        repo_root.canonicalize().unwrap(),
+        automation_root.canonicalize().unwrap(),
         repo.path().canonicalize().unwrap(),
         "detection must walk up from the playbook dir to the repo root"
     );
@@ -50,7 +50,7 @@ fn dns_record_lands_at_repo_root_not_playbook_dir() {
     );
     // disable provider sync so the test never shells out to octodns/gravity
     dns_block.insert(Value::String("auto_sync".to_string()), Value::Bool(false));
-    let dns = jetpack::dns::dns_config_from_vars(&Value::Mapping(dns_block), &repo_root)
+    let dns = jetpack::dns::dns_config_from_vars(&Value::Mapping(dns_block), &automation_root)
         .expect("dns block deserializes");
 
     jetpack::dns::add_host_record(&dns, "gravity01.riff.cc", "10.0.0.5")

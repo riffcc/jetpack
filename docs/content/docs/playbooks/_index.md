@@ -79,7 +79,7 @@ Paths resolve relative to the repository root.
 When `jetpack local` runs, Jetpack injects these variables:
 
 - `JET_CWD`
-- `JET_REPO_ROOT`
+- `JET_AUTOMATION_ROOT`
 - `JET_PLAYBOOK_DIR`
 - `JET_ROLES_DIR`
 - `JET_INVENTORY_DIR`
