@@ -14,16 +14,24 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Read-only walk of a playbook (and the roles it pulls in) that collects every
-//! template variable referenced anywhere — both inline in task fields and inside
-//! `!template` source files. This is "Set A" for the missing-secrets diagnostic:
-//! the variables the run references, independent of whether they resolve.
+//! Read-only walk of a playbook (and the roles it pulls in) that collects, for
+//! the missing-secrets diagnostic:
 //!
-//! It mirrors `traversal`'s role/task/template resolution (reusing
-//! [`resolve_role`]) but performs no `chdir` and no execution — paths are joined
+//! - **referenced** — every template variable referenced anywhere, inline in
+//!   task fields or inside `!template` source files ("Set A": what the run uses);
+//! - **defined** — every variable *defined* in the playbook itself (play
+//!   `vars`/`defaults`, role `defaults`, role-invocation `vars`, `vars_files`),
+//!   so the diagnostic does not flag a variable that has a default here.
+//!
+//! The diagnostic subtracts `referenced` from the full available set (inventory
+//! variables + `extra_vars` + these `defined` names + builtins) to name the
+//! variables that only the secrets overlay would supply.
+//!
+//! The walk mirrors `traversal`'s role/task/template resolution (reusing
+//! [`resolve_role`]) with no `chdir` and no execution — paths are joined
 //! explicitly. Each task file is parsed twice: once as a generic YAML value (so
-//! the inline templated fields of *any* task type are walked uniformly), and
-//! once as typed tasks (to follow `!template` `src` files at their known field).
+//! inline templated fields of *any* task type are walked uniformly), and once as
+//! typed tasks (to follow `!template` `src` files at their known field).
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -34,28 +42,37 @@ use crate::playbooks::template_refs::{referenced_variables, referenced_variables
 use crate::playbooks::traversal::resolve_role;
 use crate::registry::list::Task;
 
-/// Every template variable referenced by the given playbooks and the roles they
-/// pull in (role dependencies resolved recursively).
+/// Variables collected from a playbook tree.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CollectedVariables {
+    /// Variables the playbook references in templates (Set A).
+    pub referenced: BTreeSet<String>,
+    /// Variables the playbook itself defines (play/role/invocation/vars_files).
+    pub defined: BTreeSet<String>,
+}
+
+/// Walk the given playbooks (and the roles they pull in, dependencies resolved
+/// recursively) and collect their referenced and defined variables.
 ///
 /// Pure: reads files, changes nothing. A genuinely broken playbook (missing
 /// role, unreadable file, circular role dependency) yields an `Err` matching
 /// what a real run would hit; the caller decides whether to tolerate it for a
 /// best-effort diagnostic.
-pub fn collect_referenced_variables(
+pub fn collect_variables(
     playbook_paths: &[PathBuf],
     role_paths: &[PathBuf],
-) -> Result<BTreeSet<String>, String> {
-    let mut out = BTreeSet::new();
+) -> Result<CollectedVariables, String> {
+    let mut acc = CollectedVariables::default();
     for playbook_path in playbook_paths {
-        collect_from_playbook(playbook_path, role_paths, &mut out)?;
+        collect_from_playbook(playbook_path, role_paths, &mut acc)?;
     }
-    Ok(out)
+    Ok(acc)
 }
 
 fn collect_from_playbook(
     playbook_path: &Path,
     role_paths: &[PathBuf],
-    out: &mut BTreeSet<String>,
+    acc: &mut CollectedVariables,
 ) -> Result<(), String> {
     let source = fs::read_to_string(playbook_path).map_err(|e| {
         format!(
@@ -68,7 +85,7 @@ fn collect_from_playbook(
     // Inline references anywhere in the playbook document (loose task fields,
     // play var values, names, …) — a single generic walk covers every field.
     if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&source) {
-        out.extend(referenced_variables_in_value(&value));
+        acc.referenced.extend(referenced_variables_in_value(&value));
     }
 
     let plays: Vec<Play> = serde_yaml::from_str(&source).map_err(|e| {
@@ -81,9 +98,22 @@ fn collect_from_playbook(
     let playbook_dir = playbook_path.parent().unwrap_or_else(|| Path::new("."));
 
     for play in plays.iter() {
+        // Variables defined at the play level.
+        if let Some(defaults) = play.defaults.as_ref() {
+            acc.defined.extend(mapping_keys(defaults));
+        }
+        if let Some(vars) = play.vars.as_ref() {
+            acc.defined.extend(mapping_keys(vars));
+        }
+        if let Some(vars_files) = play.vars_files.as_ref() {
+            for file in vars_files.iter() {
+                collect_defined_from_vars_file(playbook_dir, file, acc);
+            }
+        }
+
         // Loose tasks and handlers: follow any `!template` source files.
-        follow_template_tasks(play.tasks.as_ref(), playbook_dir, out);
-        follow_template_tasks(play.handlers.as_ref(), playbook_dir, out);
+        follow_template_tasks(play.tasks.as_ref(), playbook_dir, acc);
+        follow_template_tasks(play.handlers.as_ref(), playbook_dir, acc);
 
         // Roles: walk each one's task/handler files (and their templates),
         // resolving dependencies recursively with cycle detection.
@@ -91,7 +121,10 @@ fn collect_from_playbook(
             let mut seen: HashSet<String> = HashSet::new();
             let mut stack: Vec<String> = Vec::new();
             for invocation in roles.iter() {
-                collect_from_role(&invocation.role, role_paths, &mut seen, &mut stack, out)?;
+                if let Some(vars) = invocation.vars.as_ref() {
+                    acc.defined.extend(mapping_keys(vars));
+                }
+                collect_from_role(&invocation.role, role_paths, &mut seen, &mut stack, acc)?;
             }
         }
     }
@@ -103,7 +136,7 @@ fn collect_from_role(
     role_paths: &[PathBuf],
     seen: &mut HashSet<String>,
     stack: &mut Vec<String>,
-    out: &mut BTreeSet<String>,
+    acc: &mut CollectedVariables,
 ) -> Result<(), String> {
     // A role already on the current chain is a cycle (check before the dedup, so
     // a cycle is never masked by a partial visit — mirroring `process_role`).
@@ -125,11 +158,14 @@ fn collect_from_role(
     stack.push(role_name.to_string());
 
     let (role, role_path) = resolve_role(role_paths, role_name)?;
+    if let Some(defaults) = role.defaults.as_ref() {
+        acc.defined.extend(mapping_keys(defaults));
+    }
 
     // Dependencies first, mirroring traversal.
     if let Some(deps) = role.dependencies.as_ref() {
         for dep in deps.iter() {
-            collect_from_role(dep, role_paths, seen, stack, out)?;
+            collect_from_role(dep, role_paths, seen, stack, acc)?;
         }
     }
 
@@ -138,13 +174,13 @@ fn collect_from_role(
     if let Some(files) = role.tasks.as_ref() {
         for file in files.iter() {
             let path = resolve_role_file(&role_path, file, "tasks");
-            collect_from_task_file(&path, &role_path, out)?;
+            collect_from_task_file(&path, &role_path, acc)?;
         }
     }
     if let Some(files) = role.handlers.as_ref() {
         for file in files.iter() {
             let path = resolve_role_file(&role_path, file, "handlers");
-            collect_from_task_file(&path, &role_path, out)?;
+            collect_from_task_file(&path, &role_path, acc)?;
         }
     }
 
@@ -156,7 +192,7 @@ fn collect_from_role(
 fn collect_from_task_file(
     path: &Path,
     role_root: &Path,
-    out: &mut BTreeSet<String>,
+    acc: &mut CollectedVariables,
 ) -> Result<(), String> {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -167,7 +203,7 @@ fn collect_from_task_file(
 
     // Inline references across the whole task file (any task type's fields).
     if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&source) {
-        out.extend(referenced_variables_in_value(&value));
+        acc.referenced.extend(referenced_variables_in_value(&value));
     }
 
     // `!template` source files: read and extract their references too.
@@ -177,10 +213,32 @@ fn collect_from_task_file(
     };
     for task in tasks {
         if let Task::Template(template_task) = task {
-            out.extend(template_file_refs(role_root, &template_task.src));
+            acc.referenced
+                .extend(template_file_refs(role_root, &template_task.src));
         }
     }
     Ok(())
+}
+
+// Add a vars_file's top-level keys to the `defined` set. Relative paths resolve
+// against the playbook directory (as traversal does); unreadable or unparseable
+// files are skipped — not what this diagnostic reports.
+fn collect_defined_from_vars_file(playbook_dir: &Path, file: &str, acc: &mut CollectedVariables) {
+    let path = Path::new(file);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        playbook_dir.join(file)
+    };
+    let Ok(source) = fs::read_to_string(&resolved) else {
+        return;
+    };
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&source) else {
+        return;
+    };
+    if let serde_yaml::Value::Mapping(map) = value {
+        acc.defined.extend(mapping_keys(&map));
+    }
 }
 
 // Absolute task/handler filenames are used as-is; relative ones live under the
@@ -223,19 +281,27 @@ fn template_file_refs(root: &Path, src: &str) -> BTreeSet<String> {
 
 // Follow `!template` source files in a list of typed tasks (loose play tasks /
 // handlers), resolving `src` against the playbook directory.
-fn follow_template_tasks(tasks: Option<&Vec<Task>>, root: &Path, out: &mut BTreeSet<String>) {
+fn follow_template_tasks(tasks: Option<&Vec<Task>>, root: &Path, acc: &mut CollectedVariables) {
     if let Some(tasks) = tasks {
         for task in tasks {
             if let Task::Template(template_task) = task {
-                out.extend(template_file_refs(root, &template_task.src));
+                acc.referenced
+                    .extend(template_file_refs(root, &template_task.src));
             }
         }
     }
 }
 
+// The string keys of a YAML mapping — these are the variable names it defines.
+fn mapping_keys(mapping: &serde_yaml::Mapping) -> impl Iterator<Item = String> + '_ {
+    mapping
+        .keys()
+        .filter_map(|k| k.as_str().map(|s| s.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::collect_referenced_variables;
+    use super::{CollectedVariables, collect_variables};
     use std::collections::BTreeSet;
     use std::fs;
     use std::path::Path;
@@ -262,8 +328,9 @@ mod tests {
             )
             .unwrap();
         });
-        let refs = collect_referenced_variables(&[playbook], &[]).unwrap();
-        assert_eq!(refs, set(&["who"]));
+        let collected = collect_variables(&[playbook], &[]).unwrap();
+        assert_eq!(collected.referenced, set(&["who"]));
+        assert!(collected.defined.is_empty());
     }
 
     #[test]
@@ -281,21 +348,20 @@ mod tests {
         )
         .unwrap();
         let playbook = dir.path().join("site.yml");
-        let refs = collect_referenced_variables(&[playbook], &[]).unwrap();
-        assert_eq!(refs, set(&["bind_addr", "redis_port"]));
+        let collected = collect_variables(&[playbook], &[]).unwrap();
+        assert_eq!(collected.referenced, set(&["bind_addr", "redis_port"]));
     }
 
     #[test]
     fn collects_from_role_tasks_and_handlers_and_dependencies() {
         let dir = tempfile::tempdir().unwrap();
         let roles_root = dir.path().join("roles");
-        // base role: a task with an inline ref + a template, and a handler ref.
         fs::create_dir_all(roles_root.join("base/tasks")).unwrap();
         fs::create_dir_all(roles_root.join("base/handlers")).unwrap();
         fs::create_dir_all(roles_root.join("base/templates")).unwrap();
         fs::write(
             roles_root.join("base/role.yml"),
-            "name: base\ndependencies: [shared]\ntasks: [main.yml]\nhandlers: [handlers.yml]\n",
+            "name: base\ndefaults:\n  base_token: default\ndependencies: [shared]\ntasks: [main.yml]\nhandlers: [handlers.yml]\n",
         )
         .unwrap();
         fs::write(
@@ -313,7 +379,6 @@ mod tests {
             "secret = {{ app_secret }}\n",
         )
         .unwrap();
-        // shared dep role with its own ref.
         fs::create_dir_all(roles_root.join("shared/tasks")).unwrap();
         fs::write(
             roles_root.join("shared/role.yml"),
@@ -325,19 +390,22 @@ mod tests {
             "- !echo\n  msg: \"shared={{ shared_key }}\"\n",
         )
         .unwrap();
-        // playbook invoking the base role.
         fs::write(
             dir.path().join("site.yml"),
-            "- name: site\n  groups: [all]\n  roles:\n    - role: base\n",
+            "- name: site\n  groups: [all]\n  vars:\n    svc: sshd\n  roles:\n    - role: base\n      vars:\n        app_secret: inline\n",
         )
         .unwrap();
 
         let playbook = dir.path().join("site.yml");
-        let refs = collect_referenced_variables(&[playbook], &[roles_root]).unwrap();
+        let collected = collect_variables(&[playbook], &[roles_root]).unwrap();
         assert_eq!(
-            refs,
+            collected.referenced,
             set(&["app_secret", "base_token", "shared_key", "svc"])
         );
+        // base_token has a role default; svc is a play var; app_secret is an
+        // invocation var — all defined here, so a missing-vars diagnostic would
+        // correctly report only shared_key.
+        assert_eq!(collected.defined, set(&["app_secret", "base_token", "svc"]));
     }
 
     #[test]
@@ -361,8 +429,8 @@ mod tests {
         )
         .unwrap();
         let playbook = dir.path().join("site.yml");
-        let refs = collect_referenced_variables(&[playbook], &[roles_root]).unwrap();
-        assert_eq!(refs, set(&["x"]));
+        let collected = collect_variables(&[playbook], &[roles_root]).unwrap();
+        assert_eq!(collected.referenced, set(&["x"]));
     }
 
     #[test]
@@ -389,8 +457,23 @@ mod tests {
         )
         .unwrap();
         let playbook = dir.path().join("site.yml");
-        let err = collect_referenced_variables(&[playbook], &[roles_root]).unwrap_err();
+        let err = collect_variables(&[playbook], &[roles_root]).unwrap_err();
         assert!(err.contains("circular"), "got: {err}");
+    }
+
+    #[test]
+    fn collects_defined_names_from_vars_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("secrets.yml"), "api_token: from-file\n").unwrap();
+        fs::write(
+            dir.path().join("site.yml"),
+            "- name: site\n  groups: [all]\n  vars_files:\n    - secrets.yml\n  tasks:\n    - !echo\n      msg: \"t={{ api_token }}\"\n",
+        )
+        .unwrap();
+        let playbook = dir.path().join("site.yml");
+        let collected = collect_variables(&[playbook], &[]).unwrap();
+        assert_eq!(collected.referenced, set(&["api_token"]));
+        assert_eq!(collected.defined, set(&["api_token"]));
     }
 
     #[test]
@@ -398,7 +481,7 @@ mod tests {
         let (_tmp, playbook) = fixture(|root| {
             fs::write(root.join("site.yml"), "[]\n").unwrap();
         });
-        let refs = collect_referenced_variables(&[playbook], &[]).unwrap();
-        assert!(refs.is_empty());
+        let collected = collect_variables(&[playbook], &[]).unwrap();
+        assert_eq!(collected, CollectedVariables::default());
     }
 }
