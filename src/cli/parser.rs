@@ -729,15 +729,11 @@ impl CliParser {
         match parse_paths(&String::from("-p/--playbook"), value) {
             Ok(paths) => {
                 for p in paths.iter() {
-                    if p.is_file() {
-                        let full = std::fs::canonicalize(p.as_path()).unwrap();
-                        self.playbook_paths
-                            .write()
-                            .unwrap()
-                            .push(full.to_path_buf());
-                    } else {
-                        return Err(format!("playbook file missing: {:?}", p));
-                    }
+                    let resolved = resolve_playbook_path(p).map_err(|err| {
+                        format!("{} {}", Arguments::ARGUMENT_PLAYBOOK.as_str(), err)
+                    })?;
+                    let full = std::fs::canonicalize(&resolved).unwrap();
+                    self.playbook_paths.write().unwrap().push(full);
                 }
             }
             Err(err_msg) => {
@@ -1830,6 +1826,108 @@ mod tests {
     }
 
     #[test]
+    fn resolve_playbook_path_file_is_used_directly() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("x.yml");
+        fs::write(&file, "---\n").unwrap();
+        assert_eq!(resolve_playbook_path(&file).unwrap(), file);
+    }
+
+    #[test]
+    fn resolve_playbook_path_dir_prefers_main_yml() {
+        let dir = TempDir::new().unwrap();
+        let pb = dir.path().join("web");
+        fs::create_dir_all(&pb).unwrap();
+        fs::write(pb.join("main.yml"), "---\n").unwrap();
+        fs::write(pb.join("web.yml"), "---\n").unwrap();
+        assert_eq!(resolve_playbook_path(&pb).unwrap(), pb.join("main.yml"));
+    }
+
+    #[test]
+    fn resolve_playbook_path_dir_falls_back_to_main_yaml() {
+        let dir = TempDir::new().unwrap();
+        let pb = dir.path().join("web");
+        fs::create_dir_all(&pb).unwrap();
+        fs::write(pb.join("main.yaml"), "---\n").unwrap();
+        assert_eq!(resolve_playbook_path(&pb).unwrap(), pb.join("main.yaml"));
+    }
+
+    #[test]
+    fn resolve_playbook_path_dir_uses_namesake_yml() {
+        let dir = TempDir::new().unwrap();
+        let pb = dir.path().join("gravity");
+        fs::create_dir_all(&pb).unwrap();
+        fs::write(pb.join("gravity.yml"), "---\n").unwrap();
+        assert_eq!(resolve_playbook_path(&pb).unwrap(), pb.join("gravity.yml"));
+    }
+
+    #[test]
+    fn resolve_playbook_path_dir_uses_namesake_yaml() {
+        let dir = TempDir::new().unwrap();
+        let pb = dir.path().join("gravity");
+        fs::create_dir_all(&pb).unwrap();
+        fs::write(pb.join("gravity.yaml"), "---\n").unwrap();
+        assert_eq!(resolve_playbook_path(&pb).unwrap(), pb.join("gravity.yaml"));
+    }
+
+    #[test]
+    fn resolve_playbook_path_dir_with_no_entry_errors_clearly() {
+        let dir = TempDir::new().unwrap();
+        let pb = dir.path().join("empty");
+        fs::create_dir_all(&pb).unwrap();
+        let err = resolve_playbook_path(&pb).unwrap_err();
+        assert!(err.contains("no playbook entry"), "{err}");
+        assert!(err.contains("main.yml"), "{err}");
+        assert!(err.contains("empty.yml"), "{err}");
+    }
+
+    #[test]
+    fn playbook_dir_arg_resolves_to_namesake_and_sets_playbook_dir() {
+        // `-p <dir>` resolves to the dir's entry, and JET_PLAYBOOK_DIR becomes the
+        // directory the user pointed at (so modules/roles siblings auto-discover).
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let automation_root = temp_dir.path();
+        let pb_dir = automation_root.join("playbooks").join("gravity");
+        fs::create_dir_all(&pb_dir).unwrap();
+        fs::write(pb_dir.join("gravity.yml"), "---\n").unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(automation_root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec![
+            "jetp".into(),
+            "ssh".into(),
+            "--playbook".into(),
+            "playbooks/gravity".into(),
+        ]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok(), "{:?}", result.err());
+        let playbook = parser
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
+        assert!(playbook.ends_with("playbooks/gravity/gravity.yml"));
+        let extra = parser.extra_vars.as_mapping().unwrap();
+        let playbook_dir = extra
+            .get(serde_yaml::Value::String("JET_PLAYBOOK_DIR".into()))
+            .expect("JET_PLAYBOOK_DIR injected")
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            playbook_dir.ends_with("playbooks/gravity"),
+            "JET_PLAYBOOK_DIR should be the dir pointed at: {playbook_dir}"
+        );
+    }
+
+    #[test]
     fn test_split_string() {
         let result = split_string(&"one:two:three".to_string());
         assert!(result.is_ok());
@@ -1872,4 +1970,45 @@ fn parse_paths(from: &str, value: &str) -> Result<Vec<PathBuf>, String> {
         }
     }
     Ok(results)
+}
+
+/// Resolve a `-p`/`--playbook` (or `defaults.playbook`) segment to a concrete
+/// playbook file.
+///
+/// A segment may be a file (used directly) or a directory. For a directory we
+/// probe, in order: `main.yml`, `main.yaml`, `<dirname>.yml`, `<dirname>.yaml`
+/// — first match wins — so `-p playbooks/gravity` runs `gravity/gravity.yml`
+/// (its namesake) while `-p playbooks/web` (with only `main.yml`) runs
+/// `main.yml`. The resolved file's parent dir becomes `JET_PLAYBOOK_DIR`
+/// (derived in `inject_builtin_vars`), so a directory argument keeps the
+/// "modules/roles siblings auto-discover" behavior pointed at the directory the
+/// user named.
+fn resolve_playbook_path(path: &Path) -> Result<PathBuf, String> {
+    if path.is_file() {
+        return Ok(path.to_path_buf());
+    }
+    if path.is_dir() {
+        let dirname = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("playbook directory has no name: {}", path.display()))?;
+        let candidates: [String; 4] = [
+            "main.yml".to_string(),
+            "main.yaml".to_string(),
+            format!("{dirname}.yml"),
+            format!("{dirname}.yaml"),
+        ];
+        for candidate in &candidates {
+            let entry = path.join(candidate);
+            if entry.is_file() {
+                return Ok(entry);
+            }
+        }
+        return Err(format!(
+            "no playbook entry in {} (looked for main.yml, main.yaml, {dirname}.yml, \
+             {dirname}.yaml)",
+            path.display()
+        ));
+    }
+    Err(format!("playbook file missing: {}", path.display()))
 }
