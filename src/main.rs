@@ -59,6 +59,23 @@ fn liftoff() -> Result<(), String> {
         two_column_table("field", "value", &cli_parser.resolution_summary());
     }
 
+    // #55: a declared-but-missing secrets_inventory in a non-mutating mode
+    // (converging modes already hard-errored in parse) is warned + skipped, not
+    // fatal — so a fresh clone / CI / contributor without the secrets sibling
+    // can still validate. Informational notice → stdout, never stderr.
+    {
+        let missing = cli_parser.missing_secrets.read().unwrap();
+        if !missing.is_empty() {
+            let names: Vec<String> = missing.iter().map(|p| p.display().to_string()).collect();
+            println!(
+                "note: secrets_inventory not found on this machine — skipping the secrets \
+                 overlay for this non-mutating run (define it, or pass --no-secrets to \
+                 silence): {}",
+                names.join(", ")
+            );
+        }
+    }
+
     let inventory: Arc<RwLock<Inventory>> = Arc::new(RwLock::new(Inventory::new()));
 
     match cli_parser.mode {

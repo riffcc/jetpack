@@ -44,6 +44,10 @@ pub struct CliParser {
     /// repo), layered on top of `inventory_paths` at load time. Tracked
     /// separately so `--no-secrets` can skip them and the summary can show them.
     pub secrets_paths: Arc<RwLock<Vec<PathBuf>>>,
+    /// Secrets paths declared in the contract but missing on disk. Populated
+    /// only in non-mutating modes (mutating modes hard-error instead, #55) so
+    /// the resolution summary / notice can report "(missing — skipped)".
+    pub missing_secrets: Arc<RwLock<Vec<PathBuf>>>,
     pub role_paths: Arc<RwLock<Vec<PathBuf>>>,
     pub module_paths: Arc<RwLock<Vec<PathBuf>>>,
     pub limit_groups: Vec<String>,
@@ -224,6 +228,18 @@ pub fn is_execution_mode(mode: u32) -> bool {
             | CLI_MODE_CHECK_LOCAL
             | CLI_MODE_PULL
             | CLI_MODE_SIMULATE
+    )
+}
+
+/// Whether `mode` mutates target hosts and therefore needs operator secrets
+/// (the `secrets_inventory` overlay). Distinct from `is_execution_mode`, which
+/// also includes the dry-runs (`plan`/`check-ssh`/`check-local`) — those don't
+/// mutate, so a missing secrets overlay there is warned+skipped, not fatal.
+/// Used by the #55 mode-aware missing-secrets gate.
+pub fn is_converging_mode(mode: u32) -> bool {
+    matches!(
+        mode,
+        CLI_MODE_APPLY | CLI_MODE_RUN | CLI_MODE_SSH | CLI_MODE_LOCAL | CLI_MODE_PULL
     )
 }
 
@@ -503,6 +519,7 @@ impl CliParser {
             playbook_paths: Arc::new(RwLock::new(Vec::new())),
             inventory_paths: Arc::new(RwLock::new(Vec::new())),
             secrets_paths: Arc::new(RwLock::new(Vec::new())),
+            missing_secrets: Arc::new(RwLock::new(Vec::new())),
             role_paths: Arc::new(RwLock::new(Vec::new())),
             module_paths: Arc::new(RwLock::new(Vec::new())),
             needs_help: false,
@@ -1238,13 +1255,25 @@ impl CliParser {
 
         // Secrets overlay (defaults.secrets_inventory) — only when --no-secrets
         // was not passed. Loaded after the main inventory so it layers on top.
+        // #55: a declared path missing on disk (fresh clone / CI / contributor
+        // without the secrets sibling) is mode-aware — a converging run needs
+        // the operator truth and hard-errors; a non-mutating run (check/plan/
+        // syntax/...) warns and skips so static validation still works.
         if !self.no_secrets {
             for secrets in &defaults.secrets_inventory {
-                self.append_secrets(
-                    &resolve_repo_relative_path(&automation_root, secrets)?
-                        .display()
-                        .to_string(),
-                )?;
+                let resolved = resolve_repo_relative_path(&automation_root, secrets)?;
+                if resolved.exists() {
+                    self.append_secrets(&resolved.display().to_string())?;
+                } else if is_converging_mode(self.mode) {
+                    return Err(format!(
+                        "secrets_inventory path ({}) was not found. This run converges hosts \
+                         and needs the operator secrets — create/populate that folder, pass \
+                         --no-secrets to skip the overlay, or supply it via -i.",
+                        resolved.display()
+                    ));
+                } else {
+                    self.missing_secrets.write().unwrap().push(resolved);
+                }
             }
         }
 
@@ -1292,7 +1321,22 @@ impl CliParser {
         let secrets = if self.no_secrets {
             String::from("(skipped via --no-secrets)")
         } else {
-            join_paths(&self.secrets_paths)
+            let present = join_paths(&self.secrets_paths);
+            let missing = self.missing_secrets.read().unwrap();
+            if missing.is_empty() {
+                present
+            } else {
+                let missing_str = missing
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if present == "(none)" {
+                    format!("(missing: {} — skipped)", missing_str)
+                } else {
+                    format!("{} (missing: {} — skipped)", present, missing_str)
+                }
+            }
         };
         let mut rows = vec![
             (
@@ -2460,6 +2504,147 @@ mod tests {
         assert!(
             parser.secrets_paths.read().unwrap().is_empty(),
             "--no-secrets must not populate secrets_paths"
+        );
+    }
+
+    // --- #55: mode-aware missing-secrets gate ---
+
+    /// Fixture: a `.jetpack.yml` with playbook + inventory, and
+    /// `secrets_inventory` pointing at `../missing-secrets` (NOT on disk) when
+    /// `declare_secrets` is true. Returns the kept-alive TempDir + its root.
+    fn secrets_contract_fixture(declare_secrets: bool) -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().to_path_buf();
+        fs::create_dir_all(root.join("pb")).unwrap();
+        fs::create_dir_all(root.join("inv")).unwrap();
+        fs::write(root.join("pb/install.yml"), "---\n").unwrap();
+        let secrets_line = if declare_secrets {
+            "  secrets_inventory:\n    - ../missing-secrets\n"
+        } else {
+            ""
+        };
+        fs::write(
+            root.join(".jetpack.yml"),
+            format!(
+                "version: 1\ndefaults:\n  playbook: pb/install.yml\n  inventory:\n    - inv\n{}",
+                secrets_line
+            ),
+        )
+        .unwrap();
+        (temp_dir, root)
+    }
+
+    #[test]
+    fn missing_secrets_warns_and_skips_in_non_mutating_mode() {
+        // `check` is non-mutating: a declared-but-missing secrets path must be
+        // warned + skipped, NOT hard-fail (#55 — fresh clone / CI / contributor).
+        let _lock = ENV_LOCK.lock().unwrap();
+        let (_temp, root) = secrets_contract_fixture(true);
+        let previous = env::current_dir().unwrap();
+        env::set_current_dir(&root).unwrap();
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "check".into()]);
+        env::set_current_dir(previous).unwrap();
+
+        assert!(
+            result.is_ok(),
+            "check must not hard-fail on missing secrets: {:?}",
+            result.err()
+        );
+        assert!(
+            parser.secrets_paths.read().unwrap().is_empty(),
+            "missing secret must not be loaded"
+        );
+        let missing = parser.missing_secrets.read().unwrap();
+        assert_eq!(missing.len(), 1, "missing secret recorded: {:?}", missing);
+        assert!(missing[0].to_string_lossy().ends_with("missing-secrets"));
+    }
+
+    #[test]
+    fn missing_secrets_hard_errors_in_converging_mode() {
+        // `apply` converges hosts: a declared-but-missing secrets path must
+        // hard-error with an actionable message naming the path + the override.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let (_temp, root) = secrets_contract_fixture(true);
+        let previous = env::current_dir().unwrap();
+        env::set_current_dir(&root).unwrap();
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "apply".into()]);
+        env::set_current_dir(previous).unwrap();
+
+        let err = result
+            .err()
+            .expect("apply must hard-fail on missing secrets");
+        assert!(err.contains("secrets_inventory"), "names the key: {}", err);
+        assert!(err.contains("missing-secrets"), "names the path: {}", err);
+        assert!(
+            err.contains("--no-secrets"),
+            "explains the override: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn undeclared_secrets_is_unchanged_in_any_mode() {
+        // No `secrets_inventory` key → no gate, no warning, regardless of mode.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let (_temp, root) = secrets_contract_fixture(false);
+        let previous = env::current_dir().unwrap();
+        env::set_current_dir(&root).unwrap();
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "apply".into()]);
+        env::set_current_dir(previous).unwrap();
+        assert!(
+            result.is_ok(),
+            "no secrets key → no gate: {:?}",
+            result.err()
+        );
+        assert!(parser.missing_secrets.read().unwrap().is_empty());
+    }
+
+    #[test]
+    fn no_secrets_override_proceeds_with_missing_in_converging_mode() {
+        // `--no-secrets` is the explicit override even in a converging mode.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let (_temp, root) = secrets_contract_fixture(true);
+        let previous = env::current_dir().unwrap();
+        env::set_current_dir(&root).unwrap();
+        let mut parser = CliParser::new();
+        let result =
+            parser.parse_from_strings(vec!["jetp".into(), "apply".into(), "--no-secrets".into()]);
+        env::set_current_dir(previous).unwrap();
+        assert!(
+            result.is_ok(),
+            "--no-secrets overrides missing secrets: {:?}",
+            result.err()
+        );
+        assert!(
+            parser.missing_secrets.read().unwrap().is_empty(),
+            "nothing recorded under --no-secrets"
+        );
+    }
+
+    #[test]
+    fn resolution_summary_reflects_missing_secrets() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let (_temp, root) = secrets_contract_fixture(true);
+        let previous = env::current_dir().unwrap();
+        env::set_current_dir(&root).unwrap();
+        let mut parser = CliParser::new();
+        parser
+            .parse_from_strings(vec!["jetp".into(), "check".into()])
+            .unwrap();
+        env::set_current_dir(previous).unwrap();
+        let map: HashMap<String, String> = parser.resolution_summary().into_iter().collect();
+        assert!(
+            map["Secrets"].contains("missing"),
+            "summary shows missing: {}",
+            map["Secrets"]
+        );
+        assert!(
+            map["Secrets"].contains("skipped"),
+            "summary shows skipped: {}",
+            map["Secrets"]
         );
     }
 
