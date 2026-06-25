@@ -693,6 +693,12 @@ impl CliParser {
             .map_err(|e| format!("failed to canonicalize current directory: {e}"))?;
         self.automation_root = crate::util::repo::detect_automation_root(&cwd);
 
+        // Apply defaults in precedence order: CLI flags (already parsed) win,
+        // then the `.jetpack` contract (all playbook modes), then — for local
+        // mode only — the deploy/ conventions. apply_file_defaults flips
+        // playbook_set/inventory_set when the contract supplies them, so a
+        // zero-arg `jetp ssh` passes the main.rs required-arg gates.
+        self.apply_file_defaults(&cwd)?;
         self.apply_local_bootstrap_defaults(&cwd)?;
 
         if self.playbook_set {
@@ -1011,61 +1017,87 @@ impl CliParser {
         Ok(())
     }
 
+    /// Apply `.jetpack` contract defaults for every playbook-executing mode —
+    /// the same mode set as `inject_builtin_vars` (everything but the pure
+    /// utility modes). Each of playbook/inventory/roles is filled ONLY when the
+    /// user did not supply it on the CLI, so precedence is CLI > file. Paths in
+    /// the contract resolve against the automation root, the way `Cargo.toml`
+    /// paths resolve against the package root.
+    fn apply_file_defaults(&mut self, cwd: &Path) -> Result<(), String> {
+        match self.mode {
+            CLI_MODE_SHOW | CLI_MODE_DOCS | CLI_MODE_GEN_REFERENCE | CLI_MODE_INSTALL => {
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        let defaults = self.load_jetpack_file_config(cwd)?.effective();
+        let automation_root = self.automation_root.clone();
+
+        // Each of playbook/inventory/roles is filled ONLY when the CLI left it
+        // unset — CLI wins over the contract. For the scalar playbook the
+        // "not set" guard is folded into the Option via `filter` (a single
+        // if-let, since `let`-chains are not stable); the lists are iterated
+        // unconditionally under their own is-empty guard.
+        if let Some(playbook) = defaults.playbook.as_ref().filter(|_| !self.playbook_set) {
+            self.append_playbook(
+                &resolve_repo_relative_path(&automation_root, playbook)?
+                    .display()
+                    .to_string(),
+            )?;
+        }
+
+        if self.role_paths.read().unwrap().is_empty() {
+            for roles in &defaults.roles {
+                self.append_roles(
+                    &resolve_repo_relative_path(&automation_root, roles)?
+                        .display()
+                        .to_string(),
+                )?;
+            }
+        }
+
+        if !self.inventory_set {
+            for inventory in &defaults.inventory {
+                self.append_inventory(
+                    &resolve_repo_relative_path(&automation_root, inventory)?
+                        .display()
+                        .to_string(),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Local-mode convention fallbacks (the `deploy/` layout) — the last-resort
+    /// layer BENEATH the contract. The `.jetpack` contract was already applied by
+    /// `apply_file_defaults`; this only fills what is still unset for a bare
+    /// `jetp local` with no contract and no explicit flags.
     fn apply_local_bootstrap_defaults(&mut self, cwd: &Path) -> Result<(), String> {
         match self.mode {
             CLI_MODE_LOCAL | CLI_MODE_CHECK_LOCAL => {}
             _ => return Ok(()),
         }
 
-        let file_config = self.load_jetpack_file_config(cwd)?;
-        let defaults = file_config.effective();
-
         if !self.playbook_set {
-            if let Some(playbook) = defaults.playbook.as_ref() {
-                self.append_playbook(
-                    &resolve_repo_relative_path(cwd, playbook)?
-                        .display()
-                        .to_string(),
-                )?;
-            } else {
-                let default_playbook = cwd.join(DEFAULT_LOCAL_PLAYBOOK);
-                if default_playbook.is_file() {
-                    self.append_playbook(&default_playbook.display().to_string())?;
-                }
+            let default_playbook = cwd.join(DEFAULT_LOCAL_PLAYBOOK);
+            if default_playbook.is_file() {
+                self.append_playbook(&default_playbook.display().to_string())?;
             }
         }
 
         if self.playbook_set && self.role_paths.read().unwrap().is_empty() {
-            if !defaults.roles.is_empty() {
-                for roles in &defaults.roles {
-                    self.append_roles(
-                        &resolve_repo_relative_path(cwd, roles)?
-                            .display()
-                            .to_string(),
-                    )?;
-                }
-            } else {
-                let default_roles = cwd.join(DEFAULT_LOCAL_ROLES);
-                if default_roles.is_dir() {
-                    self.append_roles(&default_roles.display().to_string())?;
-                }
+            let default_roles = cwd.join(DEFAULT_LOCAL_ROLES);
+            if default_roles.is_dir() {
+                self.append_roles(&default_roles.display().to_string())?;
             }
         }
 
         if !self.inventory_set {
-            if !defaults.inventory.is_empty() {
-                for inventory in &defaults.inventory {
-                    self.append_inventory(
-                        &resolve_repo_relative_path(cwd, inventory)?
-                            .display()
-                            .to_string(),
-                    )?;
-                }
-            } else {
-                let default_inventory = cwd.join(DEFAULT_LOCAL_INVENTORY);
-                if default_inventory.exists() {
-                    self.append_inventory(&default_inventory.display().to_string())?;
-                }
+            let default_inventory = cwd.join(DEFAULT_LOCAL_INVENTORY);
+            if default_inventory.exists() {
+                self.append_inventory(&default_inventory.display().to_string())?;
             }
         }
 
@@ -1925,6 +1957,131 @@ mod tests {
             playbook_dir.ends_with("playbooks/gravity"),
             "JET_PLAYBOOK_DIR should be the dir pointed at: {playbook_dir}"
         );
+    }
+
+    #[test]
+    fn zero_arg_ssh_uses_contract_defaults() {
+        // The headline of #47: with a `.jetpack` contract, `jetp ssh` (zero args)
+        // resolves playbook + inventory and flips the required-arg gates.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let automation_root = temp_dir.path();
+        fs::create_dir_all(automation_root.join("pb")).unwrap();
+        fs::create_dir_all(automation_root.join("inv")).unwrap();
+        fs::write(automation_root.join("pb/install.yml"), "---\n").unwrap();
+        fs::write(
+            automation_root.join(".jetpack.yml"),
+            "version: 1\ndefaults:\n  playbook: pb/install.yml\n  inventory:\n    - inv\n",
+        )
+        .unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(automation_root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "ssh".into()]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(parser.playbook_set, "playbook defaulted from contract");
+        assert!(parser.inventory_set, "inventory defaulted from contract");
+        let playbook = parser
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
+        assert!(playbook.ends_with("pb/install.yml"));
+        let inventory = parser
+            .inventory_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
+        assert!(inventory.ends_with("inv"));
+    }
+
+    #[test]
+    fn cli_flags_override_contract_defaults() {
+        // Precedence is CLI > file > convention: an explicit -p beats the
+        // contract's defaults.playbook.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let automation_root = temp_dir.path();
+        fs::create_dir_all(automation_root.join("pb")).unwrap();
+        fs::create_dir_all(automation_root.join("manual")).unwrap();
+        fs::write(automation_root.join("pb/contract.yml"), "---\n").unwrap();
+        fs::write(automation_root.join("manual/explicit.yml"), "---\n").unwrap();
+        fs::write(
+            automation_root.join(".jetpack.yml"),
+            "version: 1\ndefaults:\n  playbook: pb/contract.yml\n",
+        )
+        .unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(automation_root).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec![
+            "jetp".into(),
+            "ssh".into(),
+            "--playbook".into(),
+            "manual/explicit.yml".into(),
+        ]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok());
+        let playbook = parser
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
+        assert!(
+            playbook.ends_with("manual/explicit.yml"),
+            "CLI -p must beat the contract: {playbook:?}"
+        );
+    }
+
+    #[test]
+    fn contract_paths_resolve_against_automation_root_from_subdir() {
+        // Running from a subdirectory, the contract's relative paths resolve
+        // against the automation root (like Cargo.toml), not the working dir.
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp_dir = TempDir::new().unwrap();
+        let automation_root = temp_dir.path();
+        fs::create_dir_all(automation_root.join("pb")).unwrap();
+        fs::write(automation_root.join("pb/install.yml"), "---\n").unwrap();
+        fs::write(
+            automation_root.join(".jetpack.yml"),
+            "version: 1\ndefaults:\n  playbook: pb/install.yml\n",
+        )
+        .unwrap();
+        let subdir = automation_root.join("deep").join("nest");
+        fs::create_dir_all(&subdir).unwrap();
+
+        let previous_dir = env::current_dir().unwrap();
+        env::set_current_dir(&subdir).unwrap();
+
+        let mut parser = CliParser::new();
+        let result = parser.parse_from_strings(vec!["jetp".into(), "ssh".into()]);
+
+        env::set_current_dir(previous_dir).unwrap();
+
+        assert!(result.is_ok());
+        let playbook = parser
+            .playbook_paths
+            .read()
+            .unwrap()
+            .first()
+            .unwrap()
+            .clone();
+        assert!(playbook.ends_with("pb/install.yml"));
     }
 
     #[test]
