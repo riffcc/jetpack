@@ -14,18 +14,21 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Read-only walk of a playbook (and the roles it pulls in) that collects, for
-//! the missing-secrets diagnostic:
+//! Read-only walk of a playbook (and the roles it pulls in) that collects, per
+//! play, the variables the missing-secrets diagnostic needs:
 //!
-//! - **referenced** — every template variable referenced anywhere, inline in
-//!   task fields or inside `!template` source files ("Set A": what the run uses);
-//! - **defined** — every variable *defined* in the playbook itself (play
-//!   `vars`/`defaults`, role `defaults`, role-invocation `vars`, `vars_files`),
-//!   so the diagnostic does not flag a variable that has a default here.
+//! - **referenced** — variables the play references, inline in task fields or in
+//!   `!template` source files;
+//! - **defined** — variables the play itself defines (play `vars`/`defaults`,
+//!   role `defaults`, role-invocation `vars`, `vars_files`);
+//! - **groups** — the raw `play.groups` entries, so the diagnostic can resolve
+//!   the play's targeted hosts.
 //!
-//! The diagnostic subtracts `referenced` from the full available set (inventory
-//! variables + `extra_vars` + these `defined` names + builtins) to name the
-//! variables that only the secrets overlay would supply.
+//! The diagnostic applies the exact per-play scope formula
+//! `R(p) \ ( D(p) ∪ G ∪ B ∪ ⋂_{h ∈ H(p)} I(h) )` — proven equivalent to the
+//! per-(play, host) semantics in `secrets_diagnostic` (Lean: `missing_per_play_exact`).
+//! Keeping the data per-play (rather than a run-wide union) is what makes the
+//! diagnostic exact instead of over- or under-reporting.
 //!
 //! The walk mirrors `traversal`'s role/task/template resolution (reusing
 //! [`resolve_role`]) with no `chdir` and no execution — paths are joined
@@ -42,37 +45,43 @@ use crate::playbooks::template_refs::{referenced_variables, referenced_variables
 use crate::playbooks::traversal::resolve_role;
 use crate::registry::list::Task;
 
-/// Variables collected from a playbook tree.
+/// Per-play collected variables: what a single play references, what it defines,
+/// and the (raw, possibly templated) groups it targets. Kept per-play so the
+/// diagnostic can resolve each play's targeted hosts and apply the exact
+/// per-play scope formula (see `secrets_diagnostic` + the Lean proof).
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct CollectedVariables {
-    /// Variables the playbook references in templates (Set A).
+pub struct PerPlayVars {
+    /// Raw `play.groups` entries (may contain `{{ }}`).
+    pub groups: Vec<String>,
+    /// Variables the play references in templates.
     pub referenced: BTreeSet<String>,
-    /// Variables the playbook itself defines (play/role/invocation/vars_files).
+    /// Variables the play itself defines (play vars/defaults, role defaults,
+    /// role-invocation vars, vars_files).
     pub defined: BTreeSet<String>,
 }
 
 /// Walk the given playbooks (and the roles they pull in, dependencies resolved
-/// recursively) and collect their referenced and defined variables.
+/// recursively) and collect each play's referenced and defined variables.
 ///
 /// Pure: reads files, changes nothing. A genuinely broken playbook (missing
 /// role, unreadable file, circular role dependency) yields an `Err` matching
 /// what a real run would hit; the caller decides whether to tolerate it for a
 /// best-effort diagnostic.
-pub fn collect_variables(
+pub fn collect_per_play(
     playbook_paths: &[PathBuf],
     role_paths: &[PathBuf],
-) -> Result<CollectedVariables, String> {
-    let mut acc = CollectedVariables::default();
+) -> Result<Vec<PerPlayVars>, String> {
+    let mut out: Vec<PerPlayVars> = Vec::new();
     for playbook_path in playbook_paths {
-        collect_from_playbook(playbook_path, role_paths, &mut acc)?;
+        collect_from_playbook(playbook_path, role_paths, &mut out)?;
     }
-    Ok(acc)
+    Ok(out)
 }
 
 fn collect_from_playbook(
     playbook_path: &Path,
     role_paths: &[PathBuf],
-    acc: &mut CollectedVariables,
+    out: &mut Vec<PerPlayVars>,
 ) -> Result<(), String> {
     let source = fs::read_to_string(playbook_path).map_err(|e| {
         format!(
@@ -82,11 +91,14 @@ fn collect_from_playbook(
         )
     })?;
 
-    // Inline references anywhere in the playbook document (loose task fields,
-    // play var values, names, …) — a single generic walk covers every field.
-    if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&source) {
-        acc.referenced.extend(referenced_variables_in_value(&value));
-    }
+    // Parse twice: as typed plays (structure) and as a generic value (so each
+    // play's inline templated fields are walked uniformly). Keep the value as a
+    // per-play sequence to attribute inline references to the correct play.
+    let whole: serde_yaml::Value = serde_yaml::from_str(&source).unwrap_or(serde_yaml::Value::Null);
+    let play_values: Vec<serde_yaml::Value> = match &whole {
+        serde_yaml::Value::Sequence(seq) => seq.clone(),
+        _ => Vec::new(),
+    };
 
     let plays: Vec<Play> = serde_yaml::from_str(&source).map_err(|e| {
         format!(
@@ -97,7 +109,20 @@ fn collect_from_playbook(
     })?;
     let playbook_dir = playbook_path.parent().unwrap_or_else(|| Path::new("."));
 
-    for play in plays.iter() {
+    for (index, play) in plays.iter().enumerate() {
+        let mut acc = PerPlayVars {
+            groups: play.groups.clone(),
+            referenced: BTreeSet::new(),
+            defined: BTreeSet::new(),
+        };
+
+        // Inline references in this play's own YAML (loose task fields, play var
+        // values, names, …) — walked generically so every field type is covered.
+        if let Some(play_value) = play_values.get(index) {
+            acc.referenced
+                .extend(referenced_variables_in_value(play_value));
+        }
+
         // Variables defined at the play level.
         if let Some(defaults) = play.defaults.as_ref() {
             acc.defined.extend(mapping_keys(defaults));
@@ -107,13 +132,13 @@ fn collect_from_playbook(
         }
         if let Some(vars_files) = play.vars_files.as_ref() {
             for file in vars_files.iter() {
-                collect_defined_from_vars_file(playbook_dir, file, acc);
+                collect_defined_from_vars_file(playbook_dir, file, &mut acc);
             }
         }
 
         // Loose tasks and handlers: follow any `!template` source files.
-        follow_template_tasks(play.tasks.as_ref(), playbook_dir, acc);
-        follow_template_tasks(play.handlers.as_ref(), playbook_dir, acc);
+        follow_template_tasks(play.tasks.as_ref(), playbook_dir, &mut acc);
+        follow_template_tasks(play.handlers.as_ref(), playbook_dir, &mut acc);
 
         // Roles: walk each one's task/handler files (and their templates),
         // resolving dependencies recursively with cycle detection.
@@ -124,9 +149,17 @@ fn collect_from_playbook(
                 if let Some(vars) = invocation.vars.as_ref() {
                     acc.defined.extend(mapping_keys(vars));
                 }
-                collect_from_role(&invocation.role, role_paths, &mut seen, &mut stack, acc)?;
+                collect_from_role(
+                    &invocation.role,
+                    role_paths,
+                    &mut seen,
+                    &mut stack,
+                    &mut acc,
+                )?;
             }
         }
+
+        out.push(acc);
     }
     Ok(())
 }
@@ -136,7 +169,7 @@ fn collect_from_role(
     role_paths: &[PathBuf],
     seen: &mut HashSet<String>,
     stack: &mut Vec<String>,
-    acc: &mut CollectedVariables,
+    acc: &mut PerPlayVars,
 ) -> Result<(), String> {
     // A role already on the current chain is a cycle (check before the dedup, so
     // a cycle is never masked by a partial visit — mirroring `process_role`).
@@ -192,7 +225,7 @@ fn collect_from_role(
 fn collect_from_task_file(
     path: &Path,
     role_root: &Path,
-    acc: &mut CollectedVariables,
+    acc: &mut PerPlayVars,
 ) -> Result<(), String> {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -223,7 +256,7 @@ fn collect_from_task_file(
 // Add a vars_file's top-level keys to the `defined` set. Relative paths resolve
 // against the playbook directory (as traversal does); unreadable or unparseable
 // files are skipped — not what this diagnostic reports.
-fn collect_defined_from_vars_file(playbook_dir: &Path, file: &str, acc: &mut CollectedVariables) {
+fn collect_defined_from_vars_file(playbook_dir: &Path, file: &str, acc: &mut PerPlayVars) {
     let path = Path::new(file);
     let resolved = if path.is_absolute() {
         path.to_path_buf()
@@ -281,7 +314,7 @@ fn template_file_refs(root: &Path, src: &str) -> BTreeSet<String> {
 
 // Follow `!template` source files in a list of typed tasks (loose play tasks /
 // handlers), resolving `src` against the playbook directory.
-fn follow_template_tasks(tasks: Option<&Vec<Task>>, root: &Path, acc: &mut CollectedVariables) {
+fn follow_template_tasks(tasks: Option<&Vec<Task>>, root: &Path, acc: &mut PerPlayVars) {
     if let Some(tasks) = tasks {
         for task in tasks {
             if let Task::Template(template_task) = task {
@@ -301,7 +334,7 @@ fn mapping_keys(mapping: &serde_yaml::Mapping) -> impl Iterator<Item = String> +
 
 #[cfg(test)]
 mod tests {
-    use super::{CollectedVariables, collect_variables};
+    use super::{PerPlayVars, collect_per_play};
     use std::collections::BTreeSet;
     use std::fs;
     use std::path::Path;
@@ -309,6 +342,13 @@ mod tests {
 
     fn set(items: &[&str]) -> BTreeSet<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    // Collect and return the single play's variables (all fixtures here have one).
+    fn single(playbook: &Path, roles: &[std::path::PathBuf]) -> PerPlayVars {
+        let per = collect_per_play(&[playbook.to_path_buf()], roles).unwrap();
+        assert_eq!(per.len(), 1, "expected exactly one play, got {}", per.len());
+        per.into_iter().next().unwrap()
     }
 
     // Build a temp tree and return (playbook_path, roles_dir).
@@ -328,7 +368,7 @@ mod tests {
             )
             .unwrap();
         });
-        let collected = collect_variables(&[playbook], &[]).unwrap();
+        let collected = single(&playbook, &[]);
         assert_eq!(collected.referenced, set(&["who"]));
         assert!(collected.defined.is_empty());
     }
@@ -348,7 +388,7 @@ mod tests {
         )
         .unwrap();
         let playbook = dir.path().join("site.yml");
-        let collected = collect_variables(&[playbook], &[]).unwrap();
+        let collected = single(&playbook, &[]);
         assert_eq!(collected.referenced, set(&["bind_addr", "redis_port"]));
     }
 
@@ -397,7 +437,7 @@ mod tests {
         .unwrap();
 
         let playbook = dir.path().join("site.yml");
-        let collected = collect_variables(&[playbook], &[roles_root]).unwrap();
+        let collected = single(&playbook, &[roles_root]);
         assert_eq!(
             collected.referenced,
             set(&["app_secret", "base_token", "shared_key", "svc"])
@@ -429,8 +469,10 @@ mod tests {
         )
         .unwrap();
         let playbook = dir.path().join("site.yml");
-        let collected = collect_variables(&[playbook], &[roles_root]).unwrap();
-        assert_eq!(collected.referenced, set(&["x"]));
+        let per = collect_per_play(&[playbook], &[roles_root]).unwrap();
+        // two plays, each invoking r; both reference x exactly once.
+        assert_eq!(per.len(), 2);
+        assert!(per.iter().all(|p| p.referenced == set(&["x"])));
     }
 
     #[test]
@@ -457,7 +499,7 @@ mod tests {
         )
         .unwrap();
         let playbook = dir.path().join("site.yml");
-        let err = collect_variables(&[playbook], &[roles_root]).unwrap_err();
+        let err = collect_per_play(&[playbook], &[roles_root]).unwrap_err();
         assert!(err.contains("circular"), "got: {err}");
     }
 
@@ -471,7 +513,7 @@ mod tests {
         )
         .unwrap();
         let playbook = dir.path().join("site.yml");
-        let collected = collect_variables(&[playbook], &[]).unwrap();
+        let collected = single(&playbook, &[]);
         assert_eq!(collected.referenced, set(&["api_token"]));
         assert_eq!(collected.defined, set(&["api_token"]));
     }
@@ -481,7 +523,7 @@ mod tests {
         let (_tmp, playbook) = fixture(|root| {
             fs::write(root.join("site.yml"), "[]\n").unwrap();
         });
-        let collected = collect_variables(&[playbook], &[]).unwrap();
-        assert_eq!(collected, CollectedVariables::default());
+        let per = collect_per_play(&[playbook], &[]).unwrap();
+        assert!(per.is_empty());
     }
 }
