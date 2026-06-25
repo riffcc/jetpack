@@ -51,6 +51,47 @@ pub fn referenced_variables(template: &str) -> Result<BTreeSet<String>, String> 
     Ok(out)
 }
 
+/// Every variable referenced anywhere inside a parsed YAML value.
+///
+/// Walks the value recursively — through sequences, mappings, and `!tagged`
+/// task nodes — and runs [`referenced_variables`] on each string leaf, unioning
+/// the results. This is how the inline templated fields of *any* task type are
+/// collected uniformly: a task file is parsed generically and every string in it
+/// is fed through the extractor, with no need to enumerate the per-module task
+/// structs (which would drift whenever a module is added or changes its fields).
+///
+/// A leaf that fails to parse as a template is skipped rather than failing the
+/// whole scan: malformed templates are reported by `syntax-check`, and a
+/// diagnostic should not abort because of one odd string.
+pub fn referenced_variables_in_value(value: &serde_yaml::Value) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    walk_value(value, &mut out);
+    out
+}
+
+fn walk_value(value: &serde_yaml::Value, out: &mut BTreeSet<String>) {
+    match value {
+        serde_yaml::Value::String(s) => {
+            if let Ok(refs) = referenced_variables(s) {
+                out.extend(refs);
+            }
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                walk_value(item, out);
+            }
+        }
+        serde_yaml::Value::Mapping(map) => {
+            for (k, v) in map {
+                walk_value(k, out);
+                walk_value(v, out);
+            }
+        }
+        serde_yaml::Value::Tagged(tagged) => walk_value(&tagged.value, out),
+        _ => {}
+    }
+}
+
 fn walk_elements(
     elements: &[TemplateElement],
     locals: &BTreeSet<String>,
@@ -345,5 +386,42 @@ mod tests {
     #[test]
     fn array_index_path_resolves_to_its_variable() {
         assert_eq!(refs("{{ items.[0] }}"), set(&["items"]));
+    }
+
+    // --- value-tree walking (inline fields of any task type) ------------------
+
+    use super::referenced_variables_in_value;
+
+    #[test]
+    fn value_walk_collects_from_a_sequence_of_strings() {
+        // Templated YAML scalars are quoted (else `{{ }}` would parse as a flow
+        // mapping); this is how they appear in real task files.
+        let value: serde_yaml::Value =
+            serde_yaml::from_str("- \"{{ a }}\"\n- plain\n- \"{{ b.c }}\"").unwrap();
+        assert_eq!(referenced_variables_in_value(&value), set(&["a", "b"]));
+    }
+
+    #[test]
+    fn value_walk_collects_from_a_tagged_task_mapping() {
+        // A `!command` task with a templated argument, as it parses generically.
+        let value: serde_yaml::Value =
+            serde_yaml::from_str("!command\nargv:\n  - \"{{ service }}\"\n  - restart").unwrap();
+        assert_eq!(referenced_variables_in_value(&value), set(&["service"]));
+    }
+
+    #[test]
+    fn value_walk_ignores_non_string_scalars() {
+        let value: serde_yaml::Value =
+            serde_yaml::from_str("count: 5\nenabled: true\nname: \"{{ app }}\"").unwrap();
+        assert_eq!(referenced_variables_in_value(&value), set(&["app"]));
+    }
+
+    #[test]
+    fn value_walk_skips_malformed_leaves_without_aborting() {
+        // A leaf that is valid YAML but invalid handlebars (unbalanced tag) must
+        // be skipped, not abort the scan; the well-formed leaf is still collected.
+        let value: serde_yaml::Value =
+            serde_yaml::from_str("ok: \"{{ good }}\"\nbad: \"{{ oops \"").unwrap();
+        assert_eq!(referenced_variables_in_value(&value), set(&["good"]));
     }
 }
