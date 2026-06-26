@@ -22,6 +22,7 @@ use crate::playbooks::async_ui::{AsyncUi, HostEvent, TaskDisplayStatus};
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::language::Play;
 use crate::playbooks::language::{InstantiateSpec, RoleInvocation};
+use crate::playbooks::provision_phase::{apply_provision_outcomes, provision_host_with};
 use crate::playbooks::role_tree::{
     RoleSection, RoleWalkState, resolve_role_file, resolve_template_src, walk_role_tree,
 };
@@ -591,92 +592,28 @@ fn handle_batch(
         return async_handle_batch(run_state, play, hosts);
     }
 
-    // Sequential mode: provision all hosts before running tasks
-    for host_arc in hosts.iter() {
-        let (host_name, needs_provision, provision_config, host_vars) = {
-            let host = host_arc.read().unwrap();
-            (
-                host.name.clone(),
-                host.needs_provisioning(),
-                host.get_provision().cloned(),
-                host.get_variables(),
-            )
-        };
+    // Sequential mode: provision all hosts via the shared seam, then run the
+    // task-parallel phase against the survivors.
+    let outcomes: Vec<_> = hosts
+        .iter()
+        .map(|host| provision_host_with(run_state, host, ensure_host_provisioned))
+        .collect();
 
-        if needs_provision && let Some(ref config) = provision_config {
-            // Dry-run: never create/update/destroy infrastructure in check mode.
-            if check_mode {
-                eprintln!(
-                    "  ~ {} => would provision ({}) — skipped (check mode)",
-                    host_name, config.provision_type
-                );
-                continue;
-            }
-            let dns_key = serde_yaml::Value::String("dns".to_string());
-            let automation_root = run_state.context.read().unwrap().automation_root.clone();
-            let dns_config = host_vars
-                .get(&dns_key)
-                .and_then(|v| crate::dns::dns_config_from_vars(v, &automation_root));
+    // Exclude destroyed hosts from the task pool; abort on any provision failure.
+    let destroyed = apply_provision_outcomes(&run_state.context, hosts, &outcomes)?;
 
-            match ensure_host_provisioned(
-                config,
-                &host_name,
-                &run_state.inventory,
-                dns_config.as_ref(),
-                run_state.output_handler.as_ref(),
-            ) {
-                Ok(crate::provisioners::ProvisionResult::Destroyed) => {
-                    run_state.visitor.read().unwrap().on_host_provisioned(
-                        &run_state.context,
-                        &host_name,
-                        &crate::provisioners::ProvisionResult::Destroyed,
-                    );
-                    continue;
-                }
-                Ok(result) => {
-                    run_state.visitor.read().unwrap().on_host_provisioned(
-                        &run_state.context,
-                        &host_name,
-                        &result,
-                    );
-
-                    let ip = crate::provisioners::get_provisioner(&config.provision_type)
-                        .ok()
-                        .and_then(|p| {
-                            p.get_ip(config, &host_name, &run_state.inventory)
-                                .ok()
-                                .flatten()
-                        });
-
-                    let mut host = host_arc.write().unwrap();
-                    let mut vars = host.get_variables();
-                    let mut changed = false;
-
-                    if let Some(ref ip_addr) = ip {
-                        let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                        if !vars.contains_key(&key) {
-                            vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
-                            changed = true;
-                        }
-                    }
-
-                    if let Some(ref ssh_user) = config.ssh_user {
-                        let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                        if !vars.contains_key(&key) {
-                            vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
-                            changed = true;
-                        }
-                    }
-
-                    if changed {
-                        host.set_variables(vars);
-                    }
-                }
-                Err(e) => {
-                    return Err(format!("Failed to provision host '{}': {}", host_name, e));
-                }
-            }
-        }
+    // A play that intentionally destroyed every host has nothing left to
+    // configure — succeed without running tasks. (A genuinely empty play still
+    // falls through to the task phase, preserving the prior behavior.)
+    if destroyed > 0
+        && run_state
+            .context
+            .read()
+            .unwrap()
+            .get_remaining_hosts()
+            .is_empty()
+    {
+        return Ok(());
     }
 
     // Default mode: task-parallel execution (all hosts per task, then next task)

@@ -19,7 +19,9 @@ use jetpack::inventory::hosts::Host;
 use jetpack::inventory::inventory::Inventory;
 use jetpack::output::OutputHandlerRef;
 use jetpack::playbooks::context::PlaybookContext;
-use jetpack::playbooks::provision_phase::{ProvisionOutcome, provision_host_with};
+use jetpack::playbooks::provision_phase::{
+    ProvisionOutcome, apply_provision_outcomes, provision_host_with,
+};
 use jetpack::playbooks::traversal::RunState;
 use jetpack::playbooks::visitor::{CheckMode, PlaybookVisitor};
 use jetpack::provisioners::{ProvisionConfig, ProvisionResult};
@@ -205,4 +207,52 @@ fn check_mode_is_ready_without_calling_provision() {
 
     assert!(matches!(outcome, ProvisionOutcome::Ready));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn apply_outcomes_excludes_destroyed_keeps_ready() {
+    let rs = make_run_state(false);
+    let h1 = host_without_provision("node1");
+    let h2 = host_without_provision("node2");
+    let hosts = vec![Arc::clone(&h1), Arc::clone(&h2)];
+    rs.context.write().unwrap().set_targetted_hosts(&hosts);
+    let outcomes = vec![ProvisionOutcome::Ready, ProvisionOutcome::Destroyed];
+
+    let destroyed = apply_provision_outcomes(&rs.context, &hosts, &outcomes).unwrap();
+
+    assert_eq!(destroyed, 1);
+    let remaining = rs.context.read().unwrap().get_remaining_hosts();
+    assert_eq!(remaining.len(), 1);
+    assert!(remaining.contains_key("node1"));
+    assert!(!remaining.contains_key("node2"));
+}
+
+#[test]
+fn apply_outcomes_all_destroyed_empties_pool_and_counts() {
+    let rs = make_run_state(false);
+    let h1 = host_without_provision("node1");
+    let h2 = host_without_provision("node2");
+    let hosts = vec![Arc::clone(&h1), Arc::clone(&h2)];
+    rs.context.write().unwrap().set_targetted_hosts(&hosts);
+    let outcomes = vec![ProvisionOutcome::Destroyed, ProvisionOutcome::Destroyed];
+
+    let destroyed = apply_provision_outcomes(&rs.context, &hosts, &outcomes).unwrap();
+
+    assert_eq!(destroyed, 2);
+    assert!(rs.context.read().unwrap().get_remaining_hosts().is_empty());
+}
+
+#[test]
+fn apply_outcomes_aborts_on_first_failure() {
+    let rs = make_run_state(false);
+    let h1 = host_without_provision("node1");
+    let hosts = vec![Arc::clone(&h1)];
+    rs.context.write().unwrap().set_targetted_hosts(&hosts);
+    let outcomes = vec![ProvisionOutcome::Failed("provision blew up".to_string())];
+
+    let result = apply_provision_outcomes(&rs.context, &hosts, &outcomes);
+
+    let err = result.unwrap_err();
+    assert!(err.contains("node1"), "got: {err}");
+    assert!(err.contains("provision blew up"), "got: {err}");
 }

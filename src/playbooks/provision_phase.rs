@@ -19,6 +19,7 @@
 use crate::dns::DnsConfig;
 use crate::inventory::hosts::Host;
 use crate::inventory::inventory::Inventory;
+use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::traversal::RunState;
 use crate::provisioners::{ProvisionConfig, ProvisionResult, get_provisioner};
 use std::sync::{Arc, RwLock};
@@ -144,4 +145,39 @@ where
         }
         Err(e) => ProvisionOutcome::Failed(e),
     }
+}
+
+/// Apply per-host provision outcomes to the task pool and decide whether the
+/// play proceeds.
+///
+/// - `Ready` → the host stays in the task pool.
+/// - `Destroyed` → the host is removed from the pool (an intentional destroy,
+///   not a failure).
+/// - `Failed` → abort the play immediately (the sequential
+///   abort-on-any-provision-failure policy).
+///
+/// Returns the number of destroyed hosts so the caller can recognize an
+/// all-destroyed play — a success with nothing left to configure — rather than
+/// erroring "no hosts remaining".
+pub fn apply_provision_outcomes(
+    context: &Arc<RwLock<PlaybookContext>>,
+    hosts: &[Arc<RwLock<Host>>],
+    outcomes: &[ProvisionOutcome],
+) -> Result<usize, String> {
+    let mut destroyed = 0usize;
+    let mut ctx = context.write().unwrap();
+    for (host, outcome) in hosts.iter().zip(outcomes) {
+        match outcome {
+            ProvisionOutcome::Ready => {}
+            ProvisionOutcome::Destroyed => {
+                ctx.destroy_host(host);
+                destroyed += 1;
+            }
+            ProvisionOutcome::Failed(error) => {
+                let name = host.read().unwrap().name.clone();
+                return Err(format!("Failed to provision host '{}': {}", name, error));
+            }
+        }
+    }
+    Ok(destroyed)
 }
