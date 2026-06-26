@@ -220,27 +220,31 @@ impl Host {
         blend_variables(&mut blended, mine);
         blend_variables(&mut blended, self.facts.clone());
 
-        // Add magic variables
+        // Magic variables. jet_hostname / jet_hostname_short are the jetpack
+        // builtins; inventory_hostname / inventory_hostname_short alias the
+        // canonical Ansible magic-variable names so playbooks written with that
+        // muscle memory resolve instead of failing strict-mode templating.
         let mut result = match blended {
             serde_yaml::Value::Mapping(x) => x,
             _ => panic!("get_blended_variables produced a non-mapping (1)"),
         };
-        // Full inventory hostname
-        result.insert(
-            serde_yaml::Value::String("jet_hostname".to_string()),
-            serde_yaml::Value::String(self.name.clone()),
-        );
-        // Short hostname (first part before any dot)
         let short_name = self
             .name
             .split('.')
             .next()
             .unwrap_or(&self.name)
             .to_string();
-        result.insert(
-            serde_yaml::Value::String("jet_hostname_short".to_string()),
-            serde_yaml::Value::String(short_name),
-        );
+        for (key, value) in [
+            ("jet_hostname", self.name.clone()),
+            ("jet_hostname_short", short_name.clone()),
+            ("inventory_hostname", self.name.clone()),
+            ("inventory_hostname_short", short_name),
+        ] {
+            result.insert(
+                serde_yaml::Value::String(key.to_string()),
+                serde_yaml::Value::String(value),
+            );
+        }
         result
     }
 
@@ -666,5 +670,33 @@ mod tests {
         assert_eq!(blended["port"], 8080); // Host overrides group
         assert_eq!(blended["service"], "nginx"); // From group
         assert_eq!(blended["hostname"], "webserver1"); // From host
+    }
+
+    #[test]
+    fn magic_variables_alias_inventory_hostname() {
+        use crate::playbooks::templar::{Templar, TemplateMode};
+
+        // The canonical Ansible magic-variable names must be available on every
+        // host (regression: a task `msg: "...{{ inventory_hostname }}"` failed
+        // strict-mode templating with "variable in strict mode
+        // Some(\"inventory_hostname\")").
+        let host = Host::new(&"web-01.lon.riff.cc".to_string());
+        let blended = host.get_blended_variables();
+        assert_eq!(blended["inventory_hostname"], "web-01.lon.riff.cc");
+        assert_eq!(blended["inventory_hostname_short"], "web-01");
+        // The jet_* builtins remain unchanged.
+        assert_eq!(blended["jet_hostname"], "web-01.lon.riff.cc");
+        assert_eq!(blended["jet_hostname_short"], "web-01");
+
+        // Strict-mode render against a host's blended variables — the exact path
+        // a task `msg:` takes — resolves the alias without error.
+        let rendered = Templar::new()
+            .render(
+                "provisioned {{ inventory_hostname }}",
+                blended,
+                TemplateMode::Strict,
+            )
+            .expect("inventory_hostname resolves in strict mode");
+        assert_eq!(rendered, "provisioned web-01.lon.riff.cc");
     }
 }

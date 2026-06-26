@@ -49,6 +49,8 @@ use crate::playbooks::ref_collector::collect_per_play;
 const RENDER_BUILTINS: &[&str] = &[
     "jet_hostname",
     "jet_hostname_short",
+    "inventory_hostname",
+    "inventory_hostname_short",
     "jet_play_hosts",
     "jet_sudo_user",
     "jet_command",
