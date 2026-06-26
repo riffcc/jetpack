@@ -74,6 +74,7 @@ fn liftoff() -> Result<(), String> {
             load_inventory(
                 &inventory,
                 Arc::new(RwLock::new(cli_parser.inventory_load_paths())),
+                cli_parser.extra_vars.clone(),
             )?;
             if !cli_parser.inventory_set {
                 return Err(String::from(
@@ -93,6 +94,7 @@ fn liftoff() -> Result<(), String> {
                 load_inventory(
                     &inventory,
                     Arc::new(RwLock::new(cli_parser.inventory_load_paths())),
+                    cli_parser.extra_vars.clone(),
                 )?;
             }
             // Ensure localhost is in the inventory for local execution

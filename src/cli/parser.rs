@@ -19,7 +19,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 use crate::cli::config_file::{self, JetpackFileConfig};
-use crate::inventory::loading::convert_json_vars;
+use crate::inventory::loading::{convert_json_vars, extra_vars_from_key_value};
 use crate::util::io::directory_as_string;
 use crate::util::io::jet_file_open;
 use crate::util::io::read_local_file;
@@ -1574,16 +1574,15 @@ impl CliParser {
                 }
             };
             blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(parsed));
-        } else {
+        } else if let Ok(actual) = serde_json::from_str::<serde_json::Value>(value) {
             // input is inline JSON (as YAML wouldn't make sense with the newlines)
-
-            let parsed: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(value);
-            let actual = match parsed {
-                Ok(x) => x,
-                Err(y) => return Err(format!("inline json is not valid: {}", y)),
-            };
             let serde_map = convert_json_vars(&actual);
             blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(serde_map));
+        } else {
+            // key=value, dotted key → nested: the convenient form, e.g.
+            // `-e provision.state=destroyed` (use JSON for typed values).
+            let mapping = extra_vars_from_key_value(value)?;
+            blend_variables(&mut self.extra_vars, serde_yaml::Value::Mapping(mapping));
         }
 
         Ok(())

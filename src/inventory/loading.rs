@@ -65,6 +65,7 @@ pub struct DynamicInventoryJsonEntry {
 pub fn load_inventory(
     inventory: &Arc<RwLock<Inventory>>,
     inventory_paths: Arc<RwLock<Vec<PathBuf>>>,
+    extra_vars: serde_yaml::Value,
 ) -> Result<(), String> {
     {
         let mut inv_obj = inventory.write().unwrap();
@@ -108,7 +109,7 @@ pub fn load_inventory(
     // Now that every --inventory path has contributed its group_vars/host_vars,
     // fold each host's (now path-complete) ancestor-group variables into its own
     // stored variables. See `propagate_group_vars_to_hosts` for why this is needed.
-    propagate_group_vars_to_hosts(&inventory);
+    propagate_group_vars_to_hosts(inventory, &extra_vars);
 
     Ok(())
 }
@@ -136,7 +137,10 @@ pub fn load_inventory(
 /// re-blending the ancestor-group vars underneath the host's own vars yields the
 /// complete, correctly-precedenced view: host-specific vars win over group vars
 /// (host vars are layered on top last), group vars fill the gaps.
-fn propagate_group_vars_to_hosts(inventory: &Arc<RwLock<Inventory>>) {
+fn propagate_group_vars_to_hosts(
+    inventory: &Arc<RwLock<Inventory>>,
+    extra_vars: &serde_yaml::Value,
+) {
     let host_names: Vec<String> = {
         let inv = inventory.read().unwrap();
         inv.hosts.keys().cloned().collect()
@@ -161,6 +165,15 @@ fn propagate_group_vars_to_hosts(inventory: &Arc<RwLock<Inventory>>) {
         // Top layer: the host's own variables win over group vars.
         let mine = serde_yaml::Value::from(host.get_variables());
         crate::util::yaml::blend_variables(&mut blended, mine);
+
+        // Highest layer: -e / --extra-vars override everything (matching their
+        // precedence in templating). Blending them here — not just into the
+        // templating-time context blend — lets `-e provision.state=destroyed`
+        // reach Host.provision, so an ad-hoc CLI flag can drive a fleet's
+        // lifecycle without touching inventory files.
+        if !extra_vars.is_null() {
+            crate::util::yaml::blend_variables(&mut blended, extra_vars.clone());
+        }
 
         if let serde_yaml::Value::Mapping(resolved) = blended {
             // A group-level `provision` overlay (e.g. `state: destroyed`) merges
@@ -462,6 +475,31 @@ pub fn convert_json_vars(input: &serde_json::Value) -> serde_yaml::Mapping {
     }
 }
 
+/// Parse a `key=value` extra-vars string into a nested mapping, splitting the
+/// key on `.` so `provision.state=destroyed` → `{provision: {state: "destroyed"}}`.
+/// The value is taken as a string; use JSON (`-e '{"x":5}'`) for typed values.
+pub fn extra_vars_from_key_value(input: &str) -> Result<serde_yaml::Mapping, String> {
+    let (key, val) = input.split_once('=').ok_or_else(|| {
+        format!("--extra-vars: expected @file, inline JSON, or key=value; got {input:?}")
+    })?;
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(format!("--extra-vars: empty key in {input:?}"));
+    }
+    let val = val.trim();
+    // Build the nested mapping from the dotted key segments (leaf = the value).
+    let mut node: serde_yaml::Value = serde_yaml::Value::String(val.to_string());
+    for segment in key.split('.').rev() {
+        let mut mapping = serde_yaml::Mapping::new();
+        mapping.insert(serde_yaml::Value::String(segment.to_string()), node);
+        node = serde_yaml::Value::Mapping(mapping);
+    }
+    match node {
+        serde_yaml::Value::Mapping(m) => Ok(m),
+        _ => unreachable!("a non-empty dotted key always yields a mapping"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,7 +529,12 @@ mod tests {
         let (_keep_a, path_a) = inventory_tree_with_group_vars(first_yaml);
         let (_keep_b, path_b) = inventory_tree_with_group_vars(second_yaml);
         let paths = Arc::new(RwLock::new(vec![path_a, path_b]));
-        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+        load_inventory(
+            &inventory,
+            paths,
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("load_inventory should succeed");
         inventory
             .read()
             .unwrap()
@@ -581,7 +624,12 @@ mod tests {
 
         let inventory = Arc::new(RwLock::new(Inventory::new()));
         let paths = Arc::new(RwLock::new(vec![pub_path, sec_path]));
-        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+        load_inventory(
+            &inventory,
+            paths,
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("load_inventory should succeed");
 
         let host_vars = inventory
             .read()
@@ -623,7 +671,12 @@ mod tests {
 
         let inventory = Arc::new(RwLock::new(Inventory::new()));
         let paths = Arc::new(RwLock::new(vec![path]));
-        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+        load_inventory(
+            &inventory,
+            paths,
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("load_inventory should succeed");
 
         let provision = inventory
             .read()
@@ -659,7 +712,12 @@ mod tests {
 
         let inventory = Arc::new(RwLock::new(Inventory::new()));
         let paths = Arc::new(RwLock::new(vec![path]));
-        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+        load_inventory(
+            &inventory,
+            paths,
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("load_inventory should succeed");
 
         let provision = inventory
             .read()
@@ -675,6 +733,66 @@ mod tests {
             provision.state, "present",
             "host_vars state wins over group"
         );
+    }
+
+    // -e / --extra-vars reach the provisioner: a `provision` field injected via
+    // extra_vars merges onto each host's provision config at the highest
+    // precedence, so `jetpack apply -e provision.state=destroyed` drives a
+    // fleet's lifecycle without touching inventory files. Beats host_vars.
+    #[test]
+    fn extra_vars_provision_overlay_reaches_host_provision() {
+        let (_keep, path) = inventory_tree_with_host(
+            "testgroup",
+            &["testhost"],
+            None,
+            &[(
+                "testhost",
+                "provision:\n  type: proxmox_vm\n  cluster: space\n  state: present\n",
+            )],
+        );
+        let extra: serde_yaml::Value =
+            serde_yaml::from_str("provision:\n  state: destroyed\n").unwrap();
+
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        let paths = Arc::new(RwLock::new(vec![path]));
+        load_inventory(&inventory, paths, extra).expect("load_inventory should succeed");
+
+        let provision = inventory
+            .read()
+            .unwrap()
+            .get_host("testhost")
+            .read()
+            .unwrap()
+            .get_provision()
+            .expect("host has a provision config")
+            .clone();
+
+        // extra_vars (highest precedence) beats host_vars state:present.
+        assert_eq!(provision.state, "destroyed");
+        assert_eq!(provision.provision_type, "proxmox_vm");
+    }
+
+    #[test]
+    fn extra_vars_key_value_dotted_nests() {
+        let m = extra_vars_from_key_value("provision.state=destroyed").unwrap();
+        let s = serde_yaml::to_string(&m).unwrap();
+        assert!(s.contains("provision:"), "{s}");
+        assert!(s.contains("state: destroyed"), "{s}");
+    }
+
+    #[test]
+    fn extra_vars_key_value_keeps_equals_in_value() {
+        let m = extra_vars_from_key_value("token=a=b=c").unwrap();
+        let s = serde_yaml::to_string(&m).unwrap();
+        assert!(s.contains("token: a=b=c"), "{s}");
+    }
+
+    #[test]
+    fn extra_vars_key_value_rejects_malformed() {
+        // no '=', empty key, whitespace-only key
+        assert!(extra_vars_from_key_value("nokeyvalue").is_err());
+        assert!(extra_vars_from_key_value("=value").is_err());
+        assert!(extra_vars_from_key_value("   =val").is_err());
     }
 
     // A directory with group_vars/ but no groups/ is a vars-only overlay — the
@@ -703,6 +821,7 @@ mod tests {
         load_inventory(
             &inventory,
             Arc::new(RwLock::new(vec![main_path, sec_dir.path().to_path_buf()])),
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
         )
         .expect("combined main + overlay load succeeds");
 
@@ -727,6 +846,7 @@ mod tests {
         let err = load_inventory(
             &inventory,
             Arc::new(RwLock::new(vec![empty.path().to_path_buf()])),
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
         )
         .unwrap_err();
         assert!(

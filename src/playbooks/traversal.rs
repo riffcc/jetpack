@@ -2167,7 +2167,12 @@ mod env_axis_groups_composition_tests {
         let inventory = Arc::new(RwLock::new(Inventory::new()));
         let load_list: Arc<RwLock<Vec<PathBuf>>> =
             Arc::new(RwLock::new(vec![main.clone(), overlay.clone()]));
-        load_inventory(&inventory, load_list).expect("main + env overlay load");
+        load_inventory(
+            &inventory,
+            load_list,
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("main + env overlay load");
 
         // The environment overlay's var reached group_vars/all (later-wins merge).
         let all_vars = inventory
@@ -2206,8 +2211,12 @@ mod env_axis_groups_composition_tests {
         write_group(&main, "test-webservers", &["testweb1"]);
 
         let inventory = Arc::new(RwLock::new(Inventory::new()));
-        load_inventory(&inventory, Arc::new(RwLock::new(vec![main.clone()])))
-            .expect("main inventory alone loads");
+        load_inventory(
+            &inventory,
+            Arc::new(RwLock::new(vec![main.clone()])),
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("main inventory alone loads");
 
         let rs = run_state_with_inventory(inventory);
         let play = play_with_groups("k3s", &["{{ target }}"]);

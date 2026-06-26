@@ -103,7 +103,11 @@ pub fn inventory_check(inventory: &Arc<RwLock<Inventory>>, parser: &CliParser) -
         println!("inventory-check requires --inventory");
         return 1;
     }
-    match load_inventory(inventory, Arc::clone(&parser.inventory_paths)) {
+    match load_inventory(
+        inventory,
+        Arc::clone(&parser.inventory_paths),
+        parser.extra_vars.clone(),
+    ) {
         Ok(_) => {
             let count = inventory.read().expect("inventory read").hosts.len();
             println!("inventory OK ({} hosts)", count);
