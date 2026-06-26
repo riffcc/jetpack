@@ -2250,11 +2250,8 @@ mod env_axis_groups_composition_tests {
         write_group(&main, "test-webservers", &["testweb1"]);
 
         let inventory = Arc::new(RwLock::new(Inventory::new()));
-        load_inventory(
-            &inventory,
-            Arc::new(RwLock::new(vec![main.clone()])),
-        )
-        .expect("main inventory alone loads");
+        load_inventory(&inventory, Arc::new(RwLock::new(vec![main.clone()])))
+            .expect("main inventory alone loads");
 
         let rs = run_state_with_inventory(inventory);
         let play = play_with_groups("k3s", &["{{ target }}"]);
