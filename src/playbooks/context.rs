@@ -186,6 +186,17 @@ impl PlaybookContext {
         self.failed_hosts.insert(hostname.clone(), Arc::clone(host));
     }
 
+    // A host destroyed by its provisioner is removed from the task pool for the
+    // rest of the play. Unlike fail_host this is an intentional lifecycle
+    // outcome, not a task failure: it does not count against failed_tasks and
+    // is not recorded as a failed host, so a play that destroys all of its
+    // hosts can complete successfully instead of erroring "no hosts remaining".
+
+    pub fn destroy_host(&mut self, host: &Arc<RwLock<Host>>) {
+        let hostname = host.read().unwrap().name.clone();
+        self.targetted_hosts.remove(&hostname);
+    }
+
     pub fn set_playbook_path(&mut self, path: &Path) {
         self.playbook_path = Some(path_as_string(path));
         self.playbook_directory = Some(directory_as_string(path));

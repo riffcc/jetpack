@@ -22,6 +22,9 @@ use crate::playbooks::async_ui::{AsyncUi, HostEvent, TaskDisplayStatus};
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::language::Play;
 use crate::playbooks::language::{InstantiateSpec, RoleInvocation};
+use crate::playbooks::provision_phase::{
+    apply_provision_outcomes, format_provision_summary, provision_host_with,
+};
 use crate::playbooks::role_tree::{
     RoleSection, RoleWalkState, resolve_role_file, resolve_template_src, walk_role_tree,
 };
@@ -591,92 +594,45 @@ fn handle_batch(
         return async_handle_batch(run_state, play, hosts);
     }
 
-    // Sequential mode: provision all hosts before running tasks
-    for host_arc in hosts.iter() {
-        let (host_name, needs_provision, provision_config, host_vars) = {
-            let host = host_arc.read().unwrap();
-            (
-                host.name.clone(),
-                host.needs_provisioning(),
-                host.get_provision().cloned(),
-                host.get_variables(),
-            )
-        };
+    // Provision all hosts in parallel via the shared seam, then run the
+    // task-parallel phase against the survivors. Parallelizing provision means
+    // N hosts image concurrently — each gated on its own SSH readiness — instead
+    // of serially. The DNS write lock and the VMID lock make the concurrent
+    // infrastructure writes safe.
+    use rayon::prelude::*;
+    use std::time::Instant;
+    let phase_start = Instant::now();
+    let timed: Vec<_> = hosts
+        .par_iter()
+        .map(|host| {
+            let start = Instant::now();
+            let outcome = provision_host_with(run_state, host, ensure_host_provisioned);
+            (outcome, start.elapsed())
+        })
+        .collect();
+    let outcomes: Vec<_> = timed.iter().map(|(o, _)| o.clone()).collect();
 
-        if needs_provision && let Some(ref config) = provision_config {
-            // Dry-run: never create/update/destroy infrastructure in check mode.
-            if check_mode {
-                eprintln!(
-                    "  ~ {} => would provision ({}) — skipped (check mode)",
-                    host_name, config.provision_type
-                );
-                continue;
-            }
-            let dns_key = serde_yaml::Value::String("dns".to_string());
-            let automation_root = run_state.context.read().unwrap().automation_root.clone();
-            let dns_config = host_vars
-                .get(&dns_key)
-                .and_then(|v| crate::dns::dns_config_from_vars(v, &automation_root));
+    // Exclude destroyed hosts from the task pool; abort on any provision failure.
+    let destroyed = apply_provision_outcomes(&run_state.context, hosts, &outcomes)?;
 
-            match ensure_host_provisioned(
-                config,
-                &host_name,
-                &run_state.inventory,
-                dns_config.as_ref(),
-                run_state.output_handler.as_ref(),
-            ) {
-                Ok(crate::provisioners::ProvisionResult::Destroyed) => {
-                    run_state.visitor.read().unwrap().on_host_provisioned(
-                        &run_state.context,
-                        &host_name,
-                        &crate::provisioners::ProvisionResult::Destroyed,
-                    );
-                    continue;
-                }
-                Ok(result) => {
-                    run_state.visitor.read().unwrap().on_host_provisioned(
-                        &run_state.context,
-                        &host_name,
-                        &result,
-                    );
+    // Controller-plane telemetry: per-host provision timing with the straggler flagged.
+    eprint!(
+        "{}",
+        format_provision_summary(hosts, &timed, phase_start.elapsed())
+    );
 
-                    let ip = crate::provisioners::get_provisioner(&config.provision_type)
-                        .ok()
-                        .and_then(|p| {
-                            p.get_ip(config, &host_name, &run_state.inventory)
-                                .ok()
-                                .flatten()
-                        });
-
-                    let mut host = host_arc.write().unwrap();
-                    let mut vars = host.get_variables();
-                    let mut changed = false;
-
-                    if let Some(ref ip_addr) = ip {
-                        let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                        if !vars.contains_key(&key) {
-                            vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
-                            changed = true;
-                        }
-                    }
-
-                    if let Some(ref ssh_user) = config.ssh_user {
-                        let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                        if !vars.contains_key(&key) {
-                            vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
-                            changed = true;
-                        }
-                    }
-
-                    if changed {
-                        host.set_variables(vars);
-                    }
-                }
-                Err(e) => {
-                    return Err(format!("Failed to provision host '{}': {}", host_name, e));
-                }
-            }
-        }
+    // A play that intentionally destroyed every host has nothing left to
+    // configure — succeed without running tasks. (A genuinely empty play still
+    // falls through to the task phase, preserving the prior behavior.)
+    if destroyed > 0
+        && run_state
+            .context
+            .read()
+            .unwrap()
+            .get_remaining_hosts()
+            .is_empty()
+    {
+        return Ok(());
     }
 
     // Default mode: task-parallel execution (all hosts per task, then next task)
@@ -1290,6 +1246,53 @@ fn resolve_target_groups(run_state: &Arc<RunState>, play: &Play) -> Result<Vec<S
         resolved.push(trimmed.to_string());
     }
     Ok(resolved)
+}
+
+/// Resolve the set of host names the playbook(s) target — parse each playbook,
+/// resolve every play's groups (templating + membership). Used by the
+/// destroy-confirmation gate to scope its prompt to what the `-p` playbook
+/// actually touches, instead of the whole inventory.
+///
+/// Returns `Ok(Some(set))` only on full success. Returns `Ok(None)` when there
+/// is no playbook, or any play's groups can't be resolved (read/parse error,
+/// templating failure, or a play with no declared groups) — callers MUST treat
+/// `None` as "unknown, over-approximate" so the destroy prompt never silently
+/// under-counts a real destroy.
+pub(crate) fn resolve_playbook_targets(
+    run_state: &Arc<RunState>,
+) -> Result<Option<std::collections::HashSet<String>>, String> {
+    let playbook_paths = run_state.playbook_paths.read().unwrap().clone();
+    if playbook_paths.is_empty() {
+        return Ok(None);
+    }
+    let mut targets = std::collections::HashSet::new();
+    for path in &playbook_paths {
+        let file = match jet_file_open(path) {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+        let plays: Vec<Play> = match serde_yaml::from_reader(file) {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        for (play_index, play) in plays.iter().enumerate() {
+            // Mirror the run: set play_index so a --groups per-play override
+            // resolves against the right index.
+            run_state.context.write().unwrap().play_index = play_index;
+            let groups = match resolve_target_groups(run_state, play) {
+                Ok(g) => g,
+                Err(_) => return Ok(None),
+            };
+            if groups.is_empty() {
+                // A play with no declared groups is ambiguous → safe fallback.
+                return Ok(None);
+            }
+            for host in get_play_hosts(run_state, &groups) {
+                targets.insert(host.read().unwrap().name.clone());
+            }
+        }
+    }
+    Ok(Some(targets))
 }
 
 fn get_play_hosts(run_state: &Arc<RunState>, groups: &[String]) -> Vec<Arc<RwLock<Host>>> {
@@ -2211,7 +2214,12 @@ mod env_axis_groups_composition_tests {
         let inventory = Arc::new(RwLock::new(Inventory::new()));
         let load_list: Arc<RwLock<Vec<PathBuf>>> =
             Arc::new(RwLock::new(vec![main.clone(), overlay.clone()]));
-        load_inventory(&inventory, load_list).expect("main + env overlay load");
+        load_inventory(
+            &inventory,
+            load_list,
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("main + env overlay load");
 
         // The environment overlay's var reached group_vars/all (later-wins merge).
         let all_vars = inventory
@@ -2250,8 +2258,12 @@ mod env_axis_groups_composition_tests {
         write_group(&main, "test-webservers", &["testweb1"]);
 
         let inventory = Arc::new(RwLock::new(Inventory::new()));
-        load_inventory(&inventory, Arc::new(RwLock::new(vec![main.clone()])))
-            .expect("main inventory alone loads");
+        load_inventory(
+            &inventory,
+            Arc::new(RwLock::new(vec![main.clone()])),
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        )
+        .expect("main inventory alone loads");
 
         let rs = run_state_with_inventory(inventory);
         let play = play_with_groups("k3s", &["{{ target }}"]);

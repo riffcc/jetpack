@@ -20,6 +20,26 @@ pub mod zone;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{LazyLock, Mutex};
+
+/// Serializes DNS zone mutations across threads.
+///
+/// Parallel host provisioning calls `add_host_record` / `remove_host_record`
+/// concurrently; without this guard the zone-file read-modify-write in
+/// `zone.rs` (and the octodns/gravity sync that follows it) would race and lose
+/// updates. The record-mutating entry points below hold this lock for their
+/// entire body — zone edit plus provider sync — so a host's DNS change is
+/// atomic. Internal helpers (`add_ptr_record`, `sync`) deliberately take no
+/// lock: they are only reached through these entry points, and
+/// `std::sync::Mutex` is not reentrant.
+static DNS_WRITE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// Acquire the process-wide DNS write lock, propagating poison as a `String`.
+fn dns_write_lock() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    DNS_WRITE_LOCK
+        .lock()
+        .map_err(|e| format!("DNS write lock poisoned: {}", e))
+}
 
 /// Source of truth for IP addresses
 #[derive(Debug, Clone, Deserialize, PartialEq, Default)]
@@ -160,6 +180,7 @@ pub fn dns_config_from_vars(
 /// Add a DNS A record for a host, plus PTR if configured, and optionally sync
 /// inventory_name is the FQDN from inventory (e.g., "gravity01.island.lagun.co")
 pub fn add_host_record(config: &DnsConfig, inventory_name: &str, ip: &str) -> Result<bool, String> {
+    let _guard = dns_write_lock()?;
     let zone = config
         .zone
         .clone()
@@ -211,6 +232,7 @@ pub fn add_host_record(config: &DnsConfig, inventory_name: &str, ip: &str) -> Re
 /// Remove a DNS A record for a host and optionally sync
 /// inventory_name is the FQDN from inventory (e.g., "gravity01.island.lagun.co")
 pub fn remove_host_record(config: &DnsConfig, inventory_name: &str) -> Result<bool, String> {
+    let _guard = dns_write_lock()?;
     let zone = config
         .zone
         .clone()
@@ -252,6 +274,7 @@ pub fn set_service_records(
     service_name: &str,
     ips: &[String],
 ) -> Result<bool, String> {
+    let _guard = dns_write_lock()?;
     let changed = zone::set_a_records(&config.zones_path(), zone, service_name, ips)?;
 
     if changed && config.auto_sync {
@@ -278,6 +301,7 @@ pub fn add_cname_alias(
     alias: &str,
     target: &str,
 ) -> Result<bool, String> {
+    let _guard = dns_write_lock()?;
     let changed = zone::add_cname_record(&config.zones_path(), zone, alias, target)?;
 
     if changed && config.auto_sync {
@@ -315,6 +339,7 @@ pub fn add_ptr_record(config: &DnsConfig, ip: &str, fqdn: &str) -> Result<bool, 
 
 /// Remove a record (A, CNAME, or PTR)
 pub fn remove_record(config: &DnsConfig, zone: &str, name: &str) -> Result<bool, String> {
+    let _guard = dns_write_lock()?;
     let changed = zone::remove_a_record(&config.zones_path(), zone, name)?;
 
     if changed && config.auto_sync {

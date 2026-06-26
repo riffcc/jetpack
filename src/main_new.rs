@@ -52,8 +52,12 @@ fn liftoff() -> Result<()> {
     // For show mode, handle it the old way since it's CLI-specific
     if cli_parser.mode == CLI_MODE_SHOW {
         let inventory: Arc<RwLock<Inventory>> = Arc::new(RwLock::new(Inventory::new()));
-        load_inventory(&inventory, Arc::clone(&cli_parser.inventory_paths))
-            .map_err(|e| JetpackError::Inventory(e))?;
+        load_inventory(
+            &inventory,
+            Arc::clone(&cli_parser.inventory_paths),
+            cli_parser.extra_vars.clone(),
+        )
+        .map_err(|e| JetpackError::Inventory(e))?;
         
         if !cli_parser.inventory_set {
             return Err(JetpackError::Config("--inventory is required".into()));
