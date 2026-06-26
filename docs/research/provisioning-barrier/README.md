@@ -103,7 +103,16 @@ See Posture above.
       concrete counting that pulled `propext`/`Quot.sound` into L0–L2). `strictAll` /
       `threshold` / `maxFailures` / `combined` are proven instances; bridge to jetpack
       primitives (`!wait_for_others` + `!assert P` + `!fail`) stated.
-- [ ] L4 — Python scale fuzz
+- [x] L4 — Python scale fuzz: an adversarial suite of (policy × failure-pattern) cells
+      runs the **executable mirror** of the engine at 10⁴ hosts (240 runs, seed-stable),
+      asserting every proven property holds on every execution — partition, readiness
+      & failure monotonicity, gate safety, fail-soundness, termination, and the
+      outcome-prediction for monotone policies. **0 violations**; every converge/fail
+      outcome matches the partition arithmetic the proofs predict (e.g. 80%-ready under
+      a 90%-threshold fails; total failure under strict-all resolves to `failed`, no
+      deadlock). Liveness under fair schedules stands in for the fair-lossy hypothesis —
+      no sleeps or timeouts; liveness is a property of the schedule. `python/` (pytest +
+      ruff; `python -m provisioning_barrier.fuzz`).
 - [ ] Paper draft
 - [ ] Rust implementation in jetpack
 
