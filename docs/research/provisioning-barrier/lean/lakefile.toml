@@ -1,0 +1,6 @@
+name = "ProvisioningBarrier"
+version = "0.1.0"
+defaultTargets = ["ProvisioningBarrier"]
+
+[[lean_lib]]
+name = "ProvisioningBarrier"

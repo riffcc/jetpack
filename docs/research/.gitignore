@@ -1,0 +1,31 @@
+# LaTeX build artifacts — the compiled PDF is the marketing asset (built, not committed)
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.nav
+*.snm
+*.vrb
+*.pdf
+
+# Lean 4 build artifacts
+.lake/
+build/
+*.olean
+*.ilean
+*.trace
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

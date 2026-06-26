@@ -1,0 +1,60 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\title{Formally Verified Concurrent Cluster Provisioning:\\
+Readiness Barriers and Scale-Tolerant Convergence Policies}
+\author{Benjamin Arntzen \\ \texttt{team@riff.cc} \\ Riff Labs}
+\date{Draft --- \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+[TODO] Concurrent JIT provisioning of a cluster of hosts must fan out imaging,
+gate convergence behind a readiness barrier, and tolerate node failure at scale.
+We model this protocol as a state machine, prove its safety and liveness
+properties in Lean 4, validate the scale-tolerant convergence policies
+(strict-all / percentage-threshold / max-failures) under randomized failure via a
+Python simulator, and present the verified design implemented in Rust as the
+jetpack automation engine.
+\end{abstract}
+
+\section{Introduction}
+[TODO] Provisioning at scale; failure as a forcing function; the correctness
+pitfalls (deadlock on an errored host, races across the barrier, quorum math).
+
+\section{The Protocol}
+[TODO] State machine: host $\in$ \{Provisioning, Ready, Failed\}; phase $\in$
+\{Imaging, Barrier, Converge\}; transitions \texttt{fan\_out} /
+\texttt{host\_ready} / \texttt{host\_fail} / \texttt{policy\_check} /
+\texttt{proceed}.
+
+\section{Formalization in Lean 4}
+[TODO] Layer by layer: L0 strict-all barrier, L1 \%-threshold, L2 max-failures, L3
+composition with the play-level \texttt{!wait\_for\_others} /
+\texttt{!assert} / \texttt{!fail} primitives.
+
+\section{Properties and Proofs}
+[TODO] Safety: $proceed \Rightarrow policy\_satisfied$. Liveness: the barrier
+always resolves. Policy correctness per layer.
+
+\section{Scale Simulation}
+[TODO] Python fuzz at $10^4$ hosts; randomized failure injection; property-based
+assertions.
+
+\section{Implementation}
+[TODO] Rust in jetpack: parallel provision fan-out + readiness state, composed
+with the existing play modules.
+
+\section{Related Work}
+[TODO] Terraform, Ansible \texttt{serial} / \texttt{max\_fail\_percentage}, formal
+methods in infrastructure provisioning.
+
+\section{Conclusion}
+[TODO]
+
+\end{document}
