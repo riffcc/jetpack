@@ -43,7 +43,11 @@ So a secrets inventory loaded second can add (or override) variables without los
 A `provision:` block in `group_vars/<group>` deep-merges onto each member host's
 `host_vars` provision config — so you can set or override provision fields for a
 whole fleet from one file. Host-specific fields win on conflict, exactly like
-every other variable (more-specific wins).
+every other variable (more-specific wins). The same works ad-hoc from the CLI
+with `-e` / `--extra-vars` (highest precedence): `-e provision.state=destroyed`
+overrides every host's lifecycle state for that run, no inventory file touched.
+(Values take the convenient `key=value` form, with dotted keys for nesting; JSON
+and `@file` are still accepted for typed/structured values.)
 
 The common use is toggling a fleet's lifecycle state. Put each host's real
 provision spec in its `host_vars` (no `state`, so it defaults to `present`), then
