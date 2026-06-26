@@ -220,10 +220,13 @@ impl Host {
         blend_variables(&mut blended, mine);
         blend_variables(&mut blended, self.facts.clone());
 
-        // Magic variables. jet_hostname / jet_hostname_short are the jetpack
-        // builtins; inventory_hostname / inventory_hostname_short alias the
-        // canonical Ansible magic-variable names so playbooks written with that
-        // muscle memory resolve instead of failing strict-mode templating.
+        // Magic variables. jet_hostname (the inventory identity, verbatim — the
+        // connection target is the separate jet_ssh_hostname) and
+        // jet_hostname_short are canonical. inventory_hostname /
+        // inventory_hostname_short are legacy Ansible-compat aliases that map
+        // onto them: Ansible's inventory_hostname means the same thing (the
+        // inventory identity, distinct from ansible_host), so the alias is a
+        // convenience for muscle memory, not a semantic lie.
         let mut result = match blended {
             serde_yaml::Value::Mapping(x) => x,
             _ => panic!("get_blended_variables produced a non-mapping (1)"),
@@ -676,10 +679,10 @@ mod tests {
     fn magic_variables_alias_inventory_hostname() {
         use crate::playbooks::templar::{Templar, TemplateMode};
 
-        // The canonical Ansible magic-variable names must be available on every
-        // host (regression: a task `msg: "...{{ inventory_hostname }}"` failed
-        // strict-mode templating with "variable in strict mode
-        // Some(\"inventory_hostname\")").
+        // The legacy Ansible-compat aliases (semantically identical to the
+        // jet_* builtins) must resolve in strict mode (regression: a task
+        // `msg: "...{{ inventory_hostname }}"` failed strict-mode templating
+        // with "variable in strict mode Some(\"inventory_hostname\")").
         let host = Host::new(&"web-01.lon.riff.cc".to_string());
         let blended = host.get_blended_variables();
         assert_eq!(blended["inventory_hostname"], "web-01.lon.riff.cc");
