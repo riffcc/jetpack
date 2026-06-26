@@ -181,3 +181,59 @@ pub fn apply_provision_outcomes(
     }
     Ok(destroyed)
 }
+
+/// Format a one-line-per-host summary of the parallel provision phase, flagging
+/// the slowest host as the straggler. Pure (no I/O) so it can be unit-tested.
+///
+/// `timed[i]` corresponds to `hosts[i]` — rayon's `par_iter().collect()` into a
+/// `Vec` preserves the original order.
+pub fn format_provision_summary(
+    hosts: &[Arc<RwLock<Host>>],
+    timed: &[(ProvisionOutcome, std::time::Duration)],
+    total: std::time::Duration,
+) -> String {
+    use std::fmt::Write as _;
+    let (mut ready, mut destroyed, mut failed) = (0usize, 0usize, 0usize);
+    let mut slowest = std::time::Duration::ZERO;
+    let mut straggler_idx = None;
+    for (i, (outcome, dur)) in timed.iter().enumerate() {
+        match outcome {
+            ProvisionOutcome::Ready => ready += 1,
+            ProvisionOutcome::Destroyed => destroyed += 1,
+            ProvisionOutcome::Failed(_) => failed += 1,
+        }
+        if *dur > slowest {
+            slowest = *dur;
+            straggler_idx = Some(i);
+        }
+    }
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "> provision phase: {} host(s) in {:.1}s (parallel) — ready:{} destroyed:{} failed:{}",
+        hosts.len(),
+        total.as_secs_f64(),
+        ready,
+        destroyed,
+        failed
+    );
+    for (i, (host, (outcome, dur))) in hosts.iter().zip(timed.iter()).enumerate() {
+        let name = host.read().unwrap().name.clone();
+        let label = match outcome {
+            ProvisionOutcome::Ready => "ready",
+            ProvisionOutcome::Destroyed => "destroyed",
+            ProvisionOutcome::Failed(_) => "failed",
+        };
+        let flag = if straggler_idx == Some(i) && timed.len() > 1 {
+            "  <- straggler"
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            out,
+            "    {name:<28} {label:<10} {:>6.1}s{flag}",
+            dur.as_secs_f64()
+        );
+    }
+    out
+}

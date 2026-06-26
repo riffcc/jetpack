@@ -20,7 +20,7 @@ use jetpack::inventory::inventory::Inventory;
 use jetpack::output::OutputHandlerRef;
 use jetpack::playbooks::context::PlaybookContext;
 use jetpack::playbooks::provision_phase::{
-    ProvisionOutcome, apply_provision_outcomes, provision_host_with,
+    ProvisionOutcome, apply_provision_outcomes, format_provision_summary, provision_host_with,
 };
 use jetpack::playbooks::traversal::RunState;
 use jetpack::playbooks::visitor::{CheckMode, PlaybookVisitor};
@@ -29,6 +29,7 @@ use serde_yaml::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
 type ProvisionFn = fn(
     &ProvisionConfig,
@@ -255,4 +256,43 @@ fn apply_outcomes_aborts_on_first_failure() {
     let err = result.unwrap_err();
     assert!(err.contains("node1"), "got: {err}");
     assert!(err.contains("provision blew up"), "got: {err}");
+}
+
+#[test]
+fn summary_counts_outcomes_and_flags_the_slowest_straggler() {
+    let h1 = host_without_provision("node1");
+    let h2 = host_without_provision("node2");
+    let h3 = host_without_provision("node3");
+    let hosts = vec![Arc::clone(&h1), Arc::clone(&h2), Arc::clone(&h3)];
+    let timed = vec![
+        (ProvisionOutcome::Ready, Duration::from_secs(10)),
+        (ProvisionOutcome::Destroyed, Duration::from_secs(20)),
+        (
+            ProvisionOutcome::Failed("ssh timeout".to_string()),
+            Duration::from_secs(300),
+        ),
+    ];
+
+    let s = format_provision_summary(&hosts, &timed, Duration::from_secs(305));
+
+    assert!(s.contains("3 host(s)"), "{s}");
+    assert!(s.contains("ready:1"), "{s}");
+    assert!(s.contains("destroyed:1"), "{s}");
+    assert!(s.contains("failed:1"), "{s}");
+    // The slowest (node3) is flagged; node1 is not.
+    let node3_line = s.lines().find(|l| l.contains("node3")).unwrap();
+    assert!(node3_line.contains("straggler"), "{node3_line}");
+    let node1_line = s.lines().find(|l| l.contains("node1")).unwrap();
+    assert!(!node1_line.contains("straggler"), "{node1_line}");
+}
+
+#[test]
+fn summary_does_not_flag_a_straggler_for_a_single_host() {
+    let h = host_without_provision("solo");
+    let hosts = vec![Arc::clone(&h)];
+    let timed = vec![(ProvisionOutcome::Ready, Duration::from_secs(45))];
+
+    let s = format_provision_summary(&hosts, &timed, Duration::from_secs(45));
+
+    assert!(!s.contains("straggler"), "{s}");
 }

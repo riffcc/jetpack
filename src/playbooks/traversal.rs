@@ -22,7 +22,9 @@ use crate::playbooks::async_ui::{AsyncUi, HostEvent, TaskDisplayStatus};
 use crate::playbooks::context::PlaybookContext;
 use crate::playbooks::language::Play;
 use crate::playbooks::language::{InstantiateSpec, RoleInvocation};
-use crate::playbooks::provision_phase::{apply_provision_outcomes, provision_host_with};
+use crate::playbooks::provision_phase::{
+    apply_provision_outcomes, format_provision_summary, provision_host_with,
+};
 use crate::playbooks::role_tree::{
     RoleSection, RoleWalkState, resolve_role_file, resolve_template_src, walk_role_tree,
 };
@@ -598,13 +600,26 @@ fn handle_batch(
     // of serially. The DNS write lock and the VMID lock make the concurrent
     // infrastructure writes safe.
     use rayon::prelude::*;
-    let outcomes: Vec<_> = hosts
+    use std::time::Instant;
+    let phase_start = Instant::now();
+    let timed: Vec<_> = hosts
         .par_iter()
-        .map(|host| provision_host_with(run_state, host, ensure_host_provisioned))
+        .map(|host| {
+            let start = Instant::now();
+            let outcome = provision_host_with(run_state, host, ensure_host_provisioned);
+            (outcome, start.elapsed())
+        })
         .collect();
+    let outcomes: Vec<_> = timed.iter().map(|(o, _)| o.clone()).collect();
 
     // Exclude destroyed hosts from the task pool; abort on any provision failure.
     let destroyed = apply_provision_outcomes(&run_state.context, hosts, &outcomes)?;
+
+    // Controller-plane telemetry: per-host provision timing with the straggler flagged.
+    eprint!(
+        "{}",
+        format_provision_summary(hosts, &timed, phase_start.elapsed())
+    );
 
     // A play that intentionally destroyed every host has nothing left to
     // configure — succeed without running tasks. (A genuinely empty play still
