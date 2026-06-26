@@ -163,6 +163,20 @@ fn propagate_group_vars_to_hosts(inventory: &Arc<RwLock<Inventory>>) {
         crate::util::yaml::blend_variables(&mut blended, mine);
 
         if let serde_yaml::Value::Mapping(resolved) = blended {
+            // A group-level `provision` overlay (e.g. `state: destroyed`) merges
+            // onto each member host's host_vars provision via the deep-blend
+            // above, so re-derive Host.provision from the resolved mapping —
+            // otherwise the provisioner reads the host_vars-only config parsed
+            // at load and the group overlay is silently ignored. Host fields win
+            // on conflict because the blend layers host vars on top of group
+            // vars (more-specific wins, matching variable resolution).
+            let provision_key = serde_yaml::Value::String("provision".to_string());
+            if let Some(provision_value) = resolved.get(&provision_key)
+                && let Ok(provision_config) =
+                    serde_yaml::from_value::<ProvisionConfig>(provision_value.clone())
+            {
+                host.set_provision(provision_config);
+            }
             host.set_variables(resolved);
         }
     }
@@ -339,11 +353,13 @@ fn load_vars_directory(
                     }
                 }
 
-                // Merge host-specific vars, excluding the provision block
+                // Merge host-specific vars, INCLUDING the provision block. Keeping
+                // the raw (default-free) provision mapping here lets a group-level
+                // `provision` overlay deep-merge onto it during
+                // propagate_group_vars_to_hosts; Host.provision is then re-derived
+                // from the resolved mapping so the provisioner sees the overlay.
                 for (k, v) in yaml_result.iter() {
-                    if k != &provision_key {
-                        merged_vars.insert(k.clone(), v.clone());
-                    }
+                    merged_vars.insert(k.clone(), v.clone());
                 }
 
                 // Set the merged variables on the host
@@ -585,6 +601,79 @@ mod tests {
             host_vars.get(&dns_key).is_some(),
             "dns block from secrets group_vars must propagate to host variables; got: {:?}",
             host_vars
+        );
+    }
+
+    // Group-level `provision` overlay: a field set in a group's group_vars (e.g.
+    // `state: destroyed`) must merge onto each member host's host_vars provision
+    // config, so the whole fleet's lifecycle state can be toggled from one file
+    // (the PXE-starvation harness resets/recreates test-k8s this way). Host_vars
+    // fields are preserved.
+    #[test]
+    fn group_provision_overlay_merges_onto_host_provision_config() {
+        let (_keep, path) = inventory_tree_with_host(
+            "testgroup",
+            &["testhost"],
+            Some("provision:\n  state: destroyed\n"),
+            &[(
+                "testhost",
+                "provision:\n  type: proxmox_vm\n  cluster: space\n",
+            )],
+        );
+
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        let paths = Arc::new(RwLock::new(vec![path]));
+        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+
+        let provision = inventory
+            .read()
+            .unwrap()
+            .get_host("testhost")
+            .read()
+            .unwrap()
+            .get_provision()
+            .expect("host has a provision config")
+            .clone();
+
+        assert_eq!(
+            provision.state, "destroyed",
+            "group provision.state must overlay onto the host config"
+        );
+        assert_eq!(provision.provision_type, "proxmox_vm");
+        assert_eq!(provision.cluster, "space");
+    }
+
+    // Precedence: when both the group and the host set the same provision field,
+    // the host's value wins (matches variable resolution — more specific wins).
+    #[test]
+    fn host_provision_field_wins_over_group_overlay() {
+        let (_keep, path) = inventory_tree_with_host(
+            "testgroup",
+            &["testhost"],
+            Some("provision:\n  state: destroyed\n"),
+            &[(
+                "testhost",
+                "provision:\n  type: proxmox_vm\n  cluster: space\n  state: present\n",
+            )],
+        );
+
+        let inventory = Arc::new(RwLock::new(Inventory::new()));
+        let paths = Arc::new(RwLock::new(vec![path]));
+        load_inventory(&inventory, paths).expect("load_inventory should succeed");
+
+        let provision = inventory
+            .read()
+            .unwrap()
+            .get_host("testhost")
+            .read()
+            .unwrap()
+            .get_provision()
+            .expect("host has a provision config")
+            .clone();
+
+        assert_eq!(
+            provision.state, "present",
+            "host_vars state wins over group"
         );
     }
 

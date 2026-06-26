@@ -39,7 +39,7 @@ pub mod proxmox_vm;
 
 use crate::dns::DnsConfig;
 use crate::inventory::inventory::Inventory;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -50,7 +50,7 @@ fn default_state() -> String {
 }
 
 /// Configuration for provisioning a host's underlying infrastructure
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProvisionConfig {
     /// The type of provisioner (e.g., "proxmox_lxc", "proxmox_vm", "docker")
     #[serde(rename = "type")]
