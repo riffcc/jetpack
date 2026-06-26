@@ -9,7 +9,17 @@ use crate::playbooks::templar::{Templar, TemplateMode};
 use crate::provisioners::{ProvisionConfig, ProvisionResult, Provisioner};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
+
+/// Serializes VMID allocation + empty-VM creation.
+///
+/// Proxmox `/cluster/nextid` returns max+1 without reserving it, so two hosts
+/// created in parallel on the same cluster can be handed the same VMID and
+/// collide at create time. Holding this across `get_next_vmid` →
+/// `create_empty_vm` makes parallel provisioning safe. VM creation is a single
+/// API call (~1s); PXE imaging (~90s) still runs in parallel afterward, so this
+/// serializes only the cheap part.
+static VMID_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 pub struct ProxmoxVmProvisioner;
 
@@ -968,15 +978,21 @@ impl Provisioner for ProxmoxVmProvisioner {
         // reimage with Dragonfly so it images on PXE boot. Best-effort — a
         // Dragonfly outage must never block VM creation; the VM still PXEs and
         // Dragonfly discovers it by MAC.
-        let vmid = if let Some(ref vmid_str) = config.vmid {
-            vmid_str
+        // Allocate the VMID and create the empty VM. When the VMID is
+        // auto-assigned, hold VMID_LOCK across nextid+create so parallel hosts
+        // on the same cluster don't collide on the non-reserving nextid API.
+        let (vmid, mac) = if let Some(ref vmid_str) = config.vmid {
+            let vmid = vmid_str
                 .parse::<u64>()
-                .map_err(|_| "Invalid vmid".to_string())?
+                .map_err(|_| "Invalid vmid".to_string())?;
+            (vmid, self.create_empty_vm(&conn, &config, hostname, vmid)?)
         } else {
-            self.get_next_vmid(&conn)?
+            let _guard = VMID_LOCK
+                .lock()
+                .map_err(|e| format!("VMID lock poisoned: {}", e))?;
+            let vmid = self.get_next_vmid(&conn)?;
+            (vmid, self.create_empty_vm(&conn, &config, hostname, vmid)?)
         };
-
-        let mac = self.create_empty_vm(&conn, &config, hostname, vmid)?;
 
         if !mac.is_empty() {
             eprintln!("VM {} created with MAC: {}", hostname, mac);
