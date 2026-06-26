@@ -592,10 +592,14 @@ fn handle_batch(
         return async_handle_batch(run_state, play, hosts);
     }
 
-    // Sequential mode: provision all hosts via the shared seam, then run the
-    // task-parallel phase against the survivors.
+    // Provision all hosts in parallel via the shared seam, then run the
+    // task-parallel phase against the survivors. Parallelizing provision means
+    // N hosts image concurrently — each gated on its own SSH readiness — instead
+    // of serially. The DNS write lock and the VMID lock make the concurrent
+    // infrastructure writes safe.
+    use rayon::prelude::*;
     let outcomes: Vec<_> = hosts
-        .iter()
+        .par_iter()
         .map(|host| provision_host_with(run_state, host, ensure_host_provisioned))
         .collect();
 
