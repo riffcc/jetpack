@@ -23,6 +23,7 @@ use jetpack::cli::playbooks::{
     full_check, inventory_check, playbook_check_local, playbook_check_ssh, playbook_local,
     playbook_pull, playbook_simulate, playbook_ssh, playbook_syntax_check,
 };
+use jetpack::cli::secrets_diagnostic::missing_secret_variables;
 use jetpack::cli::show::{show_inventory_group, show_inventory_host};
 use jetpack::inventory::inventory::Inventory;
 use jetpack::inventory::loading::load_inventory;
@@ -58,23 +59,6 @@ fn liftoff() -> Result<(), String> {
     // that actually resolves a playbook.
     if cli_parser.verbosity > 0 && is_execution_mode(cli_parser.mode) {
         two_column_table("field", "value", &cli_parser.resolution_summary());
-    }
-
-    // #55: a declared-but-missing secrets_inventory in a non-mutating mode
-    // (converging modes already hard-errored in parse) is warned + skipped, not
-    // fatal — so a fresh clone / CI / contributor without the secrets sibling
-    // can still validate. Informational notice → stdout, never stderr.
-    {
-        let missing = cli_parser.missing_secrets.read().unwrap();
-        if !missing.is_empty() {
-            let names: Vec<String> = missing.iter().map(|p| p.display().to_string()).collect();
-            println!(
-                "note: secrets_inventory not found on this machine — skipping the secrets \
-                 overlay for this non-mutating run (define it, or pass --no-secrets to \
-                 silence): {}",
-                names.join(", ")
-            );
-        }
     }
 
     let inventory: Arc<RwLock<Inventory>> = Arc::new(RwLock::new(Inventory::new()));
@@ -172,6 +156,49 @@ fn liftoff() -> Result<(), String> {
     // destroy hosts — so a normal `apply` never prompts, and there is no
     // `--yes`.
     confirm_destroy_if_tty(&inventory, &cli_parser)?;
+
+    // #55: a declared-but-missing secrets_inventory in a non-mutating mode
+    // (converging modes already hard-errored in parse) is skipped, not fatal — so
+    // a fresh clone / CI / contributor without the secrets sibling can still
+    // validate. Informational notice → stdout, never stderr. When inventory is
+    // loaded we also name the variables that would be undefined without the
+    // overlay, so the operator sees the blast radius rather than a bare "skipped".
+    {
+        let missing = cli_parser.missing_secrets.read().unwrap();
+        if !missing.is_empty() {
+            let paths: Vec<String> = missing.iter().map(|p| p.display().to_string()).collect();
+            let inventory_loaded = !inventory.read().expect("inventory read").hosts.is_empty();
+            let undefined = if inventory_loaded {
+                let playbook_paths = cli_parser.playbook_paths.read().unwrap().clone();
+                let role_paths = cli_parser.role_paths.read().unwrap().clone();
+                missing_secret_variables(
+                    &playbook_paths,
+                    &role_paths,
+                    &inventory,
+                    &cli_parser.extra_vars,
+                )
+            } else {
+                std::collections::BTreeSet::new()
+            };
+            if undefined.is_empty() {
+                println!(
+                    "note: secrets_inventory not found on this machine — skipping the secrets \
+                     overlay for this non-mutating run (define it, or pass --no-secrets to \
+                     silence): {}",
+                    paths.join(", ")
+                );
+            } else {
+                let vars: Vec<String> = undefined.iter().cloned().collect();
+                println!(
+                    "note: secrets_inventory not found on this machine — skipping the secrets \
+                     overlay for this non-mutating run. Without it these referenced variables \
+                     would be undefined (define the overlay, or pass --no-secrets to silence): \
+                     {}",
+                    vars.join(", ")
+                );
+            }
+        }
+    }
 
     let exit_status = match cli_parser.mode {
         jetpack::cli::parser::CLI_MODE_SHOW => match handle_show(&inventory, &cli_parser) {

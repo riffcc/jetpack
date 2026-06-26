@@ -21,4 +21,5 @@ pub mod gen_reference;
 pub mod install;
 pub mod parser;
 pub mod playbooks;
+pub mod secrets_diagnostic;
 pub mod show;
