@@ -1248,6 +1248,53 @@ fn resolve_target_groups(run_state: &Arc<RunState>, play: &Play) -> Result<Vec<S
     Ok(resolved)
 }
 
+/// Resolve the set of host names the playbook(s) target — parse each playbook,
+/// resolve every play's groups (templating + membership). Used by the
+/// destroy-confirmation gate to scope its prompt to what the `-p` playbook
+/// actually touches, instead of the whole inventory.
+///
+/// Returns `Ok(Some(set))` only on full success. Returns `Ok(None)` when there
+/// is no playbook, or any play's groups can't be resolved (read/parse error,
+/// templating failure, or a play with no declared groups) — callers MUST treat
+/// `None` as "unknown, over-approximate" so the destroy prompt never silently
+/// under-counts a real destroy.
+pub(crate) fn resolve_playbook_targets(
+    run_state: &Arc<RunState>,
+) -> Result<Option<std::collections::HashSet<String>>, String> {
+    let playbook_paths = run_state.playbook_paths.read().unwrap().clone();
+    if playbook_paths.is_empty() {
+        return Ok(None);
+    }
+    let mut targets = std::collections::HashSet::new();
+    for path in &playbook_paths {
+        let file = match jet_file_open(path) {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+        let plays: Vec<Play> = match serde_yaml::from_reader(file) {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+        for (play_index, play) in plays.iter().enumerate() {
+            // Mirror the run: set play_index so a --groups per-play override
+            // resolves against the right index.
+            run_state.context.write().unwrap().play_index = play_index;
+            let groups = match resolve_target_groups(run_state, play) {
+                Ok(g) => g,
+                Err(_) => return Ok(None),
+            };
+            if groups.is_empty() {
+                // A play with no declared groups is ambiguous → safe fallback.
+                return Ok(None);
+            }
+            for host in get_play_hosts(run_state, &groups) {
+                targets.insert(host.read().unwrap().name.clone());
+            }
+        }
+    }
+    Ok(Some(targets))
+}
+
 fn get_play_hosts(run_state: &Arc<RunState>, groups: &[String]) -> Vec<Arc<RwLock<Host>>> {
     // the hosts we want to talk to are the resolved play groups, possibly
     // further constrained by --limit-hosts / --limit-groups. Group resolution
