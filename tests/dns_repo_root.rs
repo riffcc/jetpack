@@ -22,6 +22,8 @@
 
 use serde_yaml::{Mapping, Value};
 use std::fs;
+use std::sync::Arc;
+use std::thread;
 use tempfile::TempDir;
 
 #[test]
@@ -77,4 +79,48 @@ fn dns_record_lands_at_automation_root_not_playbook_dir() {
         "hostname recorded: {content}"
     );
     assert!(content.contains("10.0.0.5"), "ip recorded: {content}");
+}
+
+/// Parallel host provisioning calls `add_host_record` concurrently against the
+/// same zone file. The DNS write lock must serialize those calls so the
+/// zone-file read-modify-write (and the sync that follows) does not lose
+/// updates — and must not deadlock on the internally-called helpers.
+#[test]
+fn parallel_add_host_record_serializes_without_loss_or_deadlock() {
+    let repo = TempDir::new().unwrap();
+    let automation_root = repo.path().to_path_buf();
+    let mut dns_block = Mapping::new();
+    dns_block.insert(
+        Value::String("path".to_string()),
+        Value::String("dns/test".to_string()),
+    );
+    dns_block.insert(Value::String("auto_sync".to_string()), Value::Bool(false));
+    let dns = Arc::new(
+        jetpack::dns::dns_config_from_vars(&Value::Mapping(dns_block), &automation_root)
+            .expect("dns block deserializes"),
+    );
+
+    const N: usize = 16;
+    let handles: Vec<_> = (1..=N)
+        .map(|i| {
+            let dns = Arc::clone(&dns);
+            thread::spawn(move || {
+                let fqdn = format!("node{i}.test");
+                let ip = format!("10.0.0.{i}");
+                jetpack::dns::add_host_record(&dns, &fqdn, &ip).expect("record write succeeds")
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().expect("DNS writer thread must not panic");
+    }
+
+    let zone_file = repo.path().join("dns/test/zones/test.yaml");
+    let content = fs::read_to_string(&zone_file).unwrap();
+    for i in 1..=N {
+        assert!(
+            content.contains(&format!("node{i}")),
+            "node{i} record lost to a concurrent write: {content}"
+        );
+    }
 }
