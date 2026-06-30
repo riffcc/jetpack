@@ -1200,6 +1200,34 @@ impl CliParser {
         Ok(())
     }
 
+    /// Render a contract `secrets_inventory` path by substituting the active
+    /// profile name into the `{profile}` placeholder.
+    ///
+    /// This is a **contract-time** substitution (the profile is selected in this
+    /// same `apply_file_defaults` pass), deliberately *not* `{{var}}` Templar
+    /// syntax — only `{profile}` is special, so the rest of a contract path
+    /// stays literal and can never be accidentally templated. A path that uses
+    /// `{profile}` with no profile selected is a configuration error: the
+    /// operator asked for a per-profile overlay but named no profile, so we
+    /// error clearly rather than silently substitute empty (a bogus path).
+    ///
+    /// Because `{`/`}` are YAML flow indicators, a `{profile}` path needs
+    /// quoting in flow style (`["../sec/{profile}-test"]`) or block style
+    /// (`  - ../sec/{profile}-test`) — the same rule that applies to `{{var}}`
+    /// everywhere else in Jetpack.
+    fn render_profile_in_path(path: &str, profile_name: Option<&str>) -> Result<String, String> {
+        if !path.contains("{profile}") {
+            return Ok(path.to_string());
+        }
+        match profile_name {
+            Some(name) => Ok(path.replace("{profile}", name)),
+            None => Err(format!(
+                "secrets_inventory path '{path}' uses {{profile}} but no profile is selected — \
+                 pass --profile or set defaults.profile so the placeholder can resolve."
+            )),
+        }
+    }
+
     /// Apply `.jetpack` contract defaults for every playbook-executing mode —
     /// the same mode set as `inject_builtin_vars` (everything but the pure
     /// utility modes). Each of playbook/inventory/roles is filled ONLY when the
@@ -1235,7 +1263,12 @@ impl CliParser {
                 defaults.inventory = inventory.clone();
             }
             if let Some(secrets) = &profile.secrets_inventory {
-                defaults.secrets_inventory = secrets.clone();
+                // `{profile}` self-substitutes the profile's own name (DRY:
+                // one path shape across sites, name self-fills).
+                defaults.secrets_inventory = secrets
+                    .iter()
+                    .map(|p| Self::render_profile_in_path(p, Some(name.as_str())))
+                    .collect::<Result<_, _>>()?;
             }
         }
 
@@ -1257,7 +1290,13 @@ impl CliParser {
                 .and_then(|e| e.get(name))
                 .ok_or_else(|| format!("environment '{}' not found in .jetpack.yml", name))?;
             if let Some(secrets) = &env.secrets_inventory {
-                defaults.secrets_inventory.extend(secrets.iter().cloned());
+                // `{profile}` substitutes the active profile name (resolved
+                // above), so a single env can layer <site>-test per profile.
+                for path in secrets {
+                    defaults
+                        .secrets_inventory
+                        .push(Self::render_profile_in_path(path, profile_name.as_deref())?);
+                }
             }
         }
 
@@ -2745,6 +2784,7 @@ mod tests {
             "sec/default",
             "sec/perth",
             "sec/london",
+            "sec/london-test",
             "sec/envtest",
         ] {
             fs::create_dir_all(root.join(d)).unwrap();
@@ -3010,6 +3050,87 @@ environments:
                 .unwrap()
                 .ends_with("sec/envtest"),
             "environment overlay layered on top of the profile secrets"
+        );
+    }
+
+    #[test]
+    fn environment_secrets_profile_placeholder_resolves_to_active_profile() {
+        // `{profile}` in an environment's secrets_inventory resolves to the
+        // selected profile name, so one `test` env can layer <site>-test per
+        // site (london/nyc/seattle) without per-site environment entries.
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+profiles:
+  london:
+    inventory: [inv/london]
+environments:
+  test:
+    secrets_inventory:
+      - sec/{profile}-test
+";
+        let (parser, result) = parse_with_contract(
+            contract,
+            &["apply", "--profile", "london", "--environment", "test"],
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            has_segment(&parser.secrets_paths, "sec/london-test"),
+            "`{{profile}}` resolved to the active profile name: {:?}",
+            parser.secrets_paths
+        );
+        // The resolved path is what the runtime will actually load.
+        let in_load_list = parser
+            .inventory_load_paths()
+            .iter()
+            .any(|p| p.to_string_lossy().ends_with("sec/london-test"));
+        assert!(in_load_list, "resolved overlay is in the load list");
+    }
+
+    #[test]
+    fn environment_secrets_profile_placeholder_without_profile_errors() {
+        // `{profile}` with no profile selected is a config error: the operator
+        // asked for a per-profile overlay but named no profile. Error clearly
+        // rather than silently substituting empty (which would load a bogus path).
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+environments:
+  test:
+    secrets_inventory:
+      - sec/{profile}-test
+";
+        let (_parser, result) = parse_with_contract(contract, &["apply", "--environment", "test"]);
+        let err = result.unwrap_err();
+        assert!(err.contains("{profile}"), "error names the placeholder: {err}");
+        assert!(err.contains("no profile"), "error states the cause: {err}");
+    }
+
+    #[test]
+    fn profile_secrets_profile_placeholder_self_substitutes() {
+        // `{profile}` in a profile's OWN secrets_inventory substitutes that
+        // profile's name — DRY across sites (one path shape, name self-fills).
+        let contract = "\
+version: 1
+defaults:
+  playbook: pb/install.yml
+  inventory: [inv/default]
+profiles:
+  london:
+    inventory: [inv/london]
+    secrets_inventory:
+      - sec/{profile}-test
+";
+        let (parser, result) = parse_with_contract(contract, &["apply", "--profile", "london"]);
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            has_segment(&parser.secrets_paths, "sec/london-test"),
+            "`{{profile}}` self-substituted the profile name: {:?}",
+            parser.secrets_paths
         );
     }
 
