@@ -3106,7 +3106,10 @@ environments:
 ";
         let (_parser, result) = parse_with_contract(contract, &["apply", "--environment", "test"]);
         let err = result.unwrap_err();
-        assert!(err.contains("{profile}"), "error names the placeholder: {err}");
+        assert!(
+            err.contains("{profile}"),
+            "error names the placeholder: {err}"
+        );
         assert!(err.contains("no profile"), "error states the cause: {err}");
     }
 

@@ -34,6 +34,7 @@ pub enum Field {
     Location,
     Mode,
     Owner,
+    Reload,
     Restart,
     Shell,
     Start,

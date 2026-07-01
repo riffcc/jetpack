@@ -8,6 +8,7 @@ fn test_systemd_service_task_basic() {
         service: "nginx".to_string(),
         enabled: None,
         started: None,
+        reload: None,
         restart: None,
         with: None,
         and: None,
@@ -27,6 +28,7 @@ fn test_systemd_service_task_enabled_started() {
         service: "postgresql".to_string(),
         enabled: Some("yes".to_string()),
         started: Some("yes".to_string()),
+        reload: None,
         restart: None,
         with: None,
         and: None,
@@ -45,6 +47,7 @@ fn test_systemd_service_task_restart() {
         service: "httpd".to_string(),
         enabled: None,
         started: None,
+        reload: None,
         restart: Some("yes".to_string()),
         with: None,
         and: None,
@@ -61,6 +64,7 @@ fn test_systemd_service_task_disabled_stopped() {
         service: "firewalld".to_string(),
         enabled: Some("no".to_string()),
         started: Some("no".to_string()),
+        reload: None,
         restart: None,
         with: None,
         and: None,
@@ -142,6 +146,26 @@ restart: "yes"
     assert_eq!(task.name, Some("Restart application".to_string()));
     assert_eq!(task.service, "myapp");
     assert_eq!(task.restart, Some("yes".to_string()));
+    assert!(task.enabled.is_none());
+    assert!(task.started.is_none());
+}
+
+#[test]
+fn test_systemd_service_task_reload_only() {
+    let yaml = r#"
+name: Reload application
+service: myapp
+reload: "yes"
+"#;
+
+    let task: Result<SystemdServiceTask, _> = serde_yaml::from_str(yaml);
+    assert!(task.is_ok());
+
+    let task = task.unwrap();
+    assert_eq!(task.name, Some("Reload application".to_string()));
+    assert_eq!(task.service, "myapp");
+    assert_eq!(task.reload, Some("yes".to_string()));
+    assert!(task.restart.is_none());
     assert!(task.enabled.is_none());
     assert!(task.started.is_none());
 }
