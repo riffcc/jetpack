@@ -62,6 +62,7 @@ fn test_all_field_variants() {
         Field::Groups,
         Field::Mode,
         Field::Owner,
+        Field::Reload,
         Field::Restart,
         Field::Shell,
         Field::Start,

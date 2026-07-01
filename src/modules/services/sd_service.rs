@@ -31,6 +31,7 @@ pub struct SystemdServiceTask {
     pub service: String,
     pub enabled: Option<String>,
     pub started: Option<String>,
+    pub reload: Option<String>,
     pub restart: Option<String>,
     pub with: Option<PreLogicInput>,
     pub and: Option<PostLogicInput>,
@@ -40,6 +41,7 @@ struct SystemdServiceAction {
     pub service: String,
     pub enabled: Option<bool>,
     pub started: Option<bool>,
+    pub reload: bool,
     pub restart: bool,
 }
 
@@ -100,6 +102,12 @@ impl IsTask for SystemdServiceTask {
                     &String::from("started"),
                     &self.started,
                 )?,
+                reload: handle.template.boolean_option_default_false(
+                    request,
+                    tm,
+                    &String::from("reload"),
+                    &self.reload,
+                )?,
                 restart: handle.template.boolean_option_default_false(
                     request,
                     tm,
@@ -142,26 +150,52 @@ impl IsAction for SystemdServiceAction {
                     _ => {}
                 };
 
-                match (actual.started, self.started, self.restart) {
-                    (_, Some(false), true) => {
+                match (actual.started, self.started, self.reload, self.restart) {
+                    (_, Some(false), true, _) => {
+                        return Err(handle.response.is_failed(
+                            request,
+                            &String::from("started:false and reload:true conflict"),
+                        ));
+                    }
+                    (_, Some(false), _, true) => {
                         return Err(handle.response.is_failed(
                             request,
                             &String::from("started:false and restart:true conflict"),
                         ));
                     }
-                    (true, Some(true), true) => {
+                    (_, _, true, true) => {
+                        return Err(handle.response.is_failed(
+                            request,
+                            &String::from("reload:true and restart:true conflict"),
+                        ));
+                    }
+                    (true, Some(true), true, false) => {
+                        changes.push(Field::Reload);
+                    }
+                    (true, None, true, false) => {
+                        changes.push(Field::Reload); /* a little weird, but we know what you mean */
+                    }
+                    (false, None, true, false) => {
+                        return Err(handle.response.is_failed(
+                            request,
+                            &String::from(
+                                "reload:true requires the service to already be started or started:true",
+                            ),
+                        ));
+                    }
+                    (true, Some(true), false, true) => {
                         changes.push(Field::Restart);
                     }
-                    (true, None, true) => {
+                    (true, None, false, true) => {
                         changes.push(Field::Restart); /* a little weird, but we know what you mean */
                     }
-                    (false, None, true) => {
+                    (false, None, false, true) => {
                         changes.push(Field::Start); /* a little weird, but we know what you mean */
                     }
-                    (false, Some(true), _) => {
+                    (false, Some(true), _, _) => {
                         changes.push(Field::Start);
                     }
-                    (true, Some(false), false) => {
+                    (true, Some(false), false, false) => {
                         changes.push(Field::Stop);
                     }
                     _ => {}
@@ -179,6 +213,8 @@ impl IsAction for SystemdServiceAction {
                     self.do_start(handle, request)?;
                 } else if request.changes.contains(&Field::Stop) {
                     self.do_stop(handle, request)?;
+                } else if request.changes.contains(&Field::Reload) {
+                    self.do_reload(handle, request)?;
                 } else if request.changes.contains(&Field::Restart) {
                     self.do_restart(handle, request)?;
                 }
@@ -291,6 +327,15 @@ impl SystemdServiceAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         let cmd = format!("systemctl restart '{}'", self.service);
+        handle.remote.run(request, &cmd, CheckRc::Checked)
+    }
+
+    pub fn do_reload(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        let cmd = format!("systemctl reload '{}'", self.service);
         handle.remote.run(request, &cmd, CheckRc::Checked)
     }
 }
