@@ -41,7 +41,7 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 ```yaml
 - !http
   name: Configure DHCP scope
-  url: "{{ gravity_url }}/api/v1/dhcp/scopes?scope=kindy.world"
+  url: "{{ gravity_url }}/api/v1/dhcp/scopes?scope=example.com"
   method: POST
   headers:
     Authorization: "Bearer {{ gravity_api_token }}"

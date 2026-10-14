@@ -34,10 +34,10 @@ async fn templates_request_and_captures_response_for_later_tasks() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/dhcp/scopes"))
-        .and(query_param("scope", "kindy.world"))
+        .and(query_param("scope", "example.com"))
         .and(header("authorization", "Bearer secret-token"))
         .and(header("content-type", "application/json"))
-        .and(body_string(r#"{"name":"kindy.world","enabled":true}"#))
+        .and(body_string(r#"{"name":"example.com","enabled":true}"#))
         .respond_with(
             ResponseTemplate::new(201)
                 .set_body_string(r#"{"created":true}"#)
@@ -51,7 +51,7 @@ async fn templates_request_and_captures_response_for_later_tasks() {
         .await;
     let task: Task = serde_yaml::from_str(
         r#"!http
-url: "{{ endpoint }}/api/v1/dhcp/scopes?scope=kindy.world"
+url: "{{ endpoint }}/api/v1/dhcp/scopes?scope=example.com"
 method: "{{ verb }}"
 headers:
   Authorization: "Bearer {{ token }}"
@@ -71,7 +71,7 @@ verify_tls: true
     };
     let handle = handle();
     handle.host.write().unwrap().update_variables(serde_yaml::from_str(&format!(
-        "endpoint: {}\nverb: POST\ntoken: secret-token\nstatus: 201\nresult_name: response\npayload: '{{\"name\":\"kindy.world\",\"enabled\":true}}'",
+        "endpoint: {}\nverb: POST\ntoken: secret-token\nstatus: 201\nresult_name: response\npayload: '{{\"name\":\"example.com\",\"enabled\":true}}'",
         server.uri()
     )).unwrap());
     let response = execute(task, handle.clone()).await.unwrap();
