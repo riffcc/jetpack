@@ -29,10 +29,35 @@ pub struct HttpTask {
     pub expected_status: Option<Vec<String>>,
     pub save: Option<String>,
     pub changed_when: Option<String>,
+    pub check: Option<HttpCheck>,
     pub timeout: Option<String>,
     pub verify_tls: Option<String>,
     pub with: Option<PreLogicInput>,
     pub and: Option<PostLogicInput>,
+}
+
+/// A read-only request whose response establishes whether mutation is needed.
+/// Request settings are independent of the mutation, including authentication.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct HttpCheck {
+    pub url: String,
+    pub method: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    pub body: Option<String>,
+    pub expected_status: Option<Vec<String>>,
+    pub timeout: Option<String>,
+    pub verify_tls: Option<String>,
+    pub matches: String,
+}
+
+impl fmt::Debug for HttpCheck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpCheck")
+            .field("request", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
 }
 
 // Redact every header, including custom authentication headers. URL and body
@@ -46,16 +71,72 @@ impl fmt::Debug for HttpTask {
 }
 
 struct HttpAction {
+    request: HttpRequest,
+    check: Option<HttpCheckAction>,
+    save: Option<String>,
+    changed_when: Option<String>,
+    condition_vars: Mapping,
+}
+
+struct HttpCheckAction {
+    request: HttpRequest,
+    matches: String,
+}
+
+struct HttpRequest {
     url: String,
     method: String,
     headers: BTreeMap<String, String>,
     body: Option<String>,
     expected_status: Option<Vec<String>>,
-    save: Option<String>,
     timeout: String,
     verify_tls: String,
-    changed_when: Option<String>,
-    condition_vars: Mapping,
+}
+
+struct HttpRequestInput<'a> {
+    url: &'a str,
+    method: &'a Option<String>,
+    headers: &'a BTreeMap<String, String>,
+    body: &'a Option<String>,
+    expected_status: &'a Option<Vec<String>>,
+    timeout: &'a Option<String>,
+    verify_tls: &'a Option<String>,
+}
+
+impl HttpRequestInput<'_> {
+    fn template(
+        &self,
+        render: &impl Fn(&str, &str) -> Result<String, Arc<TaskResponse>>,
+    ) -> Result<HttpRequest, Arc<TaskResponse>> {
+        Ok(HttpRequest {
+            url: render("url", self.url)?,
+            method: render("method", self.method.as_deref().unwrap_or("GET"))?,
+            headers: self
+                .headers
+                .iter()
+                .map(|(key, value)| {
+                    Ok((render("header name", key)?, render("header value", value)?))
+                })
+                .collect::<Result<_, Arc<TaskResponse>>>()?,
+            body: self
+                .body
+                .as_deref()
+                .map(|v| render("body", v))
+                .transpose()?,
+            expected_status: self
+                .expected_status
+                .as_ref()
+                .map(|codes| {
+                    codes
+                        .iter()
+                        .map(|v| render("expected_status", v))
+                        .collect::<Result<_, _>>()
+                })
+                .transpose()?,
+            timeout: render("timeout", self.timeout.as_deref().unwrap_or("30"))?,
+            verify_tls: render("verify_tls", self.verify_tls.as_deref().unwrap_or("true"))?,
+        })
+    }
 }
 
 impl IsTask for HttpTask {
@@ -93,36 +174,40 @@ impl IsTask for HttpTask {
                         .is_failed(request, &format!("http: cannot template {field}"))
                 })
         };
-        let optional = |field: &str, input: &Option<String>| {
-            input.as_deref().map(|v| render(field, v)).transpose()
-        };
         Ok(EvaluatedTask {
             action: Arc::new(HttpAction {
-                url: render("url", &self.url)?,
-                method: render("method", self.method.as_deref().unwrap_or("GET"))?,
-                headers: self
-                    .headers
-                    .iter()
-                    .map(|(key, value)| {
-                        Ok((render("header name", key)?, render("header value", value)?))
-                    })
-                    .collect::<Result<_, Arc<TaskResponse>>>()?,
-                body: optional("body", &self.body)?,
-                expected_status: self
-                    .expected_status
+                request: HttpRequestInput {
+                    url: &self.url,
+                    method: &self.method,
+                    headers: &self.headers,
+                    body: &self.body,
+                    expected_status: &self.expected_status,
+                    timeout: &self.timeout,
+                    verify_tls: &self.verify_tls,
+                }
+                .template(&render)?,
+                check: self
+                    .check
                     .as_ref()
-                    .map(|codes| {
-                        codes
-                            .iter()
-                            .map(|v| render("expected_status", v))
-                            .collect::<Result<_, _>>()
+                    .map(|check| {
+                        Ok::<_, Arc<TaskResponse>>(HttpCheckAction {
+                            request: HttpRequestInput {
+                                url: &check.url,
+                                method: &check.method,
+                                headers: &check.headers,
+                                body: &check.body,
+                                expected_status: &check.expected_status,
+                                timeout: &check.timeout,
+                                verify_tls: &check.verify_tls,
+                            }
+                            .template(&|field, input| render(&format!("check.{field}"), input))?,
+                            matches: check.matches.clone(),
+                        })
                     })
                     .transpose()?,
                 save: handle
                     .template
                     .string_option_no_spaces(request, tm, "save", &self.save)?,
-                timeout: render("timeout", self.timeout.as_deref().unwrap_or("30"))?,
-                verify_tls: render("verify_tls", self.verify_tls.as_deref().unwrap_or("true"))?,
                 // Preserve the condition until the actual response exists.
                 changed_when: self.changed_when.clone(),
                 // Capture variables while this invocation's item/host context
@@ -148,10 +233,42 @@ impl IsAction for HttpAction {
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         match request.request_type {
-            // Check mode stops here, without sending even a GET request.
-            TaskRequestType::Query => Ok(handle.response.needs_execution(request)),
+            TaskRequestType::Query => {
+                if let Some(check) = &self.check {
+                    // Enforce read-only preflight methods before any I/O.
+                    // The engine never enters Execute in plan/check mode.
+                    if !matches!(
+                        check.request.method.to_ascii_uppercase().as_str(),
+                        "GET" | "HEAD"
+                    ) {
+                        return Err(handle
+                            .response
+                            .is_failed(request, "http: check method must be GET or HEAD"));
+                    }
+                    let result = check.request.send().map_err(|e| {
+                        handle.response.is_failed(
+                            request,
+                            &format!("http: check: {}", e.strip_prefix("http: ").unwrap_or(&e)),
+                        )
+                    })?;
+                    if !result.expected {
+                        return Err(handle.response.is_failed(
+                            request,
+                            &format!("http: check unexpected status {}", result.status),
+                        ));
+                    }
+                    if result
+                        .test_condition(&check.matches, &self.condition_vars, "check.matches")
+                        .map_err(|e| handle.response.is_failed(request, &e))?
+                    {
+                        return Ok(handle.response.is_matched(request));
+                    }
+                }
+                Ok(handle.response.needs_execution(request))
+            }
             TaskRequestType::Execute => {
                 let result = self
+                    .request
                     .send()
                     .map_err(|e| handle.response.is_failed(request, &e))?;
                 if let Some(save) = &self.save {
@@ -280,7 +397,7 @@ fn sensitive_header(name: &str) -> bool {
         || name.contains("secret")
 }
 
-impl HttpAction {
+impl HttpRequest {
     fn send(&self) -> Result<HttpResult, String> {
         // Keep errors independent of request values and reqwest's URL-bearing
         // error strings, including malformed custom headers and method names.
@@ -393,3 +510,6 @@ impl HttpAction {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod preflight_tests;
