@@ -269,7 +269,7 @@ async fn unreachable_and_timed_out_checks_fail_without_mutation() {
 }
 
 #[tokio::test]
-async fn check_settings_are_independent_and_template_with_host_variables() {
+async fn check_overrides_template_with_host_variables() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/check"))
@@ -360,6 +360,7 @@ async fn item_iterations_check_their_own_resource_and_skip_only_matching_items()
     for (item, configured) in [("one", true), ("two", false)] {
         Mock::given(method("GET"))
             .and(path(format!("/{item}")))
+            .and(header("authorization", format!("Bearer {item}")))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!({"item": item, "configured": configured})),
@@ -369,6 +370,7 @@ async fn item_iterations_check_their_own_resource_and_skip_only_matching_items()
             .await;
         Mock::given(method("POST"))
             .and(path(format!("/{item}")))
+            .and(header("authorization", format!("Bearer {item}")))
             .and(body_string(item))
             .respond_with(
                 ResponseTemplate::new(201)
@@ -384,6 +386,8 @@ async fn item_iterations_check_their_own_resource_and_skip_only_matching_items()
     );
     task.url = format!("{}/{{{{ item }}}}", server.uri());
     task.body = Some("{{ item }}".into());
+    task.headers
+        .insert("Authorization".into(), "Bearer {{ item }}".into());
     task.check.as_mut().unwrap().url = task.url.clone();
     task.changed_when = Some("(and (eq response.json.item item) response.json.changed)".into());
     task.with = Some(serde_yaml::from_str("items: [one, two]\n").unwrap());
@@ -410,6 +414,7 @@ async fn parallel_hosts_do_not_share_preflight_or_mutation_responses() {
         let changed = id % 3 == 0;
         Mock::given(method("GET"))
             .and(path(format!("/{id}")))
+            .and(header("authorization", format!("Bearer host-{id}")))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!({"id": id, "configured": configured}))
@@ -420,6 +425,7 @@ async fn parallel_hosts_do_not_share_preflight_or_mutation_responses() {
             .await;
         Mock::given(method("POST"))
             .and(path(format!("/{id}")))
+            .and(header("authorization", format!("Bearer host-{id}")))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!({"id": id, "changed": changed})),
@@ -438,6 +444,8 @@ async fn parallel_hosts_do_not_share_preflight_or_mutation_responses() {
             "(and (eq response.json.id id) response.json.configured)",
         );
         task.url = format!("{}/{{{{ id }}}}", server.uri());
+        task.headers
+            .insert("Authorization".into(), "Bearer host-{{ id }}".into());
         task.check.as_mut().unwrap().url = task.url.clone();
         task.changed_when = Some("(and (eq response.json.id id) response.json.changed)".into());
         workers.push(tokio::spawn(async move {
@@ -552,4 +560,205 @@ async fn indirect_json_access_is_validated_only_when_its_branch_is_reached() {
             .status,
         TaskStatus::NeedsExecution
     );
+}
+
+#[tokio::test]
+async fn check_headers_inherit_and_upsert_without_changing_mutation_headers() {
+    for plan in [true, false] {
+        for override_headers in [false, true] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(header(
+                    "authorization",
+                    if override_headers {
+                        "Bearer check"
+                    } else {
+                        "Bearer parent"
+                    },
+                ))
+                .and(header("x-shared", "retained"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(header("authorization", "Bearer parent"))
+                .and(header("x-shared", "retained"))
+                .and(header("x-empty", "parent"))
+                .and(body_string("mutation body"))
+                .respond_with(ResponseTemplate::new(201))
+                .expect(if plan { 0 } else { 1 })
+                .mount(&server)
+                .await;
+            let mut task = task(&server.uri(), "false");
+            task.headers = BTreeMap::from([
+                ("Authorization".into(), "Bearer parent".into()),
+                ("X-Shared".into(), "retained".into()),
+                ("X-Empty".into(), "parent".into()),
+            ]);
+            task.body = Some("mutation body".into());
+            // Neither body nor expected_status nor method is inherited.
+            task.expected_status = Some(vec!["201".into()]);
+            if override_headers {
+                task.check.as_mut().unwrap().headers = BTreeMap::from([
+                    ("{{ auth_header }}".into(), "Bearer check".into()),
+                    ("X-Added".into(), "check only".into()),
+                    ("x-empty".into(), "".into()),
+                ]);
+            }
+            let handle = handle();
+            handle
+                .host
+                .write()
+                .unwrap()
+                .update_variables(serde_yaml::from_str("auth_header: aUtHoRiZaTiOn").unwrap());
+            let result = run_through_engine(task, handle, plan).await.unwrap();
+            assert_eq!(
+                result.status,
+                if plan {
+                    TaskStatus::NeedsExecution
+                } else {
+                    TaskStatus::IsExecuted
+                }
+            );
+            let requests = server.received_requests().await.unwrap();
+            let check = requests.iter().find(|r| r.method == "GET").unwrap();
+            assert!(check.body.is_empty());
+            assert_eq!(check.headers.get_all("authorization").iter().count(), 1);
+            assert_eq!(
+                check.headers.get("x-empty").unwrap(),
+                if override_headers { "" } else { "parent" }
+            );
+            assert_eq!(check.headers.contains_key("x-added"), override_headers);
+            if !plan {
+                let mutation = requests.iter().find(|r| r.method == "POST").unwrap();
+                assert!(!mutation.headers.contains_key("x-added"));
+            }
+        }
+    }
+}
+
+#[test]
+fn check_transport_options_inherit_defaults_and_allow_false_overrides() {
+    let render = |_: &str, value: &str| Ok(value.to_string());
+    let task = HttpTask {
+        url: "https://example.com/mutate".into(),
+        ..Default::default()
+    };
+    let defaults = HttpRequestInput {
+        url: &task.url,
+        method: &task.method,
+        headers: &task.headers,
+        body: &task.body,
+        expected_status: &task.expected_status,
+        timeout: &task.timeout,
+        verify_tls: &task.verify_tls,
+    }
+    .template(&render)
+    .unwrap();
+    let check = HttpCheck {
+        url: "https://example.com/check".into(),
+        matches: "true".into(),
+        ..Default::default()
+    };
+    let request = check.template(&defaults, &render).unwrap().request;
+    assert_eq!(
+        (&request.timeout[..], &request.verify_tls[..]),
+        ("30", "true")
+    );
+    let mut mutation = defaults;
+    mutation.timeout = "7".into();
+    for parent_tls in ["true", "false"] {
+        mutation.verify_tls = parent_tls.into();
+        let inherited = check.template(&mutation, &render).unwrap().request;
+        assert_eq!(
+            (&inherited.timeout[..], &inherited.verify_tls[..]),
+            ("7", parent_tls)
+        );
+        for child_tls in ["true", "false"] {
+            let override_check = HttpCheck {
+                timeout: Some("2".into()),
+                verify_tls: Some(child_tls.into()),
+                ..HttpCheck::default()
+            };
+            let overridden = override_check.template(&mutation, &render).unwrap().request;
+            assert_eq!(
+                (&overridden.timeout[..], &overridden.verify_tls[..]),
+                ("2", child_tls)
+            );
+            assert_eq!(
+                (&mutation.timeout[..], &mutation.verify_tls[..]),
+                ("7", parent_tls)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn inherited_timeout_is_enforced_and_explicit_check_timeout_overrides_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(1500)))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let mut task = task(&server.uri(), "true");
+    task.timeout = Some("{{ timeout }}".into());
+    let handle = handle();
+    handle
+        .host
+        .write()
+        .unwrap()
+        .update_variables(serde_yaml::from_str("timeout: 1").unwrap());
+    let error = run_through_engine(task, handle, true).await.unwrap_err();
+    assert_eq!(error.msg.as_deref(), Some("http: check: request timed out"));
+    let mut task = self::task(&server.uri(), "true");
+    task.timeout = Some("1".into());
+    task.check.as_mut().unwrap().timeout = Some("3".into());
+    assert_eq!(
+        run_through_engine(task, self::handle(), true)
+            .await
+            .unwrap()
+            .status,
+        TaskStatus::IsMatched
+    );
+}
+
+#[tokio::test]
+async fn inherited_invalid_settings_fail_without_leaking_secrets_or_mutating() {
+    for (timeout, tls, error) in [
+        (
+            "secret",
+            "true",
+            "http: check: timeout must be a positive integer in seconds",
+        ),
+        (
+            "30",
+            "secret",
+            "http: check: verify_tls must be true or false",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let mut task = task(&server.uri(), "false");
+        task.timeout = Some(timeout.into());
+        task.verify_tls = Some(tls.into());
+        let result = run_through_engine(task, handle(), true).await.unwrap_err();
+        assert_eq!(result.msg.as_deref(), Some(error));
+        assert!(!format!("{result:?}").contains("secret"));
+    }
 }

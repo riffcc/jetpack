@@ -19,7 +19,7 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 - save writes a host variable containing status (HTTP code), body (response text), headers (lowercase names mapped to lists of values), rc (0 for expected status, 1 otherwise), and out (alias of body). json contains parsed JSON when valid, including JSON null; it is omitted for empty or invalid bodies. Responses are saved before an unexpected status fails the task. Transport failures do not write a result.
 - changed_when uses the existing condition language: true always reports changed, false reports success without change, and expressions such as (eq response.status 201) or (eq response.json.changed true) inspect this invocation's actual response. The response binding is temporary and available without save. Host/item variables are captured per invocation. Expected status is validated before the condition is evaluated; condition errors fail the task without printing its expression or body.
 - JSON is required only when evaluation reaches response.json. Empty bodies produce a no-JSON-body error; nonempty invalid bodies produce an invalid-JSON error, both naming the condition field and HTTP status without exposing content. Short-circuit and/or guards can skip JSON access. A successful 204 with changed_when: false needs no JSON. Raw response.body/out remain available to conditions and save, but are never printed by the module itself.
-- check is an optional independent HTTP request with a required matches condition. Its URL, headers, body, expected_status, timeout, and verify_tls follow the same templating and defaults as the mutation; none are inherited. check.method is restricted to GET or HEAD (default GET). Include authentication explicitly in check.headers when needed.
+- check is an optional read-only HTTP request with a required matches condition and explicit URL. It inherits mutation headers, timeout, and verify_tls. Explicit check headers merge into the inherited headers, replacing matching names case-insensitively after templating. An empty check.headers map keeps the inherited headers; an empty header value explicitly replaces that value. check.timeout and check.verify_tls override only when supplied. Method (GET or HEAD, default GET), body, and expected_status remain independent with their normal defaults.
 - The query phase validates the preflight's expected status, then evaluates check.matches against its own temporary response. A true result reports matched/no change and skips mutation in both plan and apply. False reports needs execution in plan and executes mutation in apply. Transport errors, unexpected statuses, invalid JSON accesses, and invalid conditions fail without mutation. An explicitly expected empty 404 can establish absence with (and (eq response.status 200) (eq response.json.authoritative true)).
 - check.matches establishes whether mutation is necessary; changed_when evaluates only the executed mutation's response and determines the final apply report, even if it returns false after a mismatching preflight. The save variable captures only executed mutation responses: matched checks and plan do not write it or clear an earlier value. Preflight and mutation are separate requests, so server-side concurrency controls are still needed to handle another actor changing state between them.
 - Request values are omitted from debug output and errors. Captured Authorization, Proxy-Authorization, Cookie, Set-Cookie, and headers containing token, key, or secret have redacted values. Captured body/out remain raw; printing those variables may expose sensitive response content.
@@ -36,15 +36,15 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 | `expected_status` | list | no | Nonempty list of HTTP status codes (100–599), optionally templated. Default any 2xx status. |
 | `save` | string | no | Templated host-variable name to save the response map, following command/shell save. |
 | `changed_when` | condition | no | Deferred condition evaluated against this invocation's temporary response after expected-status validation. Default true (always changed). Use false for successful requests that should not claim a change. |
-| `check` | map | no | Independent read-only preflight request. Runs in query phase in both plan and apply; a matching resource skips mutation. |
+| `check` | map | no | Read-only preflight request inheriting headers, timeout, and TLS settings. Runs in query phase in both plan and apply; a matching resource skips mutation. |
 | `check.url` | string | no | Required when check is set. Templated HTTP(S) URL to inspect. |
 | `check.matches` | condition | no | Required when check is set. Deferred condition over this preflight response; true means already configured, false means mutation is needed. |
 | `check.method` | string | no | Templated GET or HEAD. Default GET; other methods fail before I/O. |
-| `check.headers` | map | no | Templated preflight headers, including authentication. Default empty; does not inherit mutation headers. |
+| `check.headers` | map | no | Templated preflight headers merged with mutation headers. Matching names replace inherited values case-insensitively; absent names are added. |
 | `check.body` | string | no | Optional templated raw preflight body. |
 | `check.expected_status` | list | no | Expected preflight status codes. Default any 2xx; explicitly include 404 when absence is a valid check result. |
-| `check.timeout` | int | no | Positive preflight timeout in seconds. Default 30; independent of mutation timeout. |
-| `check.verify_tls` | bool | no | Preflight TLS certificate verification flag. Default true; independent of mutation verify_tls. |
+| `check.timeout` | int | no | Positive preflight timeout in seconds. Defaults to the mutation timeout (30 when neither is set). |
+| `check.verify_tls` | bool | no | Preflight TLS certificate verification flag. Defaults to the mutation setting (true when neither is set). |
 | `timeout` | int | no | Templated positive timeout in seconds for the entire request and response body. Default 30. |
 | `verify_tls` | bool | no | Templated TLS certificate verification flag. Default true. |
 
@@ -104,8 +104,6 @@ Send a native HTTP(S) request from the controller, using the current host's temp
   check:
     method: GET
     url: '{{ gravity_bootstrap_url }}/api/v1/dns/zones?zone={{ item }}'
-    headers:
-      Authorization: 'Bearer {{ gravity_api_token }}'
     expected_status: [200, 404]
     matches: '(and (eq response.status 200) (eq response.json.authoritative true) (eq response.json.defaultTTL 3600))'
   with:
