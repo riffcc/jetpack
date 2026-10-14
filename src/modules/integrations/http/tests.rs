@@ -342,3 +342,407 @@ fn unknown_fields_are_rejected() {
         serde_yaml::from_str::<Task>("!http\nurl: http://localhost\npassword: secret\n").is_err()
     );
 }
+
+#[tokio::test]
+async fn change_conditions_use_the_actual_response_after_success() {
+    for (status, body, condition, expected) in [
+        (200, "", "true", TaskStatus::IsExecuted),
+        (
+            200,
+            "{{ missing_secret }}",
+            "(contains response.body \"missing_secret\")",
+            TaskStatus::IsExecuted,
+        ),
+        (204, "", "false", TaskStatus::IsPassive),
+        (
+            201,
+            "not json",
+            "(eq response.status 201)",
+            TaskStatus::IsExecuted,
+        ),
+        (
+            200,
+            "not json",
+            "(eq response.status 201)",
+            TaskStatus::IsPassive,
+        ),
+        (
+            200,
+            r#"{"changed":true}"#,
+            "(eq response.json.changed true)",
+            TaskStatus::IsExecuted,
+        ),
+        (
+            200,
+            r#"{"changed":false}"#,
+            "(eq response.json.changed true)",
+            TaskStatus::IsPassive,
+        ),
+        (
+            200,
+            "updated secret-data",
+            "(contains response.body \"updated\")",
+            TaskStatus::IsExecuted,
+        ),
+        (
+            200,
+            "response.json is literal text",
+            "(contains response.body \"response.json\")",
+            TaskStatus::IsExecuted,
+        ),
+        (
+            200,
+            "",
+            "(eq response.headers.[x-version].[0] \"v1\")",
+            TaskStatus::IsExecuted,
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .set_body_string(body)
+                    .insert_header("X-Version", "v1"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let result = execute(
+            HttpTask {
+                url: server.uri(),
+                changed_when: Some(condition.into()),
+                ..Default::default()
+            },
+            handle(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, expected, "{condition}");
+        assert!(result.msg.is_none());
+        assert!(result.command_result.is_none());
+    }
+}
+
+#[tokio::test]
+async fn unexpected_status_wins_over_invalid_change_condition() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("secret-error"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let handle = handle();
+    let error = execute(
+        HttpTask {
+            url: server.uri(),
+            save: Some("saved".into()),
+            changed_when: Some("(eq response.json.changed true)".into()),
+            ..Default::default()
+        },
+        handle.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.msg.as_deref(), Some("http: unexpected status 500"));
+    assert_eq!(
+        Value::Mapping(handle.host.read().unwrap().get_variables())["saved"]["body"],
+        "secret-error"
+    );
+}
+
+#[tokio::test]
+async fn json_access_distinguishes_absent_invalid_and_valid_null() {
+    for (body, message) in [
+        (
+            "",
+            "http: changed_when response (status 200) has no JSON body",
+        ),
+        (
+            " \n\t",
+            "http: changed_when response (status 200) has no JSON body",
+        ),
+        (
+            "secret invalid json",
+            "http: changed_when response (status 200) is not valid JSON",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let error = execute(
+            HttpTask {
+                url: server.uri(),
+                changed_when: Some("response.json".into()),
+                ..Default::default()
+            },
+            handle(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.msg.as_deref(), Some(message));
+        assert!(!format!("{error:?}").contains("secret"));
+    }
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("null"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let handle = handle();
+    let response = execute(
+        HttpTask {
+            url: server.uri(),
+            changed_when: Some("response.json".into()),
+            save: Some("saved".into()),
+            ..Default::default()
+        },
+        handle.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status, TaskStatus::IsPassive);
+    assert!(
+        Value::Mapping(handle.host.read().unwrap().get_variables())["saved"]
+            .as_mapping()
+            .unwrap()
+            .contains_key(Value::from("json"))
+    );
+}
+
+#[tokio::test]
+async fn logical_guards_skip_json_validation() {
+    for condition in [
+        "(and (eq response.status 200) (eq response.json.changed true))",
+        "(and false (eq response.json.changed true))",
+        "(eq (or true response.json) true)",
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+        execute(
+            HttpTask {
+                url: server.uri(),
+                expected_status: Some(vec!["404".into()]),
+                changed_when: Some(condition.into()),
+                ..Default::default()
+            },
+            handle(),
+        )
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn transient_response_replaces_stale_bindings_without_publishing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let handle = handle();
+    let original: Mapping =
+        serde_yaml::from_str("response:\n  status: 201\n  json:\n    changed: true\n").unwrap();
+    handle
+        .host
+        .write()
+        .unwrap()
+        .update_variables(original.clone());
+    let response = execute(
+        HttpTask {
+            url: server.uri(),
+            changed_when: Some("(eq response.status 201)".into()),
+            ..Default::default()
+        },
+        handle.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status, TaskStatus::IsPassive);
+    let error = execute(
+        HttpTask {
+            url: server.uri(),
+            changed_when: Some("(eq response.json.changed true)".into()),
+            ..Default::default()
+        },
+        handle.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error.msg.as_deref(),
+        Some("http: changed_when response (status 204) has no JSON body")
+    );
+    assert_eq!(handle.host.read().unwrap().get_variables(), original);
+}
+
+#[tokio::test]
+async fn json_is_saved_when_valid_without_requiring_json_for_success() {
+    for (body, has_json) in [
+        (r#"{"changed":true}"#, true),
+        ("", false),
+        ("plain text", false),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let handle = handle();
+        execute(
+            HttpTask {
+                url: server.uri(),
+                save: Some("saved".into()),
+                changed_when: Some("false".into()),
+                ..Default::default()
+            },
+            handle.clone(),
+        )
+        .await
+        .unwrap();
+        let vars = Value::Mapping(handle.host.read().unwrap().get_variables());
+        assert_eq!(
+            vars["saved"]
+                .as_mapping()
+                .unwrap()
+                .contains_key(Value::from("json")),
+            has_json
+        );
+        assert_eq!(vars["saved"]["body"], body);
+    }
+}
+
+#[tokio::test]
+async fn condition_errors_do_not_print_payload_or_expression_secrets() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("secret-body"))
+        .expect(2)
+        .mount(&server)
+        .await;
+    for expression in [
+        "(gt response.body 0)",
+        "(unknown_helper \"secret-literal\")",
+    ] {
+        let error = execute(
+            HttpTask {
+                url: server.uri(),
+                changed_when: Some(expression.into()),
+                ..Default::default()
+            },
+            handle(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.msg.as_deref(),
+            Some("http: invalid changed_when condition")
+        );
+        assert!(!format!("{error:?}").contains("secret"));
+    }
+}
+
+#[test]
+fn json_path_validation_uses_parsed_paths_and_checks_bracket_and_root_forms() {
+    for field in [
+        "response.json.changed",
+        "response.[json].changed",
+        "response/json/changed",
+        "this.response.json.changed",
+        "@root.response.json.changed",
+    ] {
+        assert!(
+            response_json_path(&handlebars::Path::parse(field).unwrap()),
+            "{field}"
+        );
+    }
+    for field in ["response.body", "response.headers", "other.response.json"] {
+        assert!(
+            !response_json_path(&handlebars::Path::parse(field).unwrap()),
+            "{field}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn parallel_hosts_and_overlapping_items_have_invocation_local_response_and_variables() {
+    let server = MockServer::start().await;
+    for id in 0..32 {
+        Mock::given(method("GET"))
+            .and(path(format!("/{id}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"id": id, "changed": id % 2 == 0}))
+                    .set_delay(Duration::from_millis((31 - id) * 2)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let shared_host = handle();
+    let mut jobs = Vec::new();
+    // Half of the invocations overlap on one host (simulated item parallelism);
+    // the other half use independent hosts. Evaluate while each item is active,
+    // then dispatch after all mutable host item variables have moved on.
+    for id in 0..32 {
+        let host = if id < 16 {
+            shared_host.clone()
+        } else {
+            handle()
+        };
+        host.host
+            .write()
+            .unwrap()
+            .update_variables(serde_yaml::from_str(&format!("item: {id}\n")).unwrap());
+        let task = HttpTask {
+            url: format!("{}/{{{{ item }}}}", server.uri()),
+            changed_when: Some("(and (eq response.json.id item) response.json.changed)".into()),
+            ..Default::default()
+        };
+        let query = query_request();
+        let evaluated = task.evaluate(&host, &query, TemplateMode::Strict).unwrap();
+        jobs.push((id, host, query, evaluated));
+    }
+    let workers: Vec<_> = jobs
+        .into_iter()
+        .map(|(id, host, query, evaluated)| {
+            tokio::task::spawn_blocking(move || {
+                let result = evaluated
+                    .action
+                    .dispatch(
+                        &host,
+                        &TaskRequest::execute(query.sudo_details.as_ref().unwrap()),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    result.status,
+                    if id % 2 == 0 {
+                        TaskStatus::IsExecuted
+                    } else {
+                        TaskStatus::IsPassive
+                    },
+                    "item {id}"
+                );
+                assert!(
+                    !host
+                        .host
+                        .read()
+                        .unwrap()
+                        .get_variables()
+                        .contains_key(Value::from("response"))
+                );
+            })
+        })
+        .collect();
+    for worker in workers {
+        worker.await.unwrap();
+    }
+}

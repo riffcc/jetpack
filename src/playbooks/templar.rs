@@ -110,6 +110,17 @@ impl Templar {
             }
         }
     }
+
+    /// Evaluate with an invocation-local path validator. The callback is never
+    /// called for an operand skipped by a logical short circuit.
+    pub fn test_condition_with_path_check(
+        &self,
+        expr: &str,
+        data: serde_yaml::Mapping,
+        path_check: &mut impl FnMut(&handlebars::Path) -> Result<(), String>,
+    ) -> Result<bool, String> {
+        super::conditions::evaluate_with_path_check(&HANDLEBARS, expr, &data, path_check)
+    }
 }
 
 #[cfg(test)]

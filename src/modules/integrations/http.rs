@@ -7,6 +7,7 @@
 
 use crate::handle::handle::TaskHandle;
 use crate::handle::template::BlendTarget;
+use crate::playbooks::templar::Templar;
 use crate::tasks::*;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
@@ -27,6 +28,7 @@ pub struct HttpTask {
     pub body: Option<String>,
     pub expected_status: Option<Vec<String>>,
     pub save: Option<String>,
+    pub changed_when: Option<String>,
     pub timeout: Option<String>,
     pub verify_tls: Option<String>,
     pub with: Option<PreLogicInput>,
@@ -52,6 +54,8 @@ struct HttpAction {
     save: Option<String>,
     timeout: String,
     verify_tls: String,
+    changed_when: Option<String>,
+    condition_vars: Mapping,
 }
 
 impl IsTask for HttpTask {
@@ -119,6 +123,17 @@ impl IsTask for HttpTask {
                     .string_option_no_spaces(request, tm, "save", &self.save)?,
                 timeout: render("timeout", self.timeout.as_deref().unwrap_or("30"))?,
                 verify_tls: render("verify_tls", self.verify_tls.as_deref().unwrap_or("true"))?,
+                // Preserve the condition until the actual response exists.
+                changed_when: self.changed_when.clone(),
+                // Capture variables while this invocation's item/host context
+                // is active. Neither dispatch nor parallel invocations mutate
+                // this snapshot or publish the temporary response binding.
+                condition_vars: handle
+                    .template
+                    .get_context()
+                    .read()
+                    .unwrap()
+                    .get_complete_blended_variables(&handle.host, BlendTarget::NotTemplateModule),
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
@@ -153,7 +168,17 @@ impl IsAction for HttpAction {
                         &format!("http: unexpected status {}", result.status),
                     ));
                 }
-                Ok(handle.response.is_executed(request))
+                let changed = match &self.changed_when {
+                    Some(condition) => result
+                        .test_condition(condition, &self.condition_vars, "changed_when")
+                        .map_err(|e| handle.response.is_failed(request, &e))?,
+                    None => true,
+                };
+                if changed {
+                    Ok(handle.response.is_executed(request))
+                } else {
+                    Ok(handle.response.is_passive(request))
+                }
             }
             _ => Err(handle.response.not_supported(request)),
         }
@@ -179,7 +204,69 @@ impl HttpResult {
             "headers".into(),
             serde_yaml::to_value(&self.headers).unwrap(),
         );
+        // Saving a non-JSON/empty response remains valid. Parsing errors are
+        // surfaced only if a condition reaches response.json.
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&self.body) {
+            result.insert("json".into(), serde_yaml::to_value(json).unwrap());
+        }
         result
+    }
+
+    fn test_condition(
+        &self,
+        expression: &str,
+        variables: &Mapping,
+        field: &str,
+    ) -> Result<bool, String> {
+        let mut data = variables.clone();
+        // Replace the whole binding, rather than merging in stale response
+        // fields from inventory, previous saves, or another item iteration.
+        data.insert("response".into(), Value::Mapping(self.results()));
+        let mut json_error = None;
+        let mut path_check = |path: &handlebars::Path| {
+            if response_json_path(path) {
+                let error = if self.body.trim().is_empty() {
+                    Some(format!(
+                        "http: {field} response (status {}) has no JSON body",
+                        self.status
+                    ))
+                } else if serde_json::from_str::<serde_json::Value>(&self.body).is_err() {
+                    Some(format!(
+                        "http: {field} response (status {}) is not valid JSON",
+                        self.status
+                    ))
+                } else {
+                    None
+                };
+                if let Some(error) = error {
+                    json_error = Some(error.clone());
+                    return Err(error);
+                }
+            }
+            Ok(())
+        };
+        Templar::new()
+            .test_condition_with_path_check(expression, data, &mut path_check)
+            .map_err(|_| json_error.unwrap_or_else(|| format!("http: invalid {field} condition")))
+    }
+}
+
+fn response_json_path(path: &handlebars::Path) -> bool {
+    use handlebars::{Path, PathSeg};
+    match path {
+        Path::Relative((segments, _)) => {
+            let mut names = segments.iter().filter_map(|segment| match segment {
+                PathSeg::Named(name) => Some(name.as_str()),
+                _ => None,
+            });
+            names.next() == Some("response") && names.next() == Some("json")
+        }
+        Path::Local((0, name, raw)) if name == "root" => raw
+            .strip_prefix("@root.")
+            .or_else(|| raw.strip_prefix("@root/"))
+            .and_then(|rest| Path::parse(rest).ok())
+            .is_some_and(|path| response_json_path(&path)),
+        _ => false,
     }
 }
 
