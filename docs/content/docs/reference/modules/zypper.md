@@ -12,16 +12,25 @@ description: "Manage packages with zypper (openSUSE/SUSE). Uses zypper search --
 
 Manage packages with zypper (openSUSE/SUSE). Uses zypper search --details for version comparison.
 
+## Notes
+
+- package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches.
+
 ## Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `package` | string | yes | Package name. |
+| `package` | string or list | yes | Package name. |
 | `version` | string | no | Pin a specific version (name=version). |
 | `update` | bool | no | Use zypper update semantics. |
 | `remove` | bool | no | Remove the package (zypper remove). |
 
 ## Examples
+
+```yaml
+- !zypper
+  package: [git, curl]
+```
 
 ```yaml
 - !zypper

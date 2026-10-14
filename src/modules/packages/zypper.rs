@@ -22,12 +22,114 @@ use std::sync::Arc;
 
 const MODULE: &str = "zypper";
 
+impl super::batch::BatchedPackage for ZypperAction {
+    fn package_name(&self) -> &str {
+        &self.package
+    }
+    fn query_batch_change(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        installed: Option<PackageDetails>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        if self.update
+            && !self.remove
+            && let Some(installed) = &installed
+        {
+            let command = format!(
+                "zypper --non-interactive --quiet search --match-exact --details {}",
+                super::batch::quote(&self.package)
+            );
+            let response = handle.remote.run(request, &command, CheckRc::Checked)?;
+            let candidate = self
+                .parse_zypper_search_table(handle, request, &cmd_info(&response).1)?
+                .ok_or_else(|| {
+                    handle
+                        .response
+                        .is_failed(request, "zypper query omitted the package version")
+                })?;
+            if candidate.version.is_empty() {
+                return Err(handle
+                    .response
+                    .is_failed(request, "zypper query returned an empty package version"));
+            }
+            return Ok(if installed.version == candidate.version {
+                handle.response.is_matched(request)
+            } else {
+                handle
+                    .response
+                    .needs_modification(request, &[Field::Version])
+            });
+        }
+        self.query_installed_package(handle, request, installed)
+    }
+    fn query_batch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        packages: &[Self],
+    ) -> Result<Vec<Option<PackageDetails>>, Arc<TaskResponse>> {
+        use super::batch::{query_output, quote, version_rows};
+        let names: Vec<_> = packages
+            .iter()
+            .map(|package| package.package.clone())
+            .collect();
+        let args = names
+            .iter()
+            .map(|name| quote(name))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let (rc, out) = query_output(
+            handle,
+            request,
+            &format!("rpm -q --qf '%{{NAME}}\\t%{{VERSION}}-%{{RELEASE}}\\n' -- {args}"),
+        )?;
+        version_rows(handle, request, &names, &out, "is not installed", rc)
+    }
+    fn apply_batch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        packages: &[&Self],
+    ) -> Result<(), Arc<TaskResponse>> {
+        use super::batch::quote;
+        let removing = request.request_type == TaskRequestType::Remove;
+        let targets = packages
+            .iter()
+            .map(|package| {
+                quote(&if removing {
+                    package.package.clone()
+                } else {
+                    match &package.version {
+                        Some(version) => format!("{}={version}", package.package),
+                        None => package.package.clone(),
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let verb = if removing {
+            "remove"
+        } else if request.request_type == TaskRequestType::Modify {
+            "update"
+        } else {
+            "install"
+        };
+        handle.remote.run(
+            request,
+            &format!("zypper --non-interactive --quiet {verb} -- {targets}"),
+            CheckRc::Checked,
+        )?;
+        Ok(())
+    }
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[derive(Default)]
 pub struct ZypperTask {
     pub name: Option<String>,
-    pub package: String,
+    pub package: ResourceInput,
     pub version: Option<String>,
     pub update: Option<String>,
     pub remove: Option<String>,
@@ -35,6 +137,7 @@ pub struct ZypperTask {
     pub and: Option<PostLogicInput>,
 }
 
+#[derive(Clone)]
 struct ZypperAction {
     pub package: String,
     pub version: Option<String>,
@@ -59,33 +162,41 @@ impl IsTask for ZypperTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        let package_names = self
+            .package
+            .template_no_spaces(handle, request, tm, "package")?;
+        let prototype = ZypperAction {
+            package: String::new(),
+            version: handle.template.string_option_no_spaces(
+                request,
+                tm,
+                &String::from("version"),
+                &self.version,
+            )?,
+            update: handle.template.boolean_option_default_false(
+                request,
+                tm,
+                &String::from("update"),
+                &self.update,
+            )?,
+            remove: handle.template.boolean_option_default_false(
+                request,
+                tm,
+                &String::from("remove"),
+                &self.remove,
+            )?,
+        };
         Ok(EvaluatedTask {
-            action: Arc::new(ZypperAction {
-                package: handle.template.string_no_spaces(
-                    request,
-                    tm,
-                    &String::from("package"),
-                    &self.package,
-                )?,
-                version: handle.template.string_option_no_spaces(
-                    request,
-                    tm,
-                    &String::from("version"),
-                    &self.version,
-                )?,
-                update: handle.template.boolean_option_default_false(
-                    request,
-                    tm,
-                    &String::from("update"),
-                    &self.update,
-                )?,
-                remove: handle.template.boolean_option_default_false(
-                    request,
-                    tm,
-                    &String::from("remove"),
-                    &self.remove,
-                )?,
-            }),
+            action: super::batch::action(
+                package_names
+                    .into_iter()
+                    .map(|package| ZypperAction {
+                        package,
+                        ..prototype.clone()
+                    })
+                    .collect(),
+                self.package.is_list(),
+            ),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
         })

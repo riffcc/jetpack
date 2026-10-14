@@ -12,16 +12,25 @@ description: "Manage packages with Homebrew (brew) on macOS/Linuxbrew. Locates t
 
 Manage packages with Homebrew (brew) on macOS/Linuxbrew. Locates the brew binary automatically (including /opt/homebrew/bin/brew).
 
+## Notes
+
+- package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches.
+
 ## Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `package` | string | yes | Package (formula) name. |
+| `package` | string or list | yes | Package (formula) name. |
 | `version` | string | no | Install a specific major version via name@version. |
 | `update` | bool | no | Use brew upgrade semantics. |
 | `remove` | bool | no | Uninstall the package (brew uninstall). |
 
 ## Examples
+
+```yaml
+- !homebrew
+  package: [git, curl]
+```
 
 ```yaml
 - !homebrew
