@@ -95,17 +95,9 @@ impl Templar {
             /* this is only used to get back the raw 'items' collection inside the task FSM */
             return Ok(true);
         }
-        // embed the expression in an if statement as a way to evaluate it for truth
-        let template = format!("{{{{#if {expr} }}}}true{{{{ else }}}}false{{{{/if}}}}");
-        let result = self.render(&template, data, TemplateMode::Strict);
+        let result = super::conditions::evaluate(&HANDLEBARS, expr, &data);
         match result {
-            Ok(x) => {
-                if x.as_str().eq("true") {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
+            Ok(value) => Ok(value),
             Err(y) => {
                 if y.find("Couldn't read parameter").is_some() {
                     Err(format!(
