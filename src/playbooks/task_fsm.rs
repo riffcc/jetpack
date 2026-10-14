@@ -358,60 +358,6 @@ fn run_task_on_host(
         // re-evaluate the task, allowing the 'items' to be plugged in.
         let evaluated = task.evaluate(&handle, &validate, TemplateMode::Strict)?;
 
-        // Check skip_if_exists AFTER proper templating
-        if let Some(original_with) = task.get_with()
-            && let Some(ref skip_path_raw) = original_with.skip_if_exists
-        {
-            // Import needed types
-            use crate::handle::template::BlendTarget;
-
-            // Template the path using the context directly
-            let template_result = handle.run_state.context.read().unwrap().render_template(
-                skip_path_raw,
-                &handle.host,
-                BlendTarget::NotTemplateModule,
-                TemplateMode::Strict,
-            );
-
-            match template_result {
-                Ok(templated) => {
-                    // Check if template was fully resolved
-                    if templated.contains("{{") {
-                        // Template variable not found - FAIL FAST
-                        return Err(handle.response.is_failed(
-                            &validate,
-                            &format!(
-                                "skip_if_exists: undefined variable in template '{}'",
-                                skip_path_raw
-                            ),
-                        ));
-                    }
-
-                    // Screen the templated result for illegal path characters
-                    let skip_path = match crate::tasks::cmd_library::screen_path(&templated) {
-                        Ok(path) => path,
-                        Err(e) => {
-                            return Err(handle.response.is_failed(
-                                &validate,
-                                &format!("skip_if_exists path invalid: {}", e),
-                            ));
-                        }
-                    };
-
-                    use std::path::Path;
-                    if Path::new(&skip_path).exists() {
-                        return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
-                    }
-                }
-                Err(e) => {
-                    // Template error - FAIL FAST
-                    return Err(handle
-                        .response
-                        .is_failed(&validate, &format!("skip_if_exists template error: {}", e)));
-                }
-            }
-        }
-
         // see if there is any retry or delay logic in the task
         let mut retries = match evaluated.and.as_ref().is_some() {
             false => 0,
@@ -483,7 +429,7 @@ fn run_task_on_host_inner(
     _connection: &Arc<Mutex<dyn Connection>>,
     host: &Arc<RwLock<Host>>,
     play: &Play,
-    _task: &Task,
+    task: &Task,
     are_handlers: HandlerMode,
     handle: &Arc<TaskHandle>,
     validate: &Arc<TaskRequest>,
@@ -537,6 +483,41 @@ fn run_task_on_host_inner(
     // unpredictability in the program
 
     let query = TaskRequest::query(&sudo_details).with_chdir(action.chdir());
+
+    // Probe through the selected connection, in the same sudo/directory
+    // context as the task. Returning here skips this item, not the entire loop.
+    if let Some(with) = task.get_with()
+        && let Some(path) = with.skip_if_exists
+    {
+        let rendered = run_state
+            .context
+            .read()
+            .unwrap()
+            .render_template(
+                &path,
+                host,
+                BlendTarget::NotTemplateModule,
+                TemplateMode::Strict,
+            )
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(&query, &format!("skip_if_exists template error: {e}"))
+            })?;
+        if rendered.contains("{{") {
+            return Err(handle
+                .response
+                .is_failed(&query, "skip_if_exists: undefined variable in template"));
+        }
+        let path = crate::tasks::cmd_library::screen_path(&rendered).map_err(|e| {
+            handle
+                .response
+                .is_failed(&query, &format!("skip_if_exists path invalid: {e}"))
+        })?;
+        if handle.remote.file_exists(&query, &path)? {
+            return Ok(handle.response.is_skipped(validate));
+        }
+    }
 
     // invoke the resource and see what actions it thinks need to be performed
     let qrc = action.dispatch(handle, &query);
@@ -738,3 +719,6 @@ fn run_task_on_host_inner(
 
     result
 }
+
+#[cfg(test)]
+mod skip_guard_tests;

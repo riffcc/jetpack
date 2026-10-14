@@ -560,12 +560,17 @@ impl Remote {
         request: &Arc<TaskRequest>,
         path: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
-        let get_cmd_result =
-            crate::tasks::cmd_library::get_file_exists_command(self.get_os_type(), path);
+        let get_cmd_result = crate::tasks::cmd_library::get_path_exists_command(path);
         let cmd = self.unwrap_string_result(request, &get_cmd_result)?;
         let result = self.run(request, &cmd, CheckRc::Unchecked)?;
         let (rc, _) = cmd_info(&result);
-        Ok(rc == 0)
+        match rc {
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(self
+                .response
+                .command_failed(request, &result.command_result)),
+        }
     }
 
     // return the (owner,group) tuple for a remote file.  If the command fails this will instead return None

@@ -17,7 +17,7 @@ Every task accepts an optional `with:` block of pre-execution modifiers. These w
 | Modifier | Purpose |
 |---|---|
 | `condition` | Run the task only when an expression is true. |
-| `skip_if_exists` | Skip the task if the given path already exists. |
+| `skip_if_exists` | Skip the current item if the path exists on the execution target. |
 | `sudo` | Execute with elevated privileges (`sudo: root`). |
 | `items` | Loop the task over a list of items. |
 | `delegate_to` | Execute on a different host than the current target. |
@@ -34,6 +34,12 @@ Every task accepts an optional `with:` block of pre-execution modifiers. These w
     skip_if_exists: /opt/app/bin/app   # don't re-extract if already present
     sudo: root
 ```
+
+`skip_if_exists` renders its path per host/item and probes the execution target
+through the selected connection, including delegation. It uses the task's sudo
+and working-directory context in both plan and apply. An existing path skips
+only that item; connection or probe errors fail the task. Local execution probes
+the local target through the same machinery.
 
 ## Retries
 
@@ -84,7 +90,8 @@ before running the requested command, even with `failed_when: "false"`.
 Omitting `chdir` preserves the target's existing default directory.
 
 `plan` validates the rendered path's syntax without entering or checking the
-directory. Other modules reject `chdir`, and `with.chdir` is not supported.
+directory, except when `skip_if_exists` needs to probe inside it. Other modules
+reject `chdir`, and `with.chdir` is not supported.
 
 ## Conditions
 

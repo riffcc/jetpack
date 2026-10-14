@@ -171,8 +171,17 @@ pub fn get_file_exists_command(
     _os_type: HostOSType,
     untrusted_path: &str,
 ) -> Result<String, String> {
+    get_path_exists_command(untrusted_path)
+}
+
+/// Existence probes use the same POSIX command on all execution targets and
+/// do not require OS facts (for example, before an initial facts task).
+pub fn get_path_exists_command(untrusted_path: &str) -> Result<String, String> {
     let path = screen_path(untrusted_path)?;
-    Ok(format!("test -e '{}'", path))
+    if path.contains('\0') {
+        return Err("path must not contain NUL bytes".into());
+    }
+    Ok(format!("test -e '{}'", path.replace('\'', "'\"'\"'")))
 }
 
 pub fn set_owner_command(
