@@ -45,3 +45,30 @@ Conditions are expressions evaluated against the current variables (including [f
   with:
     condition: (eq jet_os_flavor "Debian")
 ```
+
+The shared condition evaluator supports `and` and `or` with left-to-right,
+short-circuit evaluation. This also applies to module condition fields such
+as `changed_when` and `failed_when` in `!command`, `!shell`, and `!external`.
+Ordinary comparison and string helpers retain their existing semantics.
+
+```yaml
+with:
+  condition: '(and (isdefined resource) (eq resource.enabled true))'
+```
+
+`and` stops at its first false operand; `or` stops at its first true operand.
+Skipped operands do not resolve variables or execute helpers, so a guard can
+protect an otherwise invalid access. Errors from evaluated operands still fail
+the condition. Logical results use the same truthiness as Handlebars `#if`,
+including zero and empty strings being false. Missing variables keep their
+existing behavior: `isdefined` can test them, while comparison helpers require
+their parameters to exist.
+
+```yaml
+changed_when: '(or (eq rc 0) (contains out "updated"))'
+```
+
+Nested expressions and any number of operands are supported. `(and)` is true
+and `(or)` is false; a single operand follows its normal truthiness. Logical
+operators accept positional operands, not hash arguments. These lazy operators
+are part of condition evaluation; ordinary text template rendering is unchanged.
