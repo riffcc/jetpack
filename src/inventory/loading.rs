@@ -29,6 +29,9 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+#[cfg(test)]
+mod blending_tests;
+
 // ==============================================================================================================
 // YAML SPEC
 // ==============================================================================================================
@@ -72,44 +75,52 @@ pub fn load_inventory(
         inv_obj.store_group(&String::from("all"));
     }
 
+    // Assemble topology across every source before resolving declarations.
+    // Cache dynamic output so each executable runs once per load.
+    let mut sources = Vec::new();
     for inventory_path_buf in inventory_paths.read().unwrap().iter() {
         let inventory_path = inventory_path_buf.as_path();
         if inventory_path.is_dir() {
-            let has_groups = inventory_path_buf.join("groups").is_dir();
-            // A directory with group_vars/ or host_vars/ but no groups/ is a
-            // vars-only overlay (the secrets_inventory shape) — load it without
-            // requiring topology. Only a directory with none of the three errors.
-            let has_vars = inventory_path_buf.join("group_vars").exists()
-                || inventory_path_buf.join("host_vars").exists();
-            if has_groups {
-                load_on_disk_inventory_tree(inventory, true, inventory_path)?;
-            } else if has_vars {
-                load_on_disk_inventory_tree(inventory, false, inventory_path)?;
-            } else {
+            let has_groups = inventory_path.join("groups").is_dir();
+            let has_vars = inventory_path.join("group_vars").exists()
+                || inventory_path.join("host_vars").exists();
+            if !has_groups && !has_vars {
                 return Err(format!(
                     "inventory path has no groups/, group_vars/, or host_vars/ ({})",
                     inventory_path.display()
                 ));
             }
-        } else {
-            if is_executable(inventory_path) {
-                load_dynamic_inventory(inventory, inventory_path)?;
-                let dirname = directory_as_string(inventory_path);
-                let dir = Path::new(&dirname);
-                load_on_disk_inventory_tree(inventory, false, dir)?;
-            } else {
-                return Err(format!(
-                    "non-directory path to --inventory ({}) is not executable",
-                    inventory_path.display()
-                ));
+            if has_groups {
+                load_groups_directory(inventory, &inventory_path.join("groups"))?;
             }
+            sources.push((inventory_path_buf.clone(), None));
+        } else if is_executable(inventory_path) {
+            let entries = read_dynamic_inventory(inventory_path)?;
+            apply_dynamic_inventory(inventory, &entries, false);
+            sources.push((inventory_path_buf.clone(), Some(entries)));
+        } else {
+            return Err(format!(
+                "non-directory path to --inventory ({}) is not executable",
+                inventory_path.display()
+            ));
         }
     }
 
-    // Now that every --inventory path has contributed its group_vars/host_vars,
-    // fold each host's (now path-complete) ancestor-group variables into its own
-    // stored variables. See `propagate_group_vars_to_hosts` for why this is needed.
-    propagate_group_vars_to_hosts(inventory, &extra_vars);
+    // Preserve source order for variables, including dynamic declarations and
+    // the adjacent variable directories associated with executable sources.
+    for (path, dynamic_entries) in sources {
+        if let Some(entries) = dynamic_entries {
+            apply_dynamic_inventory(inventory, &entries, true);
+            let dirname = directory_as_string(&path);
+            load_on_disk_inventory_variables(inventory, Path::new(&dirname))?;
+        } else {
+            load_on_disk_inventory_variables(inventory, &path)?;
+        }
+    }
+
+    // Resolve provisioning after all declarations are loaded, without copying
+    // inherited variables into host-owned storage.
+    finalize_host_inventory(inventory, &extra_vars);
 
     Ok(())
 }
@@ -118,99 +129,34 @@ pub fn load_inventory(
 // PRIVATE INTERNALS
 // ==============================================================================================================
 
-/// After every `--inventory` path is loaded, fold each host's ancestor-group
-/// variables into its own stored variables so `get_variables()` is fully
-/// resolved — consistent with what templates already see via
-/// `Host::get_blended_variables`.
-///
-/// Without this pass, group vars only reach a host's variables at the moment
-/// that host's `host_vars` file is loaded (see `load_vars_directory`). When a
-/// later inventory path — the canonical case is a secrets overlay — contributes
-/// `group_vars` for a group but carries no `host_vars` for the member, those
-/// vars land on the group object yet never propagate to the host. Templates
-/// (which resolve via blended vars) are unaffected; anything reading raw host
-/// variables — notably the DNS reconciliation — silently misses them, which is
-/// exactly how a `dns:` block defined in a secrets overlay never fires.
-///
-/// The group objects already carry their correctly path-merged values (each
-/// successive path's group_vars merges onto the group with later-wins, #18), so
-/// re-blending the ancestor-group vars underneath the host's own vars yields the
-/// complete, correctly-precedenced view: host-specific vars win over group vars
-/// (host vars are layered on top last), group vars fill the gaps.
-fn propagate_group_vars_to_hosts(
-    inventory: &Arc<RwLock<Inventory>>,
-    extra_vars: &serde_yaml::Value,
-) {
-    let host_names: Vec<String> = {
-        let inv = inventory.read().unwrap();
-        inv.hosts.keys().cloned().collect()
-    };
-
-    for host_name in &host_names {
-        let host_arc = {
-            let inv = inventory.read().unwrap();
-            inv.get_host(host_name)
-        };
-        let mut host = host_arc.write().unwrap();
-
-        // Base layer: ancestor group vars, deep-blended. Each group object
-        // already holds its path-merged values, so blending them gives the
-        // complete group-var view for this host.
-        let mut blended = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
-        for (_name, group_arc) in host.get_ancestor_groups(20) {
-            let group_vars = serde_yaml::Value::from(group_arc.read().unwrap().get_variables());
-            crate::util::yaml::blend_variables(&mut blended, group_vars);
-        }
-
-        // Top layer: the host's own variables win over group vars.
-        let mine = serde_yaml::Value::from(host.get_variables());
-        crate::util::yaml::blend_variables(&mut blended, mine);
-
-        // Highest layer: -e / --extra-vars override everything (matching their
-        // precedence in templating). Blending them here — not just into the
-        // templating-time context blend — lets `-e provision.state=destroyed`
-        // reach Host.provision, so an ad-hoc CLI flag can drive a fleet's
-        // lifecycle without touching inventory files.
-        if !extra_vars.is_null() {
-            crate::util::yaml::blend_variables(&mut blended, extra_vars.clone());
-        }
-
-        if let serde_yaml::Value::Mapping(resolved) = blended {
-            // A group-level `provision` overlay (e.g. `state: destroyed`) merges
-            // onto each member host's host_vars provision via the deep-blend
-            // above, so re-derive Host.provision from the resolved mapping —
-            // otherwise the provisioner reads the host_vars-only config parsed
-            // at load and the group overlay is silently ignored. Host fields win
-            // on conflict because the blend layers host vars on top of group
-            // vars (more-specific wins, matching variable resolution).
-            let provision_key = serde_yaml::Value::String("provision".to_string());
-            if let Some(provision_value) = resolved.get(&provision_key)
-                && let Ok(provision_config) =
-                    serde_yaml::from_value::<ProvisionConfig>(provision_value.clone())
-            {
-                host.set_provision(provision_config);
-            }
-            host.set_variables(resolved);
+/// Refresh inventory consumers after all sources are loaded. Inherited values
+/// remain on their declaring groups; they must never become host declarations.
+fn finalize_host_inventory(inventory: &Arc<RwLock<Inventory>>, extra_vars: &serde_yaml::Value) {
+    let hosts: Vec<_> = inventory.read().unwrap().hosts.values().cloned().collect();
+    for host in hosts {
+        let mut host = host.write().unwrap();
+        host.set_inventory_extra_vars(extra_vars.clone());
+        let resolved = host.get_inventory_variables();
+        let provision_key = serde_yaml::Value::String("provision".to_string());
+        if let Some(provision_value) = resolved.get(&provision_key)
+            && let Ok(config) = serde_yaml::from_value::<ProvisionConfig>(provision_value.clone())
+        {
+            host.set_provision(config);
         }
     }
 }
 
-// loads an entire on-disk inventory tree structure (groups/, group_vars/, host_vars/)
-fn load_on_disk_inventory_tree(
+// Load variable declarations after all sources have contributed topology.
+fn load_on_disk_inventory_variables(
     inventory: &Arc<RwLock<Inventory>>,
-    include_groups: bool,
     path: &Path,
 ) -> Result<(), String> {
     let path_buf = PathBuf::from(path);
     let group_vars_pathbuf = path_buf.join("group_vars");
     let host_vars_pathbuf = path_buf.join("host_vars");
-    let groups_path = path_buf.join("groups");
     let group_vars_path = group_vars_pathbuf.as_path();
     let host_vars_path = host_vars_pathbuf.as_path();
 
-    if include_groups {
-        load_groups_directory(inventory, &groups_path)?;
-    }
     if group_vars_path.exists() {
         load_vars_directory(inventory, group_vars_path, true)?;
     }
@@ -336,14 +282,9 @@ fn load_vars_directory(
             false => {
                 let host = inv.get_host(&effective_name);
 
-                // Start with existing host-specific variables (host_vars from
-                // previous inventory paths). Group vars are deliberately NOT
-                // blended in here — that is the sole job of the
-                // `propagate_group_vars_to_hosts` pass at the end of load. Baking
-                // group vars into the host store here would let an earlier path's
-                // value shadow a later path's group_vars override (the
-                // secrets_inventory case), because propagate treats the host's
-                // stored vars as host-owned and layers them on top.
+                // Merge only host declarations from previous inventory paths.
+                // Inherited group values are resolved separately, never stored
+                // here as if the host had declared them.
                 let mut merged_vars = {
                     let h = host.read().unwrap();
                     h.get_variables()
@@ -369,7 +310,7 @@ fn load_vars_directory(
                 // Merge host-specific vars, INCLUDING the provision block. Keeping
                 // the raw (default-free) provision mapping here lets a group-level
                 // `provision` overlay deep-merge onto it during
-                // propagate_group_vars_to_hosts; Host.provision is then re-derived
+                // finalize_host_inventory; Host.provision is then re-derived
                 // from the resolved mapping so the provisioner sees the overlay.
                 for (k, v) in yaml_result.iter() {
                     merged_vars.insert(k.clone(), v.clone());
@@ -384,10 +325,9 @@ fn load_vars_directory(
     Ok(())
 }
 
-// TODO: implement
-fn load_dynamic_inventory(inv: &Arc<RwLock<Inventory>>, path: &Path) -> Result<(), String> {
-    let mut inventory = inv.write().unwrap();
-
+fn read_dynamic_inventory(
+    path: &Path,
+) -> Result<HashMap<String, DynamicInventoryJsonEntry>, String> {
     let mut command = Command::new(format!("{}", path.display()));
     let output = match command.output() {
         Ok(x) => match x.status.code() {
@@ -421,7 +361,17 @@ fn load_dynamic_inventory(inv: &Arc<RwLock<Inventory>>, path: &Path) -> Result<(
         }
     };
 
-    for (possible_group_name, entry) in json_result.iter() {
+    Ok(json_result)
+}
+
+/// Apply topology first, then declarations in source order, from cached output.
+fn apply_dynamic_inventory(
+    inv: &Arc<RwLock<Inventory>>,
+    entries: &HashMap<String, DynamicInventoryJsonEntry>,
+    variables: bool,
+) {
+    let mut inventory = inv.write().unwrap();
+    for (possible_group_name, entry) in entries.iter() {
         let group_name = match possible_group_name.eq("_meta") {
             true => String::from("all"),
             false => possible_group_name.clone(),
@@ -430,37 +380,40 @@ fn load_dynamic_inventory(inv: &Arc<RwLock<Inventory>>, path: &Path) -> Result<(
             continue;
         }
 
-        inventory.store_group(&group_name);
+        if !variables {
+            inventory.store_group(&group_name);
+        }
         let group = inventory.get_group(&group_name);
 
         if let Some(hostvars) = &entry.hostvars {
             for (host_name, values) in hostvars.iter() {
-                inventory.store_host(&group_name, host_name);
-                let host = inventory.get_host(host_name);
-                let vars = convert_json_vars(values);
-                let mut hst = host.write().unwrap();
-                hst.update_variables(vars);
+                if variables {
+                    let host = inventory.get_host(host_name);
+                    host.write()
+                        .unwrap()
+                        .update_variables(convert_json_vars(values));
+                } else {
+                    inventory.store_host(&group_name, host_name);
+                }
             }
         }
-        if let Some(hosts) = &entry.hosts {
+        if !variables && let Some(hosts) = &entry.hosts {
             for host_name in hosts.iter() {
                 inventory.store_host(&group_name, host_name);
             }
         }
-        if entry.children.as_ref().is_some() {
+        if !variables && entry.children.as_ref().is_some() {
             let subgroups = entry.children.as_ref().unwrap();
             for subgroup_name in subgroups.iter() {
                 inventory.store_subgroup(&group_name, subgroup_name);
             }
         }
-        if entry.vars.as_ref().is_some() {
+        if variables && entry.vars.as_ref().is_some() {
             let mut grp = group.write().unwrap();
             let vars = convert_json_vars(&serde_json::Value::Object(entry.vars.clone().unwrap()));
             grp.update_variables(vars);
         }
     }
-
-    Ok(())
 }
 
 pub fn convert_json_vars(input: &serde_json::Value) -> serde_yaml::Mapping {
@@ -637,7 +590,7 @@ mod tests {
             .get_host("web1")
             .read()
             .unwrap()
-            .get_variables();
+            .get_inventory_variables();
 
         // Public group var propagated via the path-1 host_vars load.
         assert_eq!(host_vars["public_key"], "from-public");
@@ -831,7 +784,7 @@ mod tests {
             .get_host("web1")
             .read()
             .unwrap()
-            .get_variables();
+            .get_inventory_variables();
         assert_eq!(host_vars["public"], "from-main"); // main var survives
         assert_eq!(host_vars["secret_token"], "s3cr3t"); // overlay var reaches host
         assert_eq!(host_vars["shared"], "from-secrets"); // overlay wins on conflict
