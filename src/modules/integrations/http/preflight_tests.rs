@@ -11,11 +11,11 @@ use std::sync::Mutex;
 use wiremock::matchers::{body_string, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn handle() -> Arc<TaskHandle> {
+pub(super) fn handle() -> Arc<TaskHandle> {
     test_handle(Arc::new(Mutex::new(RecordingConnection::new())))
 }
 
-async fn run_through_engine(
+pub(super) async fn run_through_engine(
     task: HttpTask,
     handle: Arc<TaskHandle>,
     plan: bool,

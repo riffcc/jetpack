@@ -7,6 +7,7 @@
 
 use crate::handle::handle::TaskHandle;
 use crate::handle::template::BlendTarget;
+use crate::playbooks::structural::StructuralMatch;
 use crate::playbooks::templar::Templar;
 use crate::tasks::*;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -49,7 +50,33 @@ pub struct HttpCheck {
     pub expected_status: Option<Vec<String>>,
     pub timeout: Option<String>,
     pub verify_tls: Option<String>,
-    pub matches: String,
+    pub matches: HttpMatch,
+}
+
+/// Keep expression matching and explicit structural matching complementary.
+#[derive(Deserialize, Clone)]
+#[serde(untagged)]
+pub enum HttpMatch {
+    Expression(String),
+    Structural(StructuralMatch),
+}
+
+impl Default for HttpMatch {
+    fn default() -> Self {
+        Self::Expression(String::new())
+    }
+}
+
+impl From<&str> for HttpMatch {
+    fn from(value: &str) -> Self {
+        Self::Expression(value.into())
+    }
+}
+
+impl From<String> for HttpMatch {
+    fn from(value: String) -> Self {
+        Self::Expression(value)
+    }
 }
 
 impl fmt::Debug for HttpCheck {
@@ -80,7 +107,7 @@ struct HttpAction {
 
 struct HttpCheckAction {
     request: HttpRequest,
-    matches: String,
+    matches: HttpMatch,
 }
 
 struct HttpRequest {
@@ -258,7 +285,7 @@ impl IsAction for HttpAction {
                         ));
                     }
                     if result
-                        .test_condition(&check.matches, &self.condition_vars, "check.matches")
+                        .test_match(&check.matches, &self.condition_vars)
                         .map_err(|e| handle.response.is_failed(request, &e))?
                     {
                         return Ok(handle.response.is_matched(request));
@@ -329,6 +356,48 @@ impl HttpResult {
         result
     }
 
+    fn test_match(&self, matcher: &HttpMatch, variables: &Mapping) -> Result<bool, String> {
+        match matcher {
+            HttpMatch::Expression(expression) => {
+                self.test_condition(expression, variables, "check.matches")
+            }
+            HttpMatch::Structural(matcher) => {
+                let path = Templar::new()
+                    .parse_value_path(&matcher.path)
+                    .map_err(|_| "http: invalid check.matches path")?;
+                if response_json_path(&path) {
+                    // An explicitly accepted 404 establishes resource absence.
+                    // Unexpected statuses have already failed before this call.
+                    if self.status == 404 {
+                        return Ok(false);
+                    }
+                    self.require_json("check.matches")?;
+                }
+                let mut data = variables.clone();
+                data.insert("response".into(), Value::Mapping(self.results()));
+                matcher
+                    .test(&data)
+                    .map_err(|_| "http: invalid check.matches structural matcher".into())
+            }
+        }
+    }
+
+    fn require_json(&self, field: &str) -> Result<(), String> {
+        if self.body.trim().is_empty() {
+            Err(format!(
+                "http: {field} response (status {}) has no JSON body",
+                self.status
+            ))
+        } else if serde_json::from_str::<serde_json::Value>(&self.body).is_err() {
+            Err(format!(
+                "http: {field} response (status {}) is not valid JSON",
+                self.status
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     fn test_condition(
         &self,
         expression: &str,
@@ -341,24 +410,11 @@ impl HttpResult {
         data.insert("response".into(), Value::Mapping(self.results()));
         let mut json_error = None;
         let mut path_check = |path: &handlebars::Path| {
-            if response_json_path(path) {
-                let error = if self.body.trim().is_empty() {
-                    Some(format!(
-                        "http: {field} response (status {}) has no JSON body",
-                        self.status
-                    ))
-                } else if serde_json::from_str::<serde_json::Value>(&self.body).is_err() {
-                    Some(format!(
-                        "http: {field} response (status {}) is not valid JSON",
-                        self.status
-                    ))
-                } else {
-                    None
-                };
-                if let Some(error) = error {
-                    json_error = Some(error.clone());
-                    return Err(error);
-                }
+            if response_json_path(path)
+                && let Err(error) = self.require_json(field)
+            {
+                json_error = Some(error.clone());
+                return Err(error);
             }
             Ok(())
         };
@@ -513,3 +569,6 @@ mod tests;
 
 #[cfg(test)]
 mod preflight_tests;
+
+#[cfg(test)]
+mod structural_tests;

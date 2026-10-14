@@ -21,6 +21,10 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 - JSON is required only when evaluation reaches response.json. Empty bodies produce a no-JSON-body error; nonempty invalid bodies produce an invalid-JSON error, both naming the condition field and HTTP status without exposing content. Short-circuit and/or guards can skip JSON access. A successful 204 with changed_when: false needs no JSON. Raw response.body/out remain available to conditions and save, but are never printed by the module itself.
 - check is an optional independent HTTP request with a required matches condition. Its URL, headers, body, expected_status, timeout, and verify_tls follow the same templating and defaults as the mutation; none are inherited. check.method is restricted to GET or HEAD (default GET). Include authentication explicitly in check.headers when needed.
 - The query phase validates the preflight's expected status, then evaluates check.matches against its own temporary response. A true result reports matched/no change and skips mutation in both plan and apply. False reports needs execution in plan and executes mutation in apply. Transport errors, unexpected statuses, invalid JSON accesses, and invalid conditions fail without mutation. An explicitly expected empty 404 can establish absence with (and (eq response.status 200) (eq response.json.authoritative true)).
+- check.matches accepts the existing condition string or an explicit JSON/YAML mapping with path and exactly one of contains or contains_exactly. The path uses existing Handlebars variable paths (for example response.json.zones); a missing path is a mismatch, distinct from an explicit null. Object keys in the expected value remain literal.
+- Structural matching compares objects as recursive subsets, ignoring unspecified response keys. contains allows extra array entries and ignores their order, but each expected entry needs a distinct actual entry (duplicates count). contains_exactly requires identical array length and order. These rules apply recursively, including nested arrays. Scalars compare as typed JSON values: 3600 differs from the string 3600.
+- A whole-value variable template such as '{{ gravity_dns_ttl }}' or '{{ gravity_authoritative_handlers }}' preserves numbers, booleans, null, arrays, and objects. Mixed text such as 'zone-{{ item }}' stays text; rendered text is never guessed to be JSON. Typed values resolve nested variable templates with the existing eight-expansion bound. Expected values are evaluated against an invocation-local snapshot only when matching is reached; undefined expected variables fail without printing their values.
+- For structural paths into response.json, an explicitly accepted 404 returns false (resource absent) before JSON matching. An unexpected 404 still fails expected-status validation. Empty or invalid successful JSON responses fail with the existing redacted JSON diagnostics. Expression matching retains its existing JSON access and short-circuit behavior; non-JSON paths such as response.status do not require a JSON body.
 - check.matches establishes whether mutation is necessary; changed_when evaluates only the executed mutation's response and determines the final apply report, even if it returns false after a mismatching preflight. The save variable captures only executed mutation responses: matched checks and plan do not write it or clear an earlier value. Preflight and mutation are separate requests, so server-side concurrency controls are still needed to handle another actor changing state between them.
 - Request values are omitted from debug output and errors. Captured Authorization, Proxy-Authorization, Cookie, Set-Cookie, and headers containing token, key, or secret have redacted values. Captured body/out remain raw; printing those variables may expose sensitive response content.
 - Redirects are not followed, preventing custom authentication headers from reaching another endpoint. A redirect is captured as its 3xx status and fails unless explicitly listed in expected_status.
@@ -38,7 +42,7 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 | `changed_when` | condition | no | Deferred condition evaluated against this invocation's temporary response after expected-status validation. Default true (always changed). Use false for successful requests that should not claim a change. |
 | `check` | map | no | Independent read-only preflight request. Runs in query phase in both plan and apply; a matching resource skips mutation. |
 | `check.url` | string | no | Required when check is set. Templated HTTP(S) URL to inspect. |
-| `check.matches` | condition | no | Required when check is set. Deferred condition over this preflight response; true means already configured, false means mutation is needed. |
+| `check.matches` | condition or map | no | Required when check is set. Existing condition string or structural mapping with path and exactly one contains/contains_exactly operator. True means already configured; false means mutation is needed. |
 | `check.method` | string | no | Templated GET or HEAD. Default GET; other methods fail before I/O. |
 | `check.headers` | map | no | Templated preflight headers, including authentication. Default empty; does not inherit mutation headers. |
 | `check.body` | string | no | Optional templated raw preflight body. |
@@ -108,6 +112,29 @@ Send a native HTTP(S) request from the controller, using the current host's temp
       Authorization: 'Bearer {{ gravity_api_token }}'
     expected_status: [200, 404]
     matches: '(and (eq response.status 200) (eq response.json.authoritative true) (eq response.json.defaultTTL 3600))'
+  with:
+    items: [example.com]
+```
+
+```yaml
+- !http
+  name: Configure DNS zone
+  url: 'https://api.example.com/zones?name={{ item }}'
+  method: POST
+  body: '{{ dns_zone_payload }}'
+  expected_status: [200, 201, 204]
+  changed_when: '(eq response.status 201)'
+  check:
+    url: 'https://api.example.com/zones?name={{ item }}'
+    expected_status: [200, 404]
+    matches:
+      path: response.json.zones
+      contains_exactly:
+        - name: '{{ item }}'
+          authoritative: true
+          defaultTTL: '{{ gravity_dns_ttl }}'
+          handlerConfigs: '{{ gravity_authoritative_handlers }}'
+          hook: '{{ gravity_zone_hook }}'
   with:
     items: [example.com]
 ```
