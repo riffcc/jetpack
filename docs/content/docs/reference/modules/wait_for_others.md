@@ -1,6 +1,6 @@
 ---
 title: wait_for_others
-weight: 35
+weight: 36
 description: "Barrier synchronization point for --async mode; all hosts must reach this task before any proceed past it. Silently skipped in non-async mode."
 ---
 

@@ -61,6 +61,7 @@ use crate::modules::files::unpack::UnpackTask;
 
 // integrations
 use crate::modules::integrations::github_release::GithubReleaseTask;
+use crate::modules::integrations::http::HttpTask;
 
 // inventory
 use crate::modules::inventory::instantiate::InstantiateTask;
@@ -104,6 +105,7 @@ pub enum Task {
     Github_Release(GithubReleaseTask),
     Group(GroupTask),
     Homebrew(HomebrewTask),
+    Http(HttpTask),
     Instantiate(InstantiateTask),
     Move(MoveTask),
     Pacman(PacmanTask),
@@ -146,6 +148,7 @@ impl Task {
             Task::Github_Release(x) => x.get_module(),
             Task::Group(x) => x.get_module(),
             Task::Homebrew(x) => x.get_module(),
+            Task::Http(x) => x.get_module(),
             Task::Instantiate(x) => x.get_module(),
             Task::Move(x) => x.get_module(),
             Task::Pacman(x) => x.get_module(),
@@ -189,6 +192,7 @@ impl Task {
             Task::Github_Release(x) => x.get_name(),
             Task::Group(x) => x.get_name(),
             Task::Homebrew(x) => x.get_name(),
+            Task::Http(x) => x.get_name(),
             Task::Instantiate(x) => x.get_name(),
             Task::Move(x) => x.get_name(),
             Task::Pacman(x) => x.get_name(),
@@ -232,6 +236,7 @@ impl Task {
             Task::Github_Release(x) => x.get_with(),
             Task::Group(x) => x.get_with(),
             Task::Homebrew(x) => x.get_with(),
+            Task::Http(x) => x.get_with(),
             Task::Instantiate(x) => x.get_with(),
             Task::Move(x) => x.get_with(),
             Task::Pacman(x) => x.get_with(),
@@ -280,6 +285,7 @@ impl Task {
             Task::Github_Release(x) => x.evaluate(handle, request, tm),
             Task::Group(x) => x.evaluate(handle, request, tm),
             Task::Homebrew(x) => x.evaluate(handle, request, tm),
+            Task::Http(x) => x.evaluate(handle, request, tm),
             Task::Instantiate(x) => x.evaluate(handle, request, tm),
             Task::Move(x) => x.evaluate(handle, request, tm),
             Task::Pacman(x) => x.evaluate(handle, request, tm),
@@ -356,7 +362,7 @@ impl Task {
             | Task::Stat(_)
             | Task::Template(_)
             | Task::Unpack(_) => "files",
-            Task::Github_Release(_) => "integrations",
+            Task::Github_Release(_) | Task::Http(_) => "integrations",
             Task::Instantiate(_) => "inventory",
             Task::Proxmox_Lxc(_) | Task::Proxmox_Migrate(_) | Task::Proxmox_Node(_) => "proxmox",
             Task::Apt(_)

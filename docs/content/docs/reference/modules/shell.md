@@ -1,6 +1,6 @@
 ---
 title: shell
-weight: 28
+weight: 29
 description: "Run a command through a real shell (default /bin/bash), enabling pipes, redirects, and builtins."
 ---
 

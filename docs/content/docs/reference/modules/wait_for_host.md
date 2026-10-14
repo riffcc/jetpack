@@ -1,6 +1,6 @@
 ---
 title: wait_for_host
-weight: 33
+weight: 34
 description: "Poll the target over SSH until it responds, useful after provisioning VMs/LXCs. Fails on timeout."
 ---
 

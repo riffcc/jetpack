@@ -1,6 +1,6 @@
 ---
 title: move
-weight: 20
+weight: 21
 description: "Move/rename a file on the target. Optionally backs up an existing destination first. Supports force-overwrite and post-move permission/ownership changes."
 ---
 

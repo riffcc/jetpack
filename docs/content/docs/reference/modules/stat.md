@@ -1,6 +1,6 @@
 ---
 title: stat
-weight: 29
+weight: 30
 description: "Stat a remote path and save the result (exists, is_dir, mode, owner, group) into a host variable for later use. Read-only; never modifies the target."
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: user
-weight: 32
+weight: 33
 description: "Manage a Linux user account via useradd/usermod/userdel. Linux-only."
 ---
 

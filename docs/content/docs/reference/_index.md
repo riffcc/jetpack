@@ -68,6 +68,7 @@ This section is **auto-generated** from the source (`src/registry/list.rs` and `
 | Module | Description |
 |---|---|
 | [`!github_release`](modules/github_release) | Query the GitHub release API and store the best-matching release version (semver-parsed) into a host variable. Passive — resolves and records the version string, does not download assets. |
+| [`!http`](modules/http) | Send a native HTTP(S) request from the controller, using the current host's templating context. Supports methods, headers, a raw text body, expected status codes, and response capture without curl or a shell. |
 
 ### inventory
 

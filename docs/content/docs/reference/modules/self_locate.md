@@ -1,6 +1,6 @@
 ---
 title: self_locate
-weight: 26
+weight: 27
 description: "Introspect the target's virtualization environment (lxc/qemu/pod/physical) and workload ID, saving the result as a host variable map."
 ---
 

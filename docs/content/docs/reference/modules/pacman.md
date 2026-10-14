@@ -1,6 +1,6 @@
 ---
 title: pacman
-weight: 21
+weight: 22
 description: "Manage packages with pacman (Arch Linux). Accepts repo/name syntax (strips the repo prefix for queries/removal)."
 ---
 

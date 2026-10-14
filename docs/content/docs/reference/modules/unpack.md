@@ -1,6 +1,6 @@
 ---
 title: unpack
-weight: 31
+weight: 32
 description: "Extract an archive (tar.gz/tgz/tar.bz2/tar.xz/tar/zip, or single-file gz/bz2/xz) on the target into a destination directory. Source archive must exist on the target."
 ---
 
