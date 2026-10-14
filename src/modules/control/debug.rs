@@ -29,6 +29,8 @@ pub struct DebugTask {
     pub name: Option<String>,
     pub vars: Option<Vec<String>>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -61,7 +63,14 @@ impl IsTask for DebugTask {
                 vars: self.vars.clone(),
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

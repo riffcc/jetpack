@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_directory_task_basic() {
     let task = DirectoryTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test Directory".to_string()),
         path: "/tmp/testdir".to_string(),
         remove: None,
@@ -22,6 +25,9 @@ fn test_directory_task_basic() {
 #[test]
 fn test_directory_task_with_recurse() {
     let task = DirectoryTask {
+        delay: None,
+        retry: None,
+
         name: None,
         path: "/var/www".to_string(),
         remove: None,
@@ -43,6 +49,9 @@ fn test_directory_task_with_recurse() {
 #[test]
 fn test_directory_task_remove() {
     let task = DirectoryTask {
+        delay: None,
+        retry: None,
+
         name: Some("Remove directory".to_string()),
         path: "/tmp/old_dir".to_string(),
         remove: Some("yes".to_string()),

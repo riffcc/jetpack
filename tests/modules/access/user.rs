@@ -5,6 +5,9 @@ use std::collections::HashSet;
 #[test]
 fn test_user_task_basic() {
     let task = UserTask {
+        delay: None,
+        retry: None,
+
         name: Some("Create deploy user".to_string()),
         user: "deploy".to_string(),
         uid: None,
@@ -35,6 +38,9 @@ fn test_user_task_with_details() {
     groups.insert("docker".to_string());
 
     let task = UserTask {
+        delay: None,
+        retry: None,
+
         name: None,
         user: "webuser".to_string(),
         uid: Some("1001".to_string()),
@@ -63,6 +69,9 @@ fn test_user_task_with_details() {
 #[test]
 fn test_user_task_system_user() {
     let task = UserTask {
+        delay: None,
+        retry: None,
+
         name: Some("Create system user".to_string()),
         user: "prometheus".to_string(),
         uid: None,
@@ -88,6 +97,9 @@ fn test_user_task_system_user() {
 #[test]
 fn test_user_task_remove() {
     let task = UserTask {
+        delay: None,
+        retry: None,
+
         name: Some("Remove user".to_string()),
         user: "tempuser".to_string(),
         uid: None,

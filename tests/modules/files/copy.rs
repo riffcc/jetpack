@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_copy_task_basic() {
     let task = CopyTask {
+        delay: None,
+        retry: None,
+
         name: Some("Copy config file".to_string()),
         src: "files/app.conf".to_string(),
         dest: "/etc/app/app.conf".to_string(),
@@ -29,6 +32,9 @@ fn test_copy_task_with_attributes() {
     };
 
     let task = CopyTask {
+        delay: None,
+        retry: None,
+
         name: None,
         src: "secrets/api_key".to_string(),
         dest: "/opt/app/config/api_key".to_string(),

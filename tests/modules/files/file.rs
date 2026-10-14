@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_file_task_basic() {
     let task = FileTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test File".to_string()),
         path: "/tmp/test.txt".to_string(),
         remove: None,
@@ -21,6 +24,9 @@ fn test_file_task_basic() {
 #[test]
 fn test_file_task_with_remove() {
     let task = FileTask {
+        delay: None,
+        retry: None,
+
         name: None,
         path: "/tmp/remove_me.txt".to_string(),
         remove: Some("yes".to_string()),
@@ -42,6 +48,9 @@ fn test_file_task_with_attributes() {
     };
 
     let task = FileTask {
+        delay: None,
+        retry: None,
+
         name: Some("File with attrs".to_string()),
         path: "/etc/config.conf".to_string(),
         remove: None,

@@ -35,6 +35,8 @@ pub struct TemplateTask {
     pub dest: String,
     pub attributes: Option<FileAttributesInput>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -75,7 +77,14 @@ impl IsTask for TemplateTask {
                 attributes: FileAttributesInput::template(handle, request, tm, &self.attributes)?,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

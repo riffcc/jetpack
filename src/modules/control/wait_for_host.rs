@@ -29,6 +29,7 @@ pub struct WaitForHostTask {
     /// Delay between retries in seconds (default: 5)
     pub delay: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -74,7 +75,14 @@ impl IsTask for WaitForHostTask {
         Ok(EvaluatedTask {
             action: Arc::new(WaitForHostAction { timeout, delay }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

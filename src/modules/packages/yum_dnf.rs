@@ -142,6 +142,8 @@ pub struct YumDnfTask {
     pub update: Option<String>,
     pub remove: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -206,7 +208,14 @@ impl IsTask for YumDnfTask {
                 self.package.is_list(),
             ),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

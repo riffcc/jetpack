@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_systemd_service_task_basic() {
     let task = SystemdServiceTask {
+        delay: None,
+        retry: None,
+
         name: Some("Enable nginx".to_string()),
         service: "nginx".to_string(),
         enabled: None,
@@ -24,6 +27,9 @@ fn test_systemd_service_task_basic() {
 #[test]
 fn test_systemd_service_task_enabled_started() {
     let task = SystemdServiceTask {
+        delay: None,
+        retry: None,
+
         name: None,
         service: "postgresql".to_string(),
         enabled: Some("yes".to_string()),
@@ -43,6 +49,9 @@ fn test_systemd_service_task_enabled_started() {
 #[test]
 fn test_systemd_service_task_restart() {
     let task = SystemdServiceTask {
+        delay: None,
+        retry: None,
+
         name: Some("Restart web server".to_string()),
         service: "httpd".to_string(),
         enabled: None,
@@ -60,6 +69,9 @@ fn test_systemd_service_task_restart() {
 #[test]
 fn test_systemd_service_task_disabled_stopped() {
     let task = SystemdServiceTask {
+        delay: None,
+        retry: None,
+
         name: Some("Disable service".to_string()),
         service: "firewalld".to_string(),
         enabled: Some("no".to_string()),

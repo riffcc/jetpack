@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_yum_dnf_task_basic() {
     let task = YumDnfTask {
+        delay: None,
+        retry: None,
+
         name: Some("Install httpd".to_string()),
         package: "httpd".to_string().into(),
         version: None,
@@ -23,6 +26,9 @@ fn test_yum_dnf_task_basic() {
 #[test]
 fn test_yum_dnf_task_with_version() {
     let task = YumDnfTask {
+        delay: None,
+        retry: None,
+
         name: None,
         package: "mariadb-server".to_string().into(),
         version: Some("10.5".to_string()),
@@ -40,6 +46,9 @@ fn test_yum_dnf_task_with_version() {
 #[test]
 fn test_yum_dnf_task_remove() {
     let task = YumDnfTask {
+        delay: None,
+        retry: None,
+
         name: Some("Remove old package".to_string()),
         package: "php-5.6".to_string().into(),
         version: None,
@@ -56,6 +65,9 @@ fn test_yum_dnf_task_remove() {
 #[test]
 fn test_yum_dnf_task_with_update() {
     let task = YumDnfTask {
+        delay: None,
+        retry: None,
+
         name: Some("Update kernel".to_string()),
         package: "kernel".to_string().into(),
         version: None,
