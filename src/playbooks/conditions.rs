@@ -14,6 +14,18 @@ pub(super) fn evaluate(
     expression: &str,
     data: &serde_yaml::Mapping,
 ) -> Result<bool, String> {
+    evaluate_with_path_check(registry, expression, data, &mut |_| Ok(()))
+}
+
+/// Validate a path only when evaluation reaches it, including inside ordinary
+/// helpers. This supports invocation-local deferred data without teaching the
+/// condition engine about any particular module or response format.
+pub(super) fn evaluate_with_path_check(
+    registry: &Handlebars,
+    expression: &str,
+    data: &serde_yaml::Mapping,
+    path_check: &mut impl FnMut(&handlebars::Path) -> Result<(), String>,
+) -> Result<bool, String> {
     let mut template = Template::compile(&format!(
         "{{{{#if {expression} }}}}true{{{{else}}}}false{{{{/if}}}}"
     ))
@@ -24,10 +36,10 @@ pub(super) fn evaluate(
     for element in &mut template.elements {
         if let TemplateElement::HelperBlock(helper) = element {
             for parameter in &mut helper.params {
-                *parameter = reduce(registry, &context, parameter)?;
+                *parameter = reduce(registry, &context, parameter, path_check)?;
             }
             for parameter in helper.hash.values_mut() {
-                *parameter = reduce(registry, &context, parameter)?;
+                *parameter = reduce(registry, &context, parameter, path_check)?;
             }
         }
     }
@@ -47,7 +59,11 @@ fn reduce(
     registry: &Handlebars,
     context: &Context,
     parameter: &Parameter,
+    path_check: &mut impl FnMut(&handlebars::Path) -> Result<(), String>,
 ) -> Result<Parameter, String> {
+    if let Parameter::Path(path) = parameter {
+        path_check(path)?;
+    }
     let Parameter::Subexpression(subexpression) = parameter else {
         // Retain paths (including missing paths) so helpers like isdefined
         // still receive Handlebars' Missing value rather than a null literal.
@@ -63,7 +79,7 @@ fn reduce(
         }
         let is_and = name == Some("and");
         for operand in &helper.params {
-            let operand = reduce(registry, context, operand)?;
+            let operand = reduce(registry, context, operand, path_check)?;
             let value = operand
                 .expand(registry, context, &mut RenderContext::new(None))
                 .map_err(|e| e.to_string())?;
@@ -78,10 +94,10 @@ fn reduce(
     let mut reduced = subexpression.clone();
     if let TemplateElement::Expression(helper) = reduced.element.as_mut() {
         for operand in &mut helper.params {
-            *operand = reduce(registry, context, operand)?;
+            *operand = reduce(registry, context, operand, path_check)?;
         }
         for operand in helper.hash.values_mut() {
-            *operand = reduce(registry, context, operand)?;
+            *operand = reduce(registry, context, operand, path_check)?;
         }
     }
     // Expand each ordinary helper exactly once, after reducing its operands.
@@ -280,6 +296,40 @@ mod tests {
                 "{expression}"
             );
         }
+    }
+
+    #[test]
+    fn path_checks_are_called_only_for_evaluated_operands() {
+        let registry = registry();
+        let data: serde_yaml::Mapping = serde_yaml::from_str("first: 1\n").unwrap();
+        let mut paths = Vec::new();
+        let mut check = |path: &handlebars::Path| {
+            paths.push(path.clone());
+            if path == &handlebars::Path::parse("forbidden").unwrap() {
+                return Err("forbidden path was accessed".into());
+            }
+            Ok(())
+        };
+        assert!(
+            !evaluate_with_path_check(
+                &registry,
+                "(and (eq first 1) false (eq forbidden 2))",
+                &data,
+                &mut check
+            )
+            .unwrap()
+        );
+        assert!(
+            evaluate_with_path_check(&registry, "(and true (eq forbidden 2))", &data, &mut check)
+                .is_err()
+        );
+        assert_eq!(
+            paths,
+            [
+                handlebars::Path::parse("first").unwrap(),
+                handlebars::Path::parse("forbidden").unwrap()
+            ]
+        );
     }
 
     #[test]

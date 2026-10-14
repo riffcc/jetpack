@@ -14,9 +14,11 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 
 ## Notes
 
-- Runs once per targeted host (and per with.items iteration) from the controller. Query/check mode sends no request. Successful requests are reported as executed/changed, including GET.
+- Runs once per targeted host (and per with.items iteration) from the controller. Query/check mode sends no request. Successful requests default to executed/changed, including GET; changed_when overrides reporting without making the request idempotent.
 - Express authentication and content formats through headers, such as Authorization and Content-Type. Body is a templated string sent verbatim; serialize JSON yourself and set Content-Type: application/json.
-- save writes a host variable containing status (HTTP code), body (response text), headers (lowercase names mapped to lists of values), rc (0 for expected status, 1 otherwise), and out (alias of body). Responses are saved before an unexpected status fails the task. Transport failures do not write a result.
+- save writes a host variable containing status (HTTP code), body (response text), headers (lowercase names mapped to lists of values), rc (0 for expected status, 1 otherwise), and out (alias of body). json contains parsed JSON when valid, including JSON null; it is omitted for empty or invalid bodies. Responses are saved before an unexpected status fails the task. Transport failures do not write a result.
+- changed_when uses the existing condition language: true always reports changed, false reports success without change, and expressions such as (eq response.status 201) or (eq response.json.changed true) inspect this invocation's actual response. The response binding is temporary and available without save. Host/item variables are captured per invocation. Expected status is validated before the condition is evaluated; condition errors fail the task without printing its expression or body.
+- JSON is required only when evaluation reaches response.json. Empty bodies produce a no-JSON-body error; nonempty invalid bodies produce an invalid-JSON error, both naming the condition field and HTTP status without exposing content. Short-circuit and/or guards can skip JSON access. A successful 204 with changed_when: false needs no JSON. Raw response.body/out remain available to conditions and save, but are never printed by the module itself.
 - Request values are omitted from debug output and errors. Captured Authorization, Proxy-Authorization, Cookie, Set-Cookie, and headers containing token, key, or secret have redacted values. Captured body/out remain raw; printing those variables may expose sensitive response content.
 - Redirects are not followed, preventing custom authentication headers from reaching another endpoint. A redirect is captured as its 3xx status and fails unless explicitly listed in expected_status.
 
@@ -30,6 +32,7 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 | `body` | string | no | Optional templated raw request body. Empty strings are allowed. |
 | `expected_status` | list | no | Nonempty list of HTTP status codes (100–599), optionally templated. Default any 2xx status. |
 | `save` | string | no | Templated host-variable name to save the response map, following command/shell save. |
+| `changed_when` | condition | no | Deferred condition evaluated against this invocation's temporary response after expected-status validation. Default true (always changed). Use false for successful requests that should not claim a change. |
 | `timeout` | int | no | Templated positive timeout in seconds for the entire request and response body. Default 30. |
 | `verify_tls` | bool | no | Templated TLS certificate verification flag. Default true. |
 
@@ -51,9 +54,21 @@ Send a native HTTP(S) request from the controller, using the current host's temp
 ```yaml
 - !http
   url: https://api.example.com/health
+  changed_when: "false"
   save: health
 - !assert
   true: (eq health.status 200)
   msg: API health check failed
+```
+
+```yaml
+- !http
+  url: https://api.example.com/resources
+  method: POST
+  headers:
+    Content-Type: application/json
+  body: '{"enabled":true}'
+  expected_status: [200, 201, 204]
+  changed_when: "(eq response.status 201)"
 ```
 
