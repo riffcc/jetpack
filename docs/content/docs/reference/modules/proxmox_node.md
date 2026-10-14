@@ -1,6 +1,6 @@
 ---
 title: proxmox_node
-weight: 24
+weight: 25
 description: "Passive/read-only query of Proxmox node status (uptime, load, memory, CPU), optionally with cluster quorum and VM/LXC lists. Saves a JSON blob into a host variable."
 ---
 

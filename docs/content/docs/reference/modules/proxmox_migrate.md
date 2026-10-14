@@ -1,6 +1,6 @@
 ---
 title: proxmox_migrate
-weight: 23
+weight: 24
 description: "Live (online) or offline migration of a Proxmox VM or LXC guest from a source node to a target node. Blocks until the migration task completes or times out."
 ---
 

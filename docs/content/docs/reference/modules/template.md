@@ -1,6 +1,6 @@
 ---
 title: template
-weight: 30
+weight: 31
 description: "Render a local template (resolved through the templates/ lookup) with variables and write the result to a remote path. Idempotent via SHA-512 of rendered output."
 ---
 

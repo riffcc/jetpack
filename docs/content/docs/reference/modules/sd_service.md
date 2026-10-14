@@ -1,6 +1,6 @@
 ---
 title: sd_service
-weight: 25
+weight: 26
 description: "Manage a systemd service's enabled/started state via systemctl. Conflicts (started:false + restart:true) fail; restart without started implies start-if-stopped."
 ---
 

@@ -1,0 +1,344 @@
+// Copyright (C) Riff Labs <team@riff.cc>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+use super::*;
+use crate::registry::list::Task;
+use crate::test_support::{RecordingConnection, query_request, test_handle};
+use std::sync::Mutex;
+use wiremock::matchers::{body_string, header, method, path, query_param};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn handle() -> Arc<TaskHandle> {
+    test_handle(Arc::new(Mutex::new(RecordingConnection::new())))
+}
+
+async fn execute(
+    task: HttpTask,
+    handle: Arc<TaskHandle>,
+) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    // The real task engine dispatches on synchronous worker threads.
+    tokio::task::spawn_blocking(move || {
+        let query = query_request();
+        let evaluated = task.evaluate(&handle, &query, TemplateMode::Strict)?;
+        evaluated.action.dispatch(
+            &handle,
+            &TaskRequest::execute(query.sudo_details.as_ref().unwrap()),
+        )
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn templates_request_and_captures_response_for_later_tasks() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/dhcp/scopes"))
+        .and(query_param("scope", "kindy.world"))
+        .and(header("authorization", "Bearer secret-token"))
+        .and(header("content-type", "application/json"))
+        .and(body_string(r#"{"name":"kindy.world","enabled":true}"#))
+        .respond_with(
+            ResponseTemplate::new(201)
+                .set_body_string(r#"{"created":true}"#)
+                .insert_header("X-Request-Id", "request-1")
+                .append_header("Set-Cookie", "session=secret-cookie")
+                .append_header("Set-Cookie", "other=secret-cookie")
+                .insert_header("X-Api-Key", "secret-key"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let task: Task = serde_yaml::from_str(
+        r#"!http
+url: "{{ endpoint }}/api/v1/dhcp/scopes?scope=kindy.world"
+method: "{{ verb }}"
+headers:
+  Authorization: "Bearer {{ token }}"
+  Content-Type: application/json
+body: "{{ payload }}"
+expected_status: [200, "{{ status }}"]
+save: "{{ result_name }}"
+timeout: 5
+verify_tls: true
+"#,
+    )
+    .unwrap();
+    assert_eq!(task.get_module(), "http");
+    assert_eq!(task.category(), "integrations");
+    let Task::Http(task) = task else {
+        panic!("expected HTTP task")
+    };
+    let handle = handle();
+    handle.host.write().unwrap().update_variables(serde_yaml::from_str(&format!(
+        "endpoint: {}\nverb: POST\ntoken: secret-token\nstatus: 201\nresult_name: response\npayload: '{{\"name\":\"kindy.world\",\"enabled\":true}}'",
+        server.uri()
+    )).unwrap());
+    let response = execute(task, handle.clone()).await.unwrap();
+    assert_eq!(response.status, TaskStatus::IsExecuted);
+    assert!(response.command_result.is_none());
+    let vars = Value::Mapping(handle.host.read().unwrap().get_variables());
+    assert_eq!(vars["response"]["status"], 201);
+    assert_eq!(vars["response"]["rc"], 0);
+    assert_eq!(vars["response"]["body"], r#"{"created":true}"#);
+    assert_eq!(vars["response"]["out"], vars["response"]["body"]);
+    assert_eq!(vars["response"]["headers"]["x-request-id"][0], "request-1");
+    assert_eq!(vars["response"]["headers"]["set-cookie"][0], "[REDACTED]");
+    assert_eq!(vars["response"]["headers"]["set-cookie"][1], "[REDACTED]");
+    assert_eq!(vars["response"]["headers"]["x-api-key"][0], "[REDACTED]");
+    let rendered = handle
+        .template
+        .get_context()
+        .read()
+        .unwrap()
+        .render_template(
+            "{{ response.status }}",
+            &handle.host,
+            BlendTarget::NotTemplateModule,
+            TemplateMode::Strict,
+        )
+        .unwrap();
+    assert_eq!(rendered, "201");
+}
+
+#[tokio::test]
+async fn defaults_to_get_and_accepts_any_success_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let handle = handle();
+    execute(
+        HttpTask {
+            url: server.uri(),
+            save: Some("response".into()),
+            ..Default::default()
+        },
+        handle.clone(),
+    )
+    .await
+    .unwrap();
+    let vars = Value::Mapping(handle.host.read().unwrap().get_variables());
+    assert_eq!(vars["response"]["status"], 204);
+    assert_eq!(vars["response"]["body"], "");
+}
+
+#[tokio::test]
+async fn captures_unexpected_status_without_logging_body_or_headers() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_string("secret-response")
+                .insert_header("Authorization", "secret-header"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let handle = handle();
+    let error = execute(
+        HttpTask {
+            url: server.uri(),
+            save: Some("response".into()),
+            ..Default::default()
+        },
+        handle.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.msg.as_deref(), Some("http: unexpected status 401"));
+    assert!(!format!("{error:?}").contains("secret"));
+    let vars = Value::Mapping(handle.host.read().unwrap().get_variables());
+    assert_eq!(vars["response"]["rc"], 1);
+    assert_eq!(vars["response"]["body"], "secret-response");
+    assert_eq!(
+        vars["response"]["headers"]["authorization"][0],
+        "[REDACTED]"
+    );
+}
+
+#[tokio::test]
+async fn explicitly_expected_error_status_succeeds() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    execute(
+        HttpTask {
+            url: server.uri(),
+            expected_status: Some(vec!["404".into()]),
+            ..Default::default()
+        },
+        handle(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn query_sends_no_request_and_does_not_save_results() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let handle = handle();
+    let query = query_request();
+    let task = HttpTask {
+        url: server.uri(),
+        method: Some("POST".into()),
+        save: Some("response".into()),
+        ..Default::default()
+    };
+    let evaluated = task
+        .evaluate(&handle, &query, TemplateMode::Strict)
+        .unwrap();
+    let response = evaluated.action.dispatch(&handle, &query).unwrap();
+    assert_eq!(response.status, TaskStatus::NeedsExecution);
+    assert!(handle.host.read().unwrap().get_variables().is_empty());
+}
+
+#[tokio::test]
+async fn redirects_are_captured_without_forwarding_custom_authentication() {
+    let destination = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&destination)
+        .await;
+    let source = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(302).insert_header("Location", destination.uri()))
+        .expect(1)
+        .mount(&source)
+        .await;
+    execute(
+        HttpTask {
+            url: source.uri(),
+            headers: BTreeMap::from([("X-Custom-Auth".into(), "secret".into())]),
+            expected_status: Some(vec!["302".into()]),
+            ..Default::default()
+        },
+        handle(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn times_out_without_leaking_url_credentials() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(3)))
+        .mount(&server)
+        .await;
+    let error = execute(
+        HttpTask {
+            url: format!("{}?token=secret", server.uri()),
+            timeout: Some("1".into()),
+            ..Default::default()
+        },
+        handle(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.msg.as_deref(), Some("http: request timed out"));
+}
+
+#[test]
+fn off_evaluation_does_not_validate_placeholder_values() {
+    let task: HttpTask = serde_yaml::from_str(
+        "url: '{{ missing }}'\nexpected_status: ['{{ missing }}']\ntimeout: '{{ missing }}'\n",
+    )
+    .unwrap();
+    assert!(
+        task.evaluate(&handle(), &TaskRequest::validate(), TemplateMode::Off)
+            .is_ok()
+    );
+}
+
+#[test]
+fn debug_and_template_errors_redact_custom_header_secrets() {
+    let task: Task = serde_yaml::from_str(
+        "!http\nurl: http://localhost\nheaders:\n  X-Custom-Auth: 'secret-{{ missing }}'\n",
+    )
+    .unwrap();
+    assert!(!format!("{task:?}").contains("secret"));
+    let error = task
+        .evaluate(&handle(), &TaskRequest::validate(), TemplateMode::Strict)
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.msg.as_deref(),
+        Some("http: cannot template header value")
+    );
+    assert!(!format!("{error:?}").contains("secret"));
+}
+
+#[test]
+fn invalid_inputs_fail_without_exposing_request_values() {
+    let cases = [
+        "url: 'http://[secret'",
+        "url: 'file:///secret'",
+        "url: http://localhost\nmethod: 'secret invalid'",
+        "url: http://localhost\nheaders:\n  'secret invalid': secret",
+        "url: http://localhost\nheaders:\n  Authorization: \"secret\\ninvalid\"",
+        "url: http://localhost\nexpected_status: []",
+        "url: http://localhost\nexpected_status: [99]",
+        "url: http://localhost\nexpected_status: [600]",
+        "url: http://localhost\ntimeout: 0",
+        "url: http://localhost\nverify_tls: secret",
+    ];
+    for yaml in cases {
+        let task: HttpTask = serde_yaml::from_str(yaml).unwrap();
+        let handle = handle();
+        let query = query_request();
+        let evaluated = task
+            .evaluate(&handle, &query, TemplateMode::Strict)
+            .unwrap();
+        let error = evaluated
+            .action
+            .dispatch(
+                &handle,
+                &TaskRequest::execute(query.sudo_details.as_ref().unwrap()),
+            )
+            .unwrap_err();
+        assert!(!format!("{error:?}").contains("secret"));
+        assert_eq!(error.status, TaskStatus::Failed);
+    }
+}
+
+#[tokio::test]
+async fn empty_body_and_header_values_are_valid() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(body_string(""))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    execute(
+        HttpTask {
+            url: server.uri(),
+            method: Some("PUT".into()),
+            body: Some(String::new()),
+            headers: BTreeMap::from([("X-Empty".into(), String::new())]),
+            ..Default::default()
+        },
+        handle(),
+    )
+    .await
+    .unwrap();
+}
+
+#[test]
+fn unknown_fields_are_rejected() {
+    assert!(
+        serde_yaml::from_str::<Task>("!http\nurl: http://localhost\npassword: secret\n").is_err()
+    );
+}
