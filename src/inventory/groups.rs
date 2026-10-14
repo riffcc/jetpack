@@ -17,9 +17,40 @@
 use crate::inventory::hosts::Host;
 use crate::util::yaml::blend_variables;
 use serde_yaml;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::sync::RwLock;
+
+/// Blend each declaration once, parents before descendants. Alphabetical order
+/// breaks ties between unrelated groups rather than randomized HashMap order.
+pub(crate) fn blend_group_variables(
+    groups: HashMap<String, Arc<RwLock<Group>>>,
+) -> serde_yaml::Value {
+    let mut remaining: BTreeMap<_, _> = groups.into_iter().collect();
+    let mut blended = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+    while !remaining.is_empty() {
+        let next = remaining
+            .iter()
+            .find(|(_, group)| {
+                group
+                    .read()
+                    .unwrap()
+                    .parents
+                    .keys()
+                    .all(|parent| !remaining.contains_key(parent))
+            })
+            .map(|(name, _)| name.clone())
+            // Inventory validation diagnoses cycles. Still keep resolution
+            // bounded and deterministic if called on an unvalidated graph.
+            .unwrap_or_else(|| remaining.keys().next().unwrap().clone());
+        let group = remaining.remove(&next).unwrap();
+        blend_variables(
+            &mut blended,
+            serde_yaml::Value::Mapping(group.read().unwrap().get_variables()),
+        );
+    }
+    blended
+}
 
 pub struct Group {
     pub name: String,
@@ -175,13 +206,7 @@ impl Group {
     }
 
     pub fn get_blended_variables(&self) -> serde_yaml::Mapping {
-        let mut blended: serde_yaml::Value = serde_yaml::Value::from(serde_yaml::Mapping::new());
-        let ancestors = self.get_ancestor_groups(20);
-        for (_k, v) in ancestors.iter() {
-            let theirs: serde_yaml::Value =
-                serde_yaml::Value::from(v.read().expect("group read").get_variables());
-            blend_variables(&mut blended, theirs);
-        }
+        let mut blended = blend_group_variables(self.get_ancestor_groups(20));
         let mine = serde_yaml::Value::from(self.get_variables());
         blend_variables(&mut blended, mine);
         match blended {

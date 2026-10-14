@@ -265,7 +265,7 @@ impl PlaybookContext {
         let src1ar = src1r.deref();
         blend_variables(&mut blended, serde_yaml::Value::Mapping(src1ar.clone()));
 
-        let src2 = host.read().unwrap().get_blended_variables();
+        let src2 = host.read().unwrap().get_template_variables();
         blend_variables(&mut blended, serde_yaml::Value::Mapping(src2));
 
         let src3 = self.vars_storage.read().unwrap();

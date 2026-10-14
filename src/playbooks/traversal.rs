@@ -486,7 +486,7 @@ fn handle_batch(
             let host = host_arc.read().unwrap();
             (
                 host.name.clone(),
-                host.get_variables(),
+                host.get_inventory_variables(),
                 host.get_provision().cloned(),
             )
         };
@@ -505,7 +505,8 @@ fn handle_batch(
                     let mut host = host_arc.write().unwrap();
                     let mut vars = host.get_variables();
                     let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                    let current_ip = vars
+                    let current_ip = host
+                        .get_inventory_variables()
                         .get(&key)
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
@@ -742,7 +743,7 @@ fn async_handle_batch(
                         h.name.clone(),
                         h.needs_provisioning(),
                         h.get_provision().cloned(),
-                        h.get_variables(),
+                        h.get_inventory_variables(),
                     )
                 };
 
@@ -794,7 +795,7 @@ fn async_handle_batch(
 
                             if let Some(ref ip_addr) = ip {
                                 let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                                if !vars.contains_key(&key) {
+                                if !h.get_inventory_variables().contains_key(&key) {
                                     vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
                                     changed = true;
                                 }
@@ -802,7 +803,7 @@ fn async_handle_batch(
 
                             if let Some(ref ssh_user) = config.ssh_user {
                                 let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                                if !vars.contains_key(&key) {
+                                if !h.get_inventory_variables().contains_key(&key) {
                                     vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
                                     changed = true;
                                 }
