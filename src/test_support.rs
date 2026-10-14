@@ -132,13 +132,18 @@ impl Connection for RecordingConnection {
 /// Build a minimal `TaskHandle` wired to the given connection, suitable for
 /// driving a module's `dispatch()` in a unit test.
 pub fn test_handle(connection: Arc<Mutex<dyn Connection>>) -> Arc<TaskHandle> {
+    test_handle_with_factory(connection, Arc::new(RwLock::new(NoFactory::new())))
+}
+
+pub fn test_handle_with_factory(
+    connection: Arc<Mutex<dyn Connection>>,
+    connection_factory: Arc<RwLock<dyn ConnectionFactory>>,
+) -> Arc<TaskHandle> {
     let inventory = Arc::new(RwLock::new(Inventory::new()));
     let host = Arc::new(RwLock::new(Host::new(&String::from("testhost"))));
     let parser = CliParser::new();
     let context = Arc::new(RwLock::new(PlaybookContext::new(&parser)));
     let visitor = Arc::new(RwLock::new(PlaybookVisitor::new(CheckMode::No)));
-    let connection_factory: Arc<RwLock<dyn ConnectionFactory>> =
-        Arc::new(RwLock::new(NoFactory::new()));
 
     let run_state = Arc::new(RunState {
         inventory,
