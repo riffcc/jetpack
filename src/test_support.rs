@@ -29,13 +29,18 @@ use crate::playbooks::visitor::{CheckMode, PlaybookVisitor};
 use crate::tasks::request::{SudoDetails, TaskRequest};
 use crate::tasks::response::TaskResponse;
 
+/// Shared by tests that mutate or depend on process-wide environment/cwd.
+pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+type CommandResultProvider = dyn Fn(&str) -> (i32, String) + Send + Sync;
+
 /// A fake `Connection` that records every command it is asked to run and
 /// returns a canned return code for each (default: 0). Commands are recorded in
 /// a shared log so a test can inspect them after the connection has been moved
 /// into a `TaskHandle`.
 pub struct RecordingConnection {
     log: Arc<Mutex<Vec<String>>>,
-    rc_for: Box<dyn Fn(&str) -> i32 + Send + Sync>,
+    result_for: Box<CommandResultProvider>,
 }
 
 impl RecordingConnection {
@@ -46,9 +51,16 @@ impl RecordingConnection {
 
     /// Decide the return code per command (e.g. simulate a missing file).
     pub fn with_rc<F: Fn(&str) -> i32 + Send + Sync + 'static>(rc_for: F) -> Self {
+        Self::with_result(move |cmd| (rc_for(cmd), String::new()))
+    }
+
+    /// Return canned exit status and output for command-oriented module tests.
+    pub fn with_result<F: Fn(&str) -> (i32, String) + Send + Sync + 'static>(
+        result_for: F,
+    ) -> Self {
         Self {
             log: Arc::new(Mutex::new(Vec::new())),
-            rc_for: Box::new(rc_for),
+            result_for: Box::new(result_for),
         }
     }
 
@@ -105,12 +117,12 @@ impl Connection for RecordingConnection {
         _forward: Forward,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         self.log.lock().unwrap().push(cmd.to_string());
-        let rc = (self.rc_for)(cmd);
+        let (rc, out) = (self.result_for)(cmd);
         Ok(response.command_ok(
             request,
             &Arc::new(Some(CommandResult {
                 cmd: cmd.to_string(),
-                out: String::new(),
+                out,
                 rc,
             })),
         ))

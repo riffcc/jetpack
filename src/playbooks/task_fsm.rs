@@ -536,7 +536,7 @@ fn run_task_on_host_inner(
     // don't return the wrong states, even when returning an error, to prevent
     // unpredictability in the program
 
-    let query = TaskRequest::query(&sudo_details);
+    let query = TaskRequest::query(&sudo_details).with_chdir(action.chdir());
 
     // invoke the resource and see what actions it thinks need to be performed
     let qrc = action.dispatch(handle, &query);
@@ -564,7 +564,7 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsCreation => match modify_mode {
                 true => {
-                    let req = TaskRequest::create(&sudo_details);
+                    let req = TaskRequest::create(&sudo_details).with_chdir(action.chdir());
                     let crc = action.dispatch(handle, &req);
                     match crc {
                         Ok(ref crc_ok) => match crc_ok.status {
@@ -587,7 +587,7 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsRemoval => match modify_mode {
                 true => {
-                    let req = TaskRequest::remove(&sudo_details);
+                    let req = TaskRequest::remove(&sudo_details).with_chdir(action.chdir());
                     let rrc = action.dispatch(handle, &req);
                     match rrc {
                         Ok(ref rrc_ok) => match rrc_ok.status {
@@ -609,7 +609,8 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsModification => match modify_mode {
                 true => {
-                    let req = TaskRequest::modify(&sudo_details, qrc_ok.changes.clone());
+                    let req = TaskRequest::modify(&sudo_details, qrc_ok.changes.clone())
+                        .with_chdir(action.chdir());
                     let mrc = action.dispatch(handle, &req);
                     match mrc {
                         Ok(ref mrc_ok) => match mrc_ok.status {
@@ -633,7 +634,7 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsExecution => match modify_mode {
                 true => {
-                    let req = TaskRequest::execute(&sudo_details);
+                    let req = TaskRequest::execute(&sudo_details).with_chdir(action.chdir());
                     let erc = action.dispatch(handle, &req);
                     match erc {
                         Ok(ref erc_ok) => match erc_ok.status {
@@ -655,7 +656,7 @@ fn run_task_on_host_inner(
             },
 
             TaskStatus::NeedsPassive => {
-                let req = TaskRequest::passive(&sudo_details);
+                let req = TaskRequest::passive(&sudo_details).with_chdir(action.chdir());
                 let prc = action.dispatch(handle, &req);
                 match prc {
                     Ok(ref prc_ok) => match prc_ok.status {

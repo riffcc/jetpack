@@ -1744,12 +1744,9 @@ fn join_paths(paths: &Arc<RwLock<Vec<PathBuf>>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::ENV_LOCK;
     use std::env;
-    use std::sync::Mutex;
     use tempfile::TempDir;
-
-    // Env-var-sensitive tests must hold this lock to prevent race conditions
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_cli_mode_from_string() {

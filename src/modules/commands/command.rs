@@ -30,6 +30,7 @@ pub struct CommandTask {
     pub name: Option<String>,
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     #[serde(rename = "unsafe")]
@@ -40,6 +41,7 @@ pub struct CommandTask {
 struct CommandAction {
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     pub unsafe_: bool,
@@ -64,6 +66,7 @@ impl IsTask for CommandTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         Ok(EvaluatedTask {
             action: Arc::new(CommandAction {
+                chdir: handle.template.chdir(request, tm, &self.chdir)?,
                 unsafe_: {
                     if self.cmd.find("{{").is_none() {
                         // allow all the fancy shell characters unless variables are used, in which case
@@ -110,6 +113,10 @@ impl IsTask for CommandTask {
 }
 
 impl IsAction for CommandAction {
+    fn chdir(&self) -> Option<&str> {
+        self.chdir.as_deref()
+    }
+
     fn dispatch(
         &self,
         handle: &Arc<TaskHandle>,

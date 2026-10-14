@@ -30,6 +30,7 @@ pub struct ShellTask {
     pub name: Option<String>,
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     pub shell: Option<String>, // optional shell to use (bash, zsh, sh)
@@ -39,6 +40,7 @@ pub struct ShellTask {
 struct ShellAction {
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     pub shell: String,
@@ -63,6 +65,7 @@ impl IsTask for ShellTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         Ok(EvaluatedTask {
             action: Arc::new(ShellAction {
+                chdir: handle.template.chdir(request, tm, &self.chdir)?,
                 cmd: handle.template.string_unsafe_for_shell(
                     request,
                     tm,
@@ -104,6 +107,10 @@ impl IsTask for ShellTask {
 }
 
 impl IsAction for ShellAction {
+    fn chdir(&self) -> Option<&str> {
+        self.chdir.as_deref()
+    }
+
     fn dispatch(
         &self,
         handle: &Arc<TaskHandle>,

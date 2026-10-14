@@ -12,12 +12,17 @@ description: "Run a command through a real shell (default /bin/bash), enabling p
 
 Run a command through a real shell (default /bin/bash), enabling pipes, redirects, and builtins.
 
+## Notes
+
+- chdir follows the same absolute target-path rules as !command. The directory is entered before invoking the selected shell, inside the sudo context. It is scoped to this command; missing or inaccessible directories fail regardless of failed_when. Plan validates path syntax without entering the directory.
+
 ## Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `cmd` | string | yes | The shell command line to execute (templated; passed to <shell> -c). |
 | `shell` | string | no | Path to the shell binary (e.g. /bin/zsh). Default /bin/bash. |
+| `chdir` | path | no | Absolute working directory on the execution target (templated). Omission preserves the target's default directory. |
 | `save` | string | no | Variable name to save { rc, out, stdout }. |
 | `failed_when` | condition | no | Expression overriding fail-when-rc-nonzero. |
 | `changed_when` | condition | no | Expression overriding always-changed. |

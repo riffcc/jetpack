@@ -33,6 +33,7 @@ pub struct ExternalTask {
     pub use_module: String,
     pub params: serde_json::Map<String, serde_json::Value>,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     pub with: Option<PreLogicInput>,
@@ -42,6 +43,7 @@ struct ExternalAction {
     pub use_module: PathBuf,
     pub params: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
 }
@@ -65,6 +67,7 @@ impl IsTask for ExternalTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         Ok(EvaluatedTask {
             action: Arc::new(ExternalAction {
+                chdir: handle.template.chdir(request, tm, &self.chdir)?,
                 use_module: handle.template.find_module_path(
                     request,
                     tm,
@@ -123,6 +126,10 @@ impl IsTask for ExternalTask {
 }
 
 impl IsAction for ExternalAction {
+    fn chdir(&self) -> Option<&str> {
+        self.chdir.as_deref()
+    }
+
     fn dispatch(
         &self,
         handle: &Arc<TaskHandle>,
@@ -132,8 +139,11 @@ impl IsAction for ExternalAction {
             TaskRequestType::Query => Ok(handle.response.needs_execution(request)),
 
             TaskRequestType::Execute => {
-                let (_tmp_path1, tmp_file1) = handle.remote.get_transfer_location(request)?;
-                let (_tmp_path2, tmp_file2) = handle.remote.get_transfer_location(request)?;
+                let staging_request = Arc::clone(request).with_chdir(None);
+                let (_tmp_path1, tmp_file1) =
+                    handle.remote.get_transfer_location(&staging_request)?;
+                let (_tmp_path2, tmp_file2) =
+                    handle.remote.get_transfer_location(&staging_request)?;
 
                 let module_tmp_file = tmp_file1.as_ref().unwrap();
                 let param_tmp_file = tmp_file2.as_ref().unwrap();
@@ -141,14 +151,14 @@ impl IsAction for ExternalAction {
                 let param_str_path = param_tmp_file.as_path().display().to_string();
 
                 handle.remote.copy_file(
-                    request,
+                    &staging_request,
                     self.use_module.as_path(),
                     &module_str_path.clone(),
                     |_f| Ok(()),
                 )?;
 
                 handle.remote.write_data(
-                    request,
+                    &staging_request,
                     &self.params.clone(),
                     &param_str_path.clone(),
                     |_f| {
@@ -158,7 +168,9 @@ impl IsAction for ExternalAction {
                 )?;
 
                 let chmod = format!("chmod +x '{}'", module_str_path.clone());
-                handle.remote.run(request, &chmod, CheckRc::Checked)?;
+                handle
+                    .remote
+                    .run(&staging_request, &chmod, CheckRc::Checked)?;
 
                 let module_run =
                     format!("{} < {}", module_str_path.clone(), param_str_path.clone());
@@ -170,10 +182,10 @@ impl IsAction for ExternalAction {
 
                 handle
                     .remote
-                    .delete_file(request, &param_str_path.clone())?;
+                    .delete_file(&staging_request, &param_str_path.clone())?;
                 handle
                     .remote
-                    .delete_file(request, &module_str_path.clone())?;
+                    .delete_file(&staging_request, &module_str_path.clone())?;
 
                 let map_data = build_results_map(handle, request, rc, &out)?;
 
