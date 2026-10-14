@@ -48,6 +48,12 @@ pub trait IsTask: Send + Sync {
 }
 
 pub trait IsAction: Send + Sync {
+    /// Target-side working directory for this evaluated invocation. Modules
+    /// opt in by exposing a top-level chdir field and overriding this getter.
+    fn chdir(&self) -> Option<&str> {
+        None
+    }
+
     fn dispatch(
         &self,
         handle: &Arc<TaskHandle>,

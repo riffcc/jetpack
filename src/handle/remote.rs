@@ -204,11 +204,17 @@ impl Remote {
             }
         }
 
+        let prepared = super::working_directory::prepare(cmd, request.chdir.as_deref())
+            .map_err(|e| self.response.is_failed(request, &e))?;
+
+        // Enter the directory inside the sudo execution context. The original
+        // user command has already passed screening; paths are literal quoted
+        // arguments in this trusted wrapper, including shell metacharacters.
         // use the sudo template to choose a new command to execute if specified.
         // this doesn't need to be sudo specifically, it's really a generic concept that can wrap a command with another tool
 
         let cmd_out = match use_sudo {
-            UseSudo::Yes => match self.template.add_sudo_details(request, cmd) {
+            UseSudo::Yes => match self.template.add_sudo_details(request, &prepared.command) {
                 Ok(x) => x,
                 Err(y) => {
                     return Err(self.response.is_failed(
@@ -217,7 +223,7 @@ impl Remote {
                     ));
                 }
             },
-            UseSudo::No => cmd.to_string(),
+            UseSudo::No => prepared.command,
         };
 
         self.response
@@ -231,6 +237,23 @@ impl Remote {
                 .lock()
                 .unwrap()
                 .run_command(&self.response, request, &cmd_out, forward);
+
+        // Directory entry failure is an execution-context failure, independent
+        // of the user's failed_when expression or unchecked command exit code.
+        if let Ok(ok_result) = &result
+            && let Some(marker) = &prepared.directory_failure
+            && let Some(command) = ok_result.command_result.as_ref()
+            && command.rc == 125
+            && command.out.lines().any(|line| line.trim() == marker)
+        {
+            return Err(self.response.is_failed(
+                request,
+                &format!(
+                    "cannot enter chdir '{}' on execution target",
+                    request.chdir.as_deref().unwrap()
+                ),
+            ));
+        }
 
         // if requested, turn non-zero return codes into errors
 

@@ -35,6 +35,34 @@ Every task accepts an optional `with:` block of pre-execution modifiers. These w
     sudo: root
 ```
 
+## Working directory
+
+`!command`, `!shell`, and `!external` accept a top-level `chdir` field:
+
+```yaml
+- !command
+  cmd: git status --short
+  chdir: /srv/projects/{{ item }}
+  with:
+    items: [app, worker]
+    sudo: deploy
+```
+
+Use an absolute path in the execution target's filesystem. For example, `/app`
+inside a container refers to that container's directory. Jetpack renders the
+path per host/item after skip conditions and passes it literally; spaces and
+shell metacharacters are allowed. Relative paths, empty paths, `~` shorthand,
+and NUL bytes are rejected.
+
+Directory entry happens inside the task's sudo context and affects only that
+command. External-module uploads, staging, and cleanup keep their usual
+directory. If the target directory is missing or inaccessible, the task fails
+before running the requested command, even with `failed_when: "false"`.
+Omitting `chdir` preserves the target's existing default directory.
+
+`plan` validates the rendered path's syntax without entering or checking the
+directory. Other modules reject `chdir`, and `with.chdir` is not supported.
+
 ## Conditions
 
 Conditions are expressions evaluated against the current variables (including [facts](../modules/facts/)):
