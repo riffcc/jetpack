@@ -99,6 +99,22 @@ fn reduce(
         for operand in helper.hash.values_mut() {
             *operand = reduce(registry, context, operand, path_check)?;
         }
+        // Handlebars lookup is also a field access. Preserve validation when a
+        // field name is supplied dynamically instead of written as a path.
+        if helper.name.as_name() == Some("lookup")
+            && helper.params.len() == 2
+            && let Parameter::Path(_) = &helper.params[0]
+        {
+            let key = helper.params[1]
+                .expand(registry, context, &mut RenderContext::new(None))
+                .map_err(|e| e.to_string())?;
+            if let Some(key) = key.value().as_str()
+                && let Some(base) = helper.params[0].as_name()
+                && let Ok(path) = handlebars::Path::parse(&format!("{base}.[{key}]"))
+            {
+                path_check(&path)?;
+            }
+        }
     }
     // Expand each ordinary helper exactly once, after reducing its operands.
     // Returning a typed literal preserves eq/string-helper behavior and keeps
