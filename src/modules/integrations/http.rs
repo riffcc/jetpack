@@ -39,7 +39,7 @@ pub struct HttpTask {
 }
 
 /// A read-only request whose response establishes whether mutation is needed.
-/// Request settings are independent of the mutation, including authentication.
+/// Inherits mutation headers, timeout, and TLS verification unless overridden.
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct HttpCheck {
@@ -141,6 +141,45 @@ impl HttpRequestInput<'_> {
     }
 }
 
+impl HttpCheck {
+    fn template(
+        &self,
+        mutation: &HttpRequest,
+        render: &impl Fn(&str, &str) -> Result<String, Arc<TaskResponse>>,
+    ) -> Result<HttpCheckAction, Arc<TaskResponse>> {
+        let mut preflight = HttpRequestInput {
+            url: &self.url,
+            method: &self.method,
+            headers: &self.headers,
+            body: &self.body,
+            expected_status: &self.expected_status,
+            timeout: &self.timeout,
+            verify_tls: &self.verify_tls,
+        }
+        .template(&|field, input| render(&format!("check.{field}"), input))?;
+        // Merge rendered names so templated header keys obey the same
+        // case-insensitive upsert rule as literal HTTP header names.
+        let overrides = std::mem::take(&mut preflight.headers);
+        preflight.headers = mutation.headers.clone();
+        for (name, value) in overrides {
+            preflight
+                .headers
+                .retain(|key, _| !key.eq_ignore_ascii_case(&name));
+            preflight.headers.insert(name, value);
+        }
+        if self.timeout.is_none() {
+            preflight.timeout = mutation.timeout.clone();
+        }
+        if self.verify_tls.is_none() {
+            preflight.verify_tls = mutation.verify_tls.clone();
+        }
+        Ok::<_, Arc<TaskResponse>>(HttpCheckAction {
+            request: preflight,
+            matches: self.matches.clone(),
+        })
+    }
+}
+
 impl IsTask for HttpTask {
     fn get_module(&self) -> String {
         "http".into()
@@ -176,37 +215,25 @@ impl IsTask for HttpTask {
                         .is_failed(request, &format!("http: cannot template {field}"))
                 })
         };
+        let mutation = HttpRequestInput {
+            url: &self.url,
+            method: &self.method,
+            headers: &self.headers,
+            body: &self.body,
+            expected_status: &self.expected_status,
+            timeout: &self.timeout,
+            verify_tls: &self.verify_tls,
+        }
+        .template(&render)?;
+        let check = self
+            .check
+            .as_ref()
+            .map(|check| check.template(&mutation, &render))
+            .transpose()?;
         Ok(EvaluatedTask {
             action: Arc::new(HttpAction {
-                request: HttpRequestInput {
-                    url: &self.url,
-                    method: &self.method,
-                    headers: &self.headers,
-                    body: &self.body,
-                    expected_status: &self.expected_status,
-                    timeout: &self.timeout,
-                    verify_tls: &self.verify_tls,
-                }
-                .template(&render)?,
-                check: self
-                    .check
-                    .as_ref()
-                    .map(|check| {
-                        Ok::<_, Arc<TaskResponse>>(HttpCheckAction {
-                            request: HttpRequestInput {
-                                url: &check.url,
-                                method: &check.method,
-                                headers: &check.headers,
-                                body: &check.body,
-                                expected_status: &check.expected_status,
-                                timeout: &check.timeout,
-                                verify_tls: &check.verify_tls,
-                            }
-                            .template(&|field, input| render(&format!("check.{field}"), input))?,
-                            matches: check.matches.clone(),
-                        })
-                    })
-                    .transpose()?,
+                request: mutation,
+                check,
                 save: handle
                     .template
                     .string_option_no_spaces(request, tm, "save", &self.save)?,
