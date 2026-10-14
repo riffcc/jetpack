@@ -23,6 +23,7 @@ pub mod language;
 pub mod provision_phase;
 pub mod ref_collector;
 pub mod role_tree;
+pub mod structural;
 pub mod t_helpers;
 pub mod task_fsm;
 pub mod templar;
