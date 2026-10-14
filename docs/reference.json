@@ -6,7 +6,7 @@
       "author": "jetpack"
     },
     {
-      "content": "Parameter types are derived from how each module uses the field (via the templating helpers in evaluate), not the Rust field type — most fields are Option<String> in the struct but are really bool/int/path/list/map at runtime. Universal fields name/with/and are documented under Task Modifiers, not repeated per module.",
+      "content": "Parameter types are derived from how each module uses the field (via the templating helpers in evaluate), not the Rust field type — most fields are Option<String> in the struct but are really bool/int/path/list/map at runtime. Universal fields name/with/and/retry/delay are documented under Task Modifiers, not repeated per module.",
       "author": "jetpack"
     }
   ],

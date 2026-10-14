@@ -10,6 +10,9 @@ fn test_set_task_basic() {
     );
 
     let task = SetTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test Set".to_string()),
         vars: Some(vars),
         with: None,
@@ -25,6 +28,9 @@ fn test_set_task_basic() {
 #[test]
 fn test_set_task_no_vars() {
     let task = SetTask {
+        delay: None,
+        retry: None,
+
         name: None,
         vars: None,
         with: None,

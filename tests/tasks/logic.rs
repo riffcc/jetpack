@@ -49,14 +49,10 @@ fn test_post_logic_input_struct() {
     let post_logic = PostLogicInput {
         notify: Some("handler".to_string()),
         ignore_errors: Some("true".to_string()),
-        retry: Some("3".to_string()),
-        delay: Some("5".to_string()),
     };
 
     assert_eq!(post_logic.notify, Some("handler".to_string()));
     assert_eq!(post_logic.ignore_errors, Some("true".to_string()));
-    assert_eq!(post_logic.retry, Some("3".to_string()));
-    assert_eq!(post_logic.delay, Some("5".to_string()));
 }
 
 #[test]

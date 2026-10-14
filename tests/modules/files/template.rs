@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_template_task_basic() {
     let task = TemplateTask {
+        delay: None,
+        retry: None,
+
         name: Some("Deploy config template".to_string()),
         src: "templates/app.conf.j2".to_string(),
         dest: "/etc/app/app.conf".to_string(),
@@ -28,6 +31,9 @@ fn test_template_task_with_attributes() {
     };
 
     let task = TemplateTask {
+        delay: None,
+        retry: None,
+
         name: None,
         src: "nginx.conf.j2".to_string(),
         dest: "/etc/nginx/nginx.conf".to_string(),
@@ -89,10 +95,10 @@ src: "templates/{{ env }}.conf.j2"
 dest: /etc/app/config.conf
 with:
   condition: "{{ deploy_config }}"
+retry: 3
+delay: 5
 and:
   notify: "restart_app"
-  retry: "3"
-  delay: "5"
 "#;
 
     let task: Result<TemplateTask, _> = serde_yaml::from_str(yaml);

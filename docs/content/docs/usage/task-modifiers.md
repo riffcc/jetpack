@@ -35,6 +35,29 @@ Every task accepts an optional `with:` block of pre-execution modifiers. These w
     sudo: root
 ```
 
+## Retries
+
+Every module accepts top-level `retry` and `delay`:
+
+```yaml
+- !http
+  url: https://api.example.com/health
+  retry: 15
+  delay: 2
+```
+
+`retry` is the number of additional attempts after a task fails (default `0`).
+`delay` is the number of seconds between those attempts (default `1`); `0`
+retries immediately. Successful tasks are not retried. Both fields accept
+nonnegative integers or templates, evaluated separately for each host/item after
+`with.condition`. Retries run the task's normal query/apply cycle again.
+
+The unreleased `and.retry` and `and.delay` forms are no longer accepted.
+`and.notify` and `and.ignore_errors` keep their existing locations and behavior.
+For `!wait_for_host` and `!wait_for_http`, `delay` also remains the polling
+interval: omitted values preserve their five-second polling default, while an
+explicit value sets both the polling interval and the pause between task retries.
+
 ## Working directory
 
 `!command`, `!shell`, and `!external` accept a top-level `chdir` field:

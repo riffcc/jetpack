@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_shell_task_basic() {
     let task = ShellTask {
+        delay: None,
+        retry: None,
+
         name: Some("Run command".to_string()),
         cmd: "echo 'Hello World'".to_string(),
         save: None,
@@ -24,6 +27,9 @@ fn test_shell_task_basic() {
 #[test]
 fn test_shell_task_with_save() {
     let task = ShellTask {
+        delay: None,
+        retry: None,
+
         name: None,
         cmd: "hostname -f".to_string(),
         save: Some("hostname_result".to_string()),
@@ -43,6 +49,9 @@ fn test_shell_task_with_save() {
 #[test]
 fn test_shell_task_with_conditions() {
     let task = ShellTask {
+        delay: None,
+        retry: None,
+
         name: Some("Check service".to_string()),
         cmd: "systemctl status nginx".to_string(),
         save: None,
@@ -61,6 +70,9 @@ fn test_shell_task_with_conditions() {
 #[test]
 fn test_shell_task_with_custom_shell() {
     let task = ShellTask {
+        delay: None,
+        retry: None,
+
         name: Some("Run with bash".to_string()),
         cmd: "echo $BASH_VERSION".to_string(),
         save: None,

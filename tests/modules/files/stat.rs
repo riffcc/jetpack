@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_stat_task_basic() {
     let task = StatTask {
+        delay: None,
+        retry: None,
+
         name: Some("Check file status".to_string()),
         path: "/etc/passwd".to_string(),
         save: "passwd_stat".to_string(),
@@ -33,11 +36,12 @@ fn test_stat_task_with_logic() {
     let post_logic = PostLogicInput {
         notify: Some("file_checked".to_string()),
         ignore_errors: None,
-        retry: None,
-        delay: None,
     };
 
     let task = StatTask {
+        delay: None,
+        retry: None,
+
         name: None,
         path: "/tmp/important.txt".to_string(),
         save: "important_file_stat".to_string(),

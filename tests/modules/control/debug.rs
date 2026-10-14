@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_debug_task_basic() {
     let task = DebugTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test Debug".to_string()),
         vars: Some(vec!["test_var".to_string()]),
         with: None,
@@ -18,6 +21,9 @@ fn test_debug_task_basic() {
 #[test]
 fn test_debug_task_no_vars() {
     let task = DebugTask {
+        delay: None,
+        retry: None,
+
         name: None,
         vars: None,
         with: None,
@@ -70,8 +76,7 @@ vars:
   - debug_var
 with:
   condition: "{{ debug_enabled }}"
-and:
-  retry: "3"
+retry: 3
 "#;
 
     let task: Result<DebugTask, _> = serde_yaml::from_str(yaml);
@@ -79,5 +84,5 @@ and:
 
     let task = task.unwrap();
     assert!(task.with.is_some());
-    assert!(task.and.is_some());
+    assert!(task.and.is_none());
 }
