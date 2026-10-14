@@ -339,64 +339,70 @@
     },
     "apt": {
       "description": "Manage packages with apt-get/dpkg (Debian/Ubuntu). Supports specific versions or local .deb paths, and auto-refreshes the apt cache.",
+      "notes": [ "package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages or refreshing the apt cache. with.items remains iteration and can run several separate batches." ],
       "parameters": [
-        { "name": "package", "type": "string", "required": true, "description": "Package name, or a local .deb file path." },
+        { "name": "package", "type": "string or list", "required": true, "description": "Package name, or a local .deb file path." },
         { "name": "version", "type": "string", "required": false, "description": "Pin a specific version (apt-get install name=version)." },
         { "name": "update", "type": "bool", "required": false, "description": "Force an apt-get update before acting." },
         { "name": "upgrade", "type": "bool", "required": false, "description": "Treat as an upgrade operation (--only-upgrade)." },
         { "name": "remove", "type": "bool", "required": false, "description": "Remove the package instead of installing." }
       ],
-      "examples": [ "- !apt\n  package: nginx\n  version: 1.18.0-0ubuntu1\n  update: true" ]
+      "examples": [ "- !apt\n  package: [git, curl]", "- !apt\n  package: nginx\n  version: 1.18.0-0ubuntu1\n  update: true" ]
     },
     "dnf": {
       "description": "Manage packages with yum or dnf (RHEL-family). Identical to !yum — both map to YumDnfTask; the backend is auto-detected per host (prefers /usr/bin/dnf, falls back to /usr/bin/yum).",
+      "notes": [ "package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches." ],
       "parameters": [
-        { "name": "package", "type": "string", "required": true, "description": "Package name." },
+        { "name": "package", "type": "string or list", "required": true, "description": "Package name." },
         { "name": "version", "type": "string", "required": false, "description": "Pin a specific version (appended as name-version)." },
         { "name": "update", "type": "bool", "required": false, "description": "Run update semantics (compares against repoquery candidate)." },
         { "name": "remove", "type": "bool", "required": false, "description": "Remove the package." }
       ],
-      "examples": [ "- !dnf\n  package: httpd\n  update: true" ]
+      "examples": [ "- !dnf\n  package: [git, curl]", "- !dnf\n  package: httpd\n  update: true" ]
     },
     "homebrew": {
       "description": "Manage packages with Homebrew (brew) on macOS/Linuxbrew. Locates the brew binary automatically (including /opt/homebrew/bin/brew).",
+      "notes": [ "package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches." ],
       "parameters": [
-        { "name": "package", "type": "string", "required": true, "description": "Package (formula) name." },
+        { "name": "package", "type": "string or list", "required": true, "description": "Package (formula) name." },
         { "name": "version", "type": "string", "required": false, "description": "Install a specific major version via name@version." },
         { "name": "update", "type": "bool", "required": false, "description": "Use brew upgrade semantics." },
         { "name": "remove", "type": "bool", "required": false, "description": "Uninstall the package (brew uninstall)." }
       ],
-      "examples": [ "- !homebrew\n  package: ripgrep\n  update: true" ]
+      "examples": [ "- !homebrew\n  package: [git, curl]", "- !homebrew\n  package: ripgrep\n  update: true" ]
     },
     "pacman": {
       "description": "Manage packages with pacman (Arch Linux). Accepts repo/name syntax (strips the repo prefix for queries/removal).",
+      "notes": [ "package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches." ],
       "parameters": [
-        { "name": "package", "type": "string", "required": true, "description": "Package name (optionally repo/name)." },
+        { "name": "package", "type": "string or list", "required": true, "description": "Package name (optionally repo/name)." },
         { "name": "version", "type": "string", "required": false, "description": "Pin a version (appended as -version)." },
         { "name": "update", "type": "bool", "required": false, "description": "Run pacman -Syu upgrade semantics." },
         { "name": "remove", "type": "bool", "required": false, "description": "Remove the package (pacman -R)." }
       ],
-      "examples": [ "- !pacman\n  package: curl\n  update: true" ]
+      "examples": [ "- !pacman\n  package: [git, curl]", "- !pacman\n  package: curl\n  update: true" ]
     },
     "yum": {
       "description": "Manage packages with yum or dnf (RHEL-family). Same module as !dnf — the backend is auto-detected per host (prefers /usr/bin/dnf, falls back to /usr/bin/yum).",
+      "notes": [ "package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches." ],
       "parameters": [
-        { "name": "package", "type": "string", "required": true, "description": "Package name." },
+        { "name": "package", "type": "string or list", "required": true, "description": "Package name." },
         { "name": "version", "type": "string", "required": false, "description": "Pin a specific version (appended as name-version)." },
         { "name": "update", "type": "bool", "required": false, "description": "Run update semantics (compares against repoquery candidate)." },
         { "name": "remove", "type": "bool", "required": false, "description": "Remove the package." }
       ],
-      "examples": [ "- !yum\n  package: httpd\n  update: true" ]
+      "examples": [ "- !yum\n  package: [git, curl]", "- !yum\n  package: httpd\n  update: true" ]
     },
     "zypper": {
       "description": "Manage packages with zypper (openSUSE/SUSE). Uses zypper search --details for version comparison.",
+      "notes": [ "package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches." ],
       "parameters": [
-        { "name": "package", "type": "string", "required": true, "description": "Package name." },
+        { "name": "package", "type": "string or list", "required": true, "description": "Package name." },
         { "name": "version", "type": "string", "required": false, "description": "Pin a specific version (name=version)." },
         { "name": "update", "type": "bool", "required": false, "description": "Use zypper update semantics." },
         { "name": "remove", "type": "bool", "required": false, "description": "Remove the package (zypper remove)." }
       ],
-      "examples": [ "- !zypper\n  package: curl\n  version: 8.3.0\n  update: true" ]
+      "examples": [ "- !zypper\n  package: [git, curl]", "- !zypper\n  package: curl\n  version: 8.3.0\n  update: true" ]
     },
     "proxmox_lxc": {
       "description": "Manage a Proxmox LXC container via the API (create/remove). Self-signed certs accepted. Idempotent on state.",

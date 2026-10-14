@@ -71,11 +71,19 @@ pub trait PackageManagementModule {
         handle: &Arc<TaskHandle>,
         request: &Arc<TaskRequest>,
     ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
-        let mut changes: Vec<Field> = Vec::new();
-
         self.initial_setup(handle, request)?;
 
         let package_details = self.get_local_version(handle, request)?;
+        self.query_installed_package(handle, request, package_details)
+    }
+
+    fn query_installed_package(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        package_details: Option<PackageDetails>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        let mut changes: Vec<Field> = Vec::new();
 
         if let Some(package_details) = package_details {
             // package is installed

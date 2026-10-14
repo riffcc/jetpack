@@ -12,17 +12,26 @@ description: "Manage packages with apt-get/dpkg (Debian/Ubuntu). Supports specif
 
 Manage packages with apt-get/dpkg (Debian/Ubuntu). Supports specific versions or local .deb paths, and auto-refreshes the apt cache.
 
+## Notes
+
+- package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages or refreshing the apt cache. with.items remains iteration and can run several separate batches.
+
 ## Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `package` | string | yes | Package name, or a local .deb file path. |
+| `package` | string or list | yes | Package name, or a local .deb file path. |
 | `version` | string | no | Pin a specific version (apt-get install name=version). |
 | `update` | bool | no | Force an apt-get update before acting. |
 | `upgrade` | bool | no | Treat as an upgrade operation (--only-upgrade). |
 | `remove` | bool | no | Remove the package instead of installing. |
 
 ## Examples
+
+```yaml
+- !apt
+  package: [git, curl]
+```
 
 ```yaml
 - !apt

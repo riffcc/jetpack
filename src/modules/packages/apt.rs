@@ -22,12 +22,193 @@ use std::sync::Arc;
 
 const MODULE: &str = "apt";
 
+impl super::batch::BatchedPackage for AptAction {
+    fn package_name(&self) -> &str {
+        &self.package
+    }
+    fn query_batch_change(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        installed: Option<PackageDetails>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        if self.upgrade
+            && !self.remove
+            && let Some(installed) = &installed
+        {
+            let candidate = if self.is_local_deb() {
+                let command = format!("dpkg-deb -f {} Version", super::batch::quote(&self.package));
+                cmd_info(&handle.remote.run(request, &command, CheckRc::Checked)?)
+                    .1
+                    .trim()
+                    .to_owned()
+            } else {
+                let command = format!("apt-cache policy {}", super::batch::quote(&self.package));
+                let response = handle.remote.run(request, &command, CheckRc::Checked)?;
+                cmd_info(&response)
+                    .1
+                    .lines()
+                    .find_map(|line| {
+                        line.trim()
+                            .strip_prefix("Candidate:")
+                            .map(|version| version.trim().to_owned())
+                    })
+                    .ok_or_else(|| {
+                        handle
+                            .response
+                            .is_failed(request, "apt query omitted the candidate version")
+                    })?
+            };
+            if candidate.is_empty() || candidate == "(none)" {
+                return Err(handle
+                    .response
+                    .is_failed(request, "apt query returned no candidate version"));
+            }
+            return Ok(if installed.version == candidate {
+                handle.response.is_matched(request)
+            } else {
+                handle
+                    .response
+                    .needs_modification(request, &[Field::Version])
+            });
+        }
+        self.query_installed_package(handle, request, installed)
+    }
+
+    fn query_batch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        packages: &[Self],
+    ) -> Result<Vec<Option<PackageDetails>>, Arc<TaskResponse>> {
+        use super::batch::{details, query_output, quote};
+        let mut names = Vec::new();
+        for package in packages {
+            let name = if package.is_local_deb() {
+                let command = format!("dpkg-deb -f {} Package", quote(&package.package));
+                let response = handle.remote.run(request, &command, CheckRc::Checked)?;
+                cmd_info(&response).1.trim().to_owned()
+            } else {
+                package.package.clone()
+            };
+            names.push(name);
+        }
+        let args = names
+            .iter()
+            .map(|name| quote(name))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let (rc, out) = query_output(
+            handle,
+            request,
+            &format!(
+                "dpkg-query -W -f='${{binary:Package}}\\t${{Version}}\\t${{db:Status-Status}}\\n' -- {args}"
+            ),
+        )?;
+        let mut rows = std::collections::HashMap::new();
+        let mut seen = std::collections::HashSet::new();
+        for line in out.lines().filter(|line| !line.trim().is_empty()) {
+            let fields: Vec<_> = line.split('\t').collect();
+            if fields.len() == 3 {
+                if !matches!(
+                    fields[2],
+                    "not-installed"
+                        | "config-files"
+                        | "half-installed"
+                        | "unpacked"
+                        | "half-configured"
+                        | "triggers-awaited"
+                        | "triggers-pending"
+                        | "installed"
+                ) {
+                    return Err(handle.response.is_failed(
+                        request,
+                        "dpkg batch query returned an invalid package status",
+                    ));
+                }
+                for name in &names {
+                    if fields[0] == name
+                        || (!name.contains(':')
+                            && fields[0].split(':').next() == Some(name.as_str()))
+                    {
+                        seen.insert(name.clone());
+                        if fields[2] == "installed" {
+                            if fields[1].is_empty() {
+                                return Err(handle.response.is_failed(
+                                    request,
+                                    "dpkg batch query returned an empty installed version",
+                                ));
+                            }
+                            rows.insert(name.clone(), fields[1].into());
+                        }
+                    }
+                }
+            } else if !line.contains("no packages found matching") {
+                return Err(handle
+                    .response
+                    .is_failed(request, "unable to parse dpkg batch query output"));
+            }
+        }
+        if rc == 0 && names.iter().any(|name| !seen.contains(name)) {
+            return Err(handle
+                .response
+                .is_failed(request, "dpkg batch query omitted a requested package"));
+        }
+        Ok(details(&names, rows))
+    }
+
+    fn apply_batch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        packages: &[&Self],
+    ) -> Result<(), Arc<TaskResponse>> {
+        use super::batch::quote;
+        let mut targets = Vec::new();
+        for package in packages {
+            let target = if request.request_type == TaskRequestType::Remove
+                && package.is_local_deb()
+            {
+                let command = format!("dpkg-deb -f {} Package", quote(&package.package));
+                cmd_info(&handle.remote.run(request, &command, CheckRc::Checked)?)
+                    .1
+                    .trim()
+                    .to_owned()
+            } else if package.is_local_deb() || request.request_type == TaskRequestType::Remove {
+                package.package.clone()
+            } else {
+                match &package.version {
+                    Some(version) => format!("{}={version}", package.package),
+                    None => package.package.clone(),
+                }
+            };
+            targets.push(quote(&target));
+        }
+        let verb = if request.request_type == TaskRequestType::Remove {
+            "remove"
+        } else {
+            "install"
+        };
+        let upgrade = if request.request_type == TaskRequestType::Modify {
+            "--only-upgrade "
+        } else {
+            ""
+        };
+        let command = format!(
+            "DEBIAN_FRONTEND=noninteractive apt-get {verb} -y -qq {upgrade}-- {}",
+            targets.join(" ")
+        );
+        handle.remote.run(request, &command, CheckRc::Checked)?;
+        Ok(())
+    }
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[derive(Default)]
 pub struct AptTask {
     pub name: Option<String>,
-    pub package: String,
+    pub package: ResourceInput,
     pub version: Option<String>,
     pub update: Option<String>,
     pub upgrade: Option<String>,
@@ -36,6 +217,7 @@ pub struct AptTask {
     pub and: Option<PostLogicInput>,
 }
 
+#[derive(Clone)]
 struct AptAction {
     pub package: String,
     pub version: Option<String>,
@@ -94,39 +276,47 @@ impl IsTask for AptTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        let package_names = self
+            .package
+            .template_no_spaces(handle, request, tm, "package")?;
+        let prototype = AptAction {
+            package: String::new(),
+            version: handle.template.string_option_no_spaces(
+                request,
+                tm,
+                &String::from("version"),
+                &self.version,
+            )?,
+            update: handle.template.boolean_option_default_false(
+                request,
+                tm,
+                &String::from("update"),
+                &self.update,
+            )?,
+            upgrade: handle.template.boolean_option_default_false(
+                request,
+                tm,
+                &String::from("upgrade"),
+                &self.upgrade,
+            )?,
+            remove: handle.template.boolean_option_default_false(
+                request,
+                tm,
+                &String::from("remove"),
+                &self.remove,
+            )?,
+        };
         Ok(EvaluatedTask {
-            action: Arc::new(AptAction {
-                package: handle.template.string_no_spaces(
-                    request,
-                    tm,
-                    &String::from("package"),
-                    &self.package,
-                )?,
-                version: handle.template.string_option_no_spaces(
-                    request,
-                    tm,
-                    &String::from("version"),
-                    &self.version,
-                )?,
-                update: handle.template.boolean_option_default_false(
-                    request,
-                    tm,
-                    &String::from("update"),
-                    &self.update,
-                )?,
-                upgrade: handle.template.boolean_option_default_false(
-                    request,
-                    tm,
-                    &String::from("upgrade"),
-                    &self.upgrade,
-                )?,
-                remove: handle.template.boolean_option_default_false(
-                    request,
-                    tm,
-                    &String::from("remove"),
-                    &self.remove,
-                )?,
-            }),
+            action: super::batch::action(
+                package_names
+                    .into_iter()
+                    .map(|package| AptAction {
+                        package,
+                        ..prototype.clone()
+                    })
+                    .collect(),
+                self.package.is_list(),
+            ),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
             and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
         })
