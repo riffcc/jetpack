@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_echo_task_basic() {
     let task = EchoTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test Echo".to_string()),
         msg: "Hello, World!".to_string(),
         with: None,
@@ -18,6 +21,9 @@ fn test_echo_task_basic() {
 #[test]
 fn test_echo_task_with_template() {
     let task = EchoTask {
+        delay: None,
+        retry: None,
+
         name: None,
         msg: "Value is: {{ test_var }}".to_string(),
         with: None,

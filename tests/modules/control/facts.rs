@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_facts_task_basic() {
     let task = FactsTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test Facts".to_string()),
         facter: Some("true".to_string()),
         ohai: Some("false".to_string()),
@@ -19,6 +22,9 @@ fn test_facts_task_basic() {
 #[test]
 fn test_facts_task_defaults() {
     let task = FactsTask {
+        delay: None,
+        retry: None,
+
         name: None,
         facter: None,
         ohai: None,
@@ -70,8 +76,7 @@ fn test_facts_task_with_logic() {
 facter: "true"
 with:
   condition: "{{ gather_external_facts }}"
-and:
-  delay: "2"
+delay: 2
 "#;
 
     let task: Result<FactsTask, _> = serde_yaml::from_str(yaml);
@@ -79,5 +84,5 @@ and:
 
     let task = task.unwrap();
     assert!(task.with.is_some());
-    assert!(task.and.is_some());
+    assert!(task.and.is_none());
 }

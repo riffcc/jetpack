@@ -84,6 +84,9 @@ mod tests {
 
     fn make_wait_task(name: &str, mode: Option<&str>) -> Task {
         Task::Wait_For_Others(WaitForOthersTask {
+            delay: None,
+            retry: None,
+
             name: Some(name.to_string()),
             mode: mode.map(|s| s.to_string()),
             with: None,
@@ -94,6 +97,9 @@ mod tests {
     fn make_echo_task() -> Task {
         use crate::modules::control::echo::EchoTask;
         Task::Echo(EchoTask {
+            delay: None,
+            retry: None,
+
             name: Some("test echo".into()),
             msg: "hello".into(),
             with: None,

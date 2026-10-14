@@ -28,6 +28,8 @@ pub struct SetTask {
     pub name: Option<String>,
     pub vars: Option<serde_yaml::Mapping>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 struct SetAction {
@@ -56,7 +58,14 @@ impl IsTask for SetTask {
                 vars: self.vars.clone(), /* templating will happen below */
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

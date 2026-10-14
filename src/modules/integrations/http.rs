@@ -33,6 +33,8 @@ pub struct HttpTask {
     pub timeout: Option<String>,
     pub verify_tls: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -221,7 +223,14 @@ impl IsTask for HttpTask {
                     .get_complete_blended_variables(&handle.host, BlendTarget::NotTemplateModule),
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

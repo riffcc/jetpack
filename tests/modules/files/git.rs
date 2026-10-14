@@ -5,6 +5,9 @@ use std::collections::HashMap;
 #[test]
 fn test_git_task_basic() {
     let task = GitTask {
+        delay: None,
+        retry: None,
+
         name: Some("Clone repository".to_string()),
         repo: "https://github.com/example/repo.git".to_string(),
         path: "/opt/myapp".to_string(),
@@ -27,6 +30,9 @@ fn test_git_task_basic() {
 #[test]
 fn test_git_task_with_branch() {
     let task = GitTask {
+        delay: None,
+        retry: None,
+
         name: None,
         repo: "git@github.com:example/private-repo.git".to_string(),
         path: "/var/lib/app".to_string(),
@@ -52,6 +58,9 @@ fn test_git_task_with_ssh_options() {
     ssh_opts.insert("Port".to_string(), "2222".to_string());
 
     let task = GitTask {
+        delay: None,
+        retry: None,
+
         name: Some("Clone with SSH options".to_string()),
         repo: "git@gitlab.com:company/project.git".to_string(),
         path: "/opt/project".to_string(),
@@ -82,6 +91,9 @@ fn test_git_task_with_attributes() {
     };
 
     let task = GitTask {
+        delay: None,
+        retry: None,
+
         name: None,
         repo: "https://github.com/public/repo.git".to_string(),
         path: "/srv/app".to_string(),

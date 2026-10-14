@@ -45,6 +45,7 @@ pub struct WaitForHttpTask {
     #[serde(default = "default_verify_tls")]
     pub verify_tls: bool,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -110,7 +111,14 @@ impl IsTask for WaitForHttpTask {
                 verify_tls: self.verify_tls,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }
