@@ -206,7 +206,7 @@ pub(crate) fn install(
         true,
     )?;
     // An unprivileged connection uploads into its own private directory; a
-    // privileged command copies that into the same-filesystem candidate.
+    // task-side writer inherits an open descriptor to that private upload.
     let mut upload = None;
     let result = (|| {
         let directory = checked(
@@ -218,12 +218,16 @@ pub(crate) fn install(
         upload = Some(directory.clone());
         let source = format!("{directory}/data");
         handle.remote.upload_private(request, content, &source)?;
-        checked(
-            handle,
-            request,
-            &format!("cat {} > {}", quote(&source), quote(&candidate)),
-            true,
-        )?;
+        let (rc, _) = handle
+            .remote
+            .stage_private_upload(request, &source, &candidate)?;
+        if rc != 0 {
+            return Err(fail(
+                handle,
+                request,
+                "candidate transfer failed (output withheld)",
+            ));
+        }
         if let Some(validator) = validator {
             let command = format!("{} >/dev/null 2>&1", validator.command(&candidate));
             let (rc, _) = handle.remote.file_command(request, &command, true)?;
@@ -340,6 +344,109 @@ pub(crate) mod tests {
                 .to_string_lossy()
                 .starts_with(".jetpack-candidate")
         }));
+    }
+    #[test]
+    fn private_upload_handoff_opens_source_before_task_context_and_keeps_it_private() {
+        let _lock = crate::test_support::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("connection's upload");
+        let hidden = root.path().join("hidden upload");
+        let cwd = root.path().join("task's directory");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::create_dir(&cwd).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let source = directory.join("data");
+        let candidate = cwd.join("candidate's config");
+        let invoked = root.path().join("wrapper-invoked");
+        let content = "\nprivate configuration 🦀\n\n";
+        std::fs::write(&source, content).unwrap();
+        std::fs::write(&candidate, "original").unwrap();
+        // Model a pathname that the task cannot access: once the identity
+        // wrapper starts, the original upload path no longer exists. Only the
+        // descriptor opened by the connection shell can deliver these bytes.
+        let wrapper = script(
+            root.path(),
+            "identity-wrapper",
+            &format!(
+                "test \"$PWD\" != {}\ntest -f /dev/fd/0\ntouch {}\nmv {} {}\ntrap {} EXIT\n\"$@\"",
+                quote(cwd.to_str().unwrap()),
+                quote(invoked.to_str().unwrap()),
+                quote(directory.to_str().unwrap()),
+                quote(hidden.to_str().unwrap()),
+                quote(&format!(
+                    "mv {} {}",
+                    quote(hidden.to_str().unwrap()),
+                    quote(directory.to_str().unwrap())
+                ))
+            ),
+        );
+        let request = TaskRequest::query(&crate::tasks::request::SudoDetails {
+            user: Some("service".into()),
+            template: format!("{} {{{{ jet_command }}}}", quote(&wrapper)),
+        })
+        .with_chdir(cwd.to_str());
+        let handle = local_handle();
+        let stage = |request: &Arc<TaskRequest>, source: &Path, candidate: &Path| {
+            handle
+                .remote
+                .stage_private_upload(
+                    request,
+                    source.to_str().unwrap(),
+                    candidate.to_str().unwrap(),
+                )
+                .unwrap()
+                .0
+        };
+        assert_eq!(stage(&request, &source, &candidate), 0);
+        assert_eq!(std::fs::read_to_string(&candidate).unwrap(), content);
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), content);
+        assert_eq!(std::fs::metadata(&directory).unwrap().mode() & 0o777, 0o700);
+        assert!(invoked.exists());
+        std::fs::remove_file(&invoked).unwrap();
+        // Opening the source fails before the wrapper or candidate is touched.
+        assert_ne!(stage(&request, &directory.join("missing"), &candidate), 0);
+        assert!(!invoked.exists());
+        assert_eq!(std::fs::read_to_string(&candidate).unwrap(), content);
+        // Directory and writer failures must propagate without promoting data.
+        let bad_cwd = request
+            .clone()
+            .with_chdir(root.path().join("missing").to_str());
+        assert_ne!(stage(&bad_cwd, &source, &candidate), 0);
+        assert_eq!(std::fs::read_to_string(&candidate).unwrap(), content);
+        assert_ne!(stage(&request, &source, &cwd), 0);
+        assert!(source.exists());
+    }
+
+    #[test]
+    fn connection_upload_setup_and_cleanup_ignore_task_directory_and_privileges() {
+        let _lock = crate::test_support::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let handle = local_handle();
+        let request = TaskRequest::query(&crate::tasks::request::SudoDetails {
+            user: Some("service".into()),
+            template: "false {{ jet_command }}".into(),
+        })
+        .with_chdir(root.path().join("task-only-missing-directory").to_str());
+        let directory = root.path().join("private upload");
+        let directory = quote(directory.to_str().unwrap());
+        let (rc, _) = handle
+            .remote
+            .file_command(&request, &format!("umask 077; mkdir {directory}"), false)
+            .unwrap();
+        assert_eq!(rc, 0);
+        let (rc, _) = handle
+            .remote
+            .file_command(&request, &format!("rmdir {directory}"), false)
+            .unwrap();
+        assert_eq!(rc, 0);
+        assert_ne!(
+            handle
+                .remote
+                .file_command(&request, "true", true)
+                .unwrap()
+                .0,
+            0
+        );
     }
     #[test]
     fn validator_placeholder_is_exactly_one_argv_argument() {

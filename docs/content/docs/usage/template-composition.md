@@ -69,7 +69,11 @@ ancestor directories follow the target's normal path semantics. Relative
 `dest` paths retain target-side directory semantics. Parent directories must
 already exist. Candidates are promoted by a same-filesystem atomic rename and
 cleaned up after success or failure while the connection remains available.
-A private upload directory is removed as well.
+A private upload directory is removed as well. Upload setup and cleanup run as
+the connection user without the task's `chdir`. The connection user opens the
+upload before switching to the task user, which writes the candidate through
+the inherited input descriptor. This supports a different non-root task user
+without making the private upload directory readable to that account.
 
 Jetpack compares the source contents and file metadata again before promotion
 and refuses an observed concurrent change. This is optimistic detection, not a
