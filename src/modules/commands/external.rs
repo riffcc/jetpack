@@ -51,6 +51,14 @@ struct ExternalAction {
 }
 
 impl IsTask for ExternalTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(self.save.as_deref())
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Run module", &self.use_module, "Run external module"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

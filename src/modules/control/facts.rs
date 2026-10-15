@@ -40,6 +40,10 @@ struct FactsAction {
 }
 
 impl IsTask for FactsTask {
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some("Gather facts".into())
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

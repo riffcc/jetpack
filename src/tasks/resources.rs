@@ -80,3 +80,9 @@ impl ResourceInput {
             .collect()
     }
 }
+
+/// The identity/order rule used by native resource batching and its labels.
+pub fn retain_unique_resources<T>(resources: &mut Vec<T>, name: impl Fn(&T) -> String) {
+    let mut seen = std::collections::HashSet::new();
+    resources.retain(|resource| seen.insert(name(resource)));
+}

@@ -78,6 +78,10 @@ struct ProxmoxNodeAction {
 }
 
 impl IsTask for ProxmoxNodeTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(self.save_to.as_deref())
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

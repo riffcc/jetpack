@@ -54,6 +54,14 @@ struct GitAction {
 }
 
 impl IsTask for GitTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Checkout", &self.path, "Checkout repository"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

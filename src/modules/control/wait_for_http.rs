@@ -68,6 +68,17 @@ struct WaitForHttpAction {
 }
 
 impl IsTask for WaitForHttpTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(format!(
+            "Wait for {}",
+            crate::tasks::naming::http_label(Some("GET"), &self.url)
+        ))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

@@ -47,6 +47,14 @@ struct CopyAction {
 }
 
 impl IsTask for CopyTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Copy file to", &self.dest, "Copy files"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

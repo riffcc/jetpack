@@ -20,6 +20,7 @@ pub mod common;
 pub mod fields;
 pub mod files;
 pub mod logic;
+pub mod naming;
 pub mod request;
 pub mod resources;
 pub mod response;
@@ -33,6 +34,7 @@ pub use crate::tasks::files::{FileAttributesEvaluated, FileAttributesInput};
 pub use crate::tasks::logic::{
     PostLogicEvaluated, PostLogicInput, PreLogicEvaluated, PreLogicInput,
 };
+pub use crate::tasks::naming::NamingContext;
 pub use crate::tasks::request::{TaskRequest, TaskRequestType};
 pub use crate::tasks::resources::ResourceInput;
 pub use crate::tasks::response::{TaskResponse, TaskStatus};

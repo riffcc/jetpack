@@ -3,7 +3,7 @@
 
 use super::common::{PackageDetails, PackageManagementModule};
 use crate::tasks::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub trait BatchedPackage: PackageManagementModule + IsAction + Sized + 'static {
@@ -39,8 +39,9 @@ pub fn action<M: BatchedPackage>(mut packages: Vec<M>, list: bool) -> Arc<dyn Is
     if !list {
         return Arc::new(packages.remove(0));
     }
-    let mut seen = HashSet::new();
-    packages.retain(|package| seen.insert(package.package_name().to_owned()));
+    crate::tasks::resources::retain_unique_resources(&mut packages, |package| {
+        package.package_name().to_owned()
+    });
     Arc::new(PackageBatch {
         packages,
         selection: Mutex::new(None),

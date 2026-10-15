@@ -5,6 +5,8 @@ weight: 3
 
 Jetpack runs a playbook against a target: either the local machine or remote hosts over SSH.
 
+Tasks receive [automatic names](task-names/) from their operations and resources. Add an optional `name:` to explain a task's purpose.
+
 ## Local execution
 
 Run a playbook against the machine you're on:
