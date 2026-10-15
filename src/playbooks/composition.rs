@@ -132,6 +132,45 @@ impl HelperDef for IncludeDir {
     }
 }
 
+/// Use Handlebars' AST to distinguish helper calls from text, comments,
+/// escaped expressions, and similarly named variables. Name-only expressions
+/// remain ordinary variables for backwards compatibility.
+fn has_includes(template: &handlebars::Template) -> bool {
+    use handlebars::template::{Parameter, TemplateElement};
+    fn parameter(p: &Parameter) -> bool {
+        match p {
+            Parameter::Subexpression(s) => element(&s.element),
+            _ => false,
+        }
+    }
+    fn element(e: &TemplateElement) -> bool {
+        match e {
+            TemplateElement::Expression(h)
+            | TemplateElement::HtmlExpression(h)
+            | TemplateElement::HelperBlock(h) => {
+                (h.name.as_name() == Some("include_dir")
+                    && (h.block || !h.params.is_empty() || !h.hash.is_empty()))
+                    || parameter(&h.name)
+                    || h.params.iter().any(parameter)
+                    || h.hash.values().any(parameter)
+                    || h.template.as_ref().is_some_and(has_includes)
+                    || h.inverse.as_ref().is_some_and(has_includes)
+            }
+            TemplateElement::DecoratorExpression(d)
+            | TemplateElement::DecoratorBlock(d)
+            | TemplateElement::PartialExpression(d)
+            | TemplateElement::PartialBlock(d) => {
+                parameter(&d.name)
+                    || d.params.iter().any(parameter)
+                    || d.hash.values().any(parameter)
+                    || d.template.as_ref().is_some_and(has_includes)
+            }
+            _ => false,
+        }
+    }
+    template.elements.iter().any(element)
+}
+
 /// Explicit sources outside the active playbook/role allow only their parent
 /// directory. Otherwise that active source directory is the permitted root.
 pub(crate) fn render(
@@ -162,7 +201,9 @@ pub(crate) fn render(
         std::fs::read_to_string(&source).map_err(|_| "cannot read template source".to_string())?;
     // Preserve recursive variable expansion for existing standalone templates.
     // Composed files use one render pass so fragment text is never interpreted twice.
-    if !text.contains("include_dir") {
+    let parsed = handlebars::Template::compile(&text)
+        .map_err(|_| format!("invalid template in {}", source.display()))?;
+    if !has_includes(&parsed) {
         return super::templar::Templar::new()
             .render(&text, data.clone(), super::templar::TemplateMode::Strict)
             .map_err(|_| format!("template evaluation failed in {}", source.display()));
@@ -293,6 +334,86 @@ mod tests {
             render(&main, root.path(), &Default::default())
                 .unwrap_err()
                 .contains("unsupported")
+        );
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    #[test]
+    fn mentions_and_similarly_named_variables_keep_recursive_expansion() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let data=serde_yaml::from_str("hostname: resolved-host\nvalue: '{{ hostname }}'\ninclude_directory: '{{ hostname }}'\ninclude_dir: '{{ hostname }}'").unwrap();
+        for (text, expected) in [
+            ("value={{ value }}\n", "value=resolved-host\n"),
+            (
+                "# include_dir documentation\nvalue={{ value }}\n",
+                "# include_dir documentation\nvalue=resolved-host\n",
+            ),
+            (
+                "{{! include_dir documentation }}\nvalue={{ value }}\n",
+                "value=resolved-host\n",
+            ),
+            (
+                "{{!-- include_dir documentation --}}\nvalue={{ value }}\n",
+                "value=resolved-host\n",
+            ),
+            ("value={{ include_directory }}\n", "value=resolved-host\n"),
+            ("value={{ include_dir }}\n", "value=resolved-host\n"),
+            (
+                "{{#if true}}# include_dir documentation\n{{ value }}{{else}}{{ include_directory }}{{/if}}",
+                "# include_dir documentation\nresolved-host",
+            ),
+        ] {
+            std::fs::write(&source, text).unwrap();
+            assert_eq!(
+                render(&source, root.path(), &data).unwrap(),
+                expected,
+                "{text}"
+            );
+        }
+    }
+    #[test]
+    fn actual_calls_in_blocks_and_subexpressions_select_composition_but_escaped_text_does_not() {
+        for source in [
+            "{{include_dir \"parts\"}}",
+            "{{{include_dir \"parts\"}}}",
+            "{{#if true}}{{include_dir \"parts\"}}{{/if}}",
+            "{{#if false}}x{{else}}{{include_dir \"parts\"}}{{/if}}",
+            "{{#if (eq 1 1)}}{{include_dir \"parts\"}}{{/if}}",
+            "{{concat (include_dir \"parts\") \"suffix\"}}",
+        ] {
+            assert!(
+                has_includes(&handlebars::Template::compile(source).unwrap()),
+                "{source}"
+            );
+        }
+        for source in [
+            "include_dir",
+            "{{! include_dir \"parts\"}}",
+            r#"\{{include_dir "parts"}}"#,
+            "{{ include_dir }}",
+            "{{ include_directory }}",
+        ] {
+            assert!(
+                !has_includes(&handlebars::Template::compile(source).unwrap()),
+                "{source}"
+            );
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("parts")).unwrap();
+        std::fs::write(root.path().join("parts/one"), "{{ literal }}").unwrap();
+        std::fs::write(
+            root.path().join("source"),
+            "{{#if true}}{{include_dir \"parts\"}}{{/if}}",
+        )
+        .unwrap();
+        let data = serde_yaml::from_str("literal: '{{ must_stay_literal }}'").unwrap();
+        assert_eq!(
+            render(&root.path().join("source"), root.path(), &data).unwrap(),
+            "{{ must_stay_literal }}\n"
         );
     }
 }
