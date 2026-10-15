@@ -259,6 +259,19 @@
       ],
       "examples": [ "- !template\n  src: nginx.conf.j2\n  dest: /etc/nginx/nginx.conf" ]
     },
+    "xml": {
+      "description": "Edit explicitly selected XML settings without reserializing unrelated configuration. Install prepared edits atomically through the execution-target connection.",
+      "parameters": [
+        { "name": "path", "type": "path", "required": true, "description": "Absolute execution-target UTF-8 XML file path; destination symlinks are rejected." },
+        { "name": "set", "type": "map", "required": false, "description": "Literal absolute element selectors mapped to typed scalar values or explicit children mappings of element names to scalar lists." },
+        { "name": "remove", "type": "list", "required": false, "description": "Literal absolute selectors to remove; absent elements are unchanged. Null is not deletion." },
+        { "name": "create", "type": "bool", "required": false, "description": "Explicitly permit missing files, ancestors, selected elements, and additional repeated children. Default false." },
+        { "name": "namespaces", "type": "map", "required": false, "description": "Explicit prefix-to-URI bindings for selectors and newly created elements. Unprefixed names select no namespace." },
+        { "name": "attributes", "type": "map", "required": false, "description": "Explicit owner/group/mode overrides; existing ownership and permissions otherwise remain intact." }
+      ],
+      "notes": [ "Set or remove is required. Selectors support literal ASCII element paths and namespace prefixes, not general XPath. Ambiguous or overlapping selectors fail. Scalar values preserve whole-variable template types; explicit children lists control repeated elements in order while preserving unrelated children. All operations are prepared before any write. Plan never stages or writes; unchanged apply never replaces or notifies. All DTDs and external entity resolution are disabled. See usage/xml-settings for creation, namespace, preservation, and optimistic concurrency details." ],
+      "examples": [ "- !xml\n  path: /etc/example/network.xml\n  create: true\n  set:\n    /NetworkConfiguration/EnableHttps: false\n    /NetworkConfiguration/KnownProxies:\n      children:\n        string: '{{ trusted_proxy_addresses }}'\n  and:\n    notify: restart application" ]
+    },
     "unpack": {
       "description": "Extract an archive (tar.gz/tgz/tar.bz2/tar.xz/tar/zip, or single-file gz/bz2/xz) on the target into a destination directory. Source archive must exist on the target.",
       "parameters": [

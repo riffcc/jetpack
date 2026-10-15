@@ -62,6 +62,7 @@ This section is **auto-generated** from the source (`src/registry/list.rs` and `
 | [`!stat`](modules/stat) | Stat a remote path and save the result (exists, is_dir, mode, owner, group) into a host variable for later use. Read-only; never modifies the target. |
 | [`!template`](modules/template) | Render a local template, optionally composing sorted include_dir fragments, and install it atomically on the execution target. Preserve existing file metadata unless explicitly overridden. |
 | [`!unpack`](modules/unpack) | Extract an archive (tar.gz/tgz/tar.bz2/tar.xz/tar/zip, or single-file gz/bz2/xz) on the target into a destination directory. Source archive must exist on the target. |
+| [`!xml`](modules/xml) | Edit explicitly selected XML settings without reserializing unrelated configuration. Install prepared edits atomically through the execution-target connection. |
 
 ### integrations
 

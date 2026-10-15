@@ -58,6 +58,7 @@ use crate::modules::files::r#move::MoveTask;
 use crate::modules::files::stat::StatTask;
 use crate::modules::files::template::TemplateTask;
 use crate::modules::files::unpack::UnpackTask;
+use crate::modules::files::xml::XmlTask;
 
 // integrations
 use crate::modules::integrations::github_release::GithubReleaseTask;
@@ -123,6 +124,7 @@ pub enum Task {
     Wait_For_Host(WaitForHostTask),
     Wait_For_Http(WaitForHttpTask),
     Wait_For_Others(WaitForOthersTask),
+    Xml(XmlTask),
     Yum(YumDnfTask),
     Zypper(ZypperTask),
 }
@@ -162,6 +164,7 @@ impl Task {
             Task::Shell(x) => x.get_module(),
             Task::Stat(x) => x.get_module(),
             Task::Template(x) => x.get_module(),
+            Task::Xml(x) => x.get_module(),
             Task::Unpack(x) => x.get_module(),
             Task::User(x) => x.get_module(),
             Task::Wait_For_Host(x) => x.get_module(),
@@ -206,6 +209,7 @@ impl Task {
             Task::Shell(x) => x.get_name(),
             Task::Stat(x) => x.get_name(),
             Task::Template(x) => x.get_name(),
+            Task::Xml(x) => x.get_name(),
             Task::Unpack(x) => x.get_name(),
             Task::User(x) => x.get_name(),
             Task::Wait_For_Host(x) => x.get_name(),
@@ -250,6 +254,7 @@ impl Task {
             Task::Shell(x) => x.get_with(),
             Task::Stat(x) => x.get_with(),
             Task::Template(x) => x.get_with(),
+            Task::Xml(x) => x.get_with(),
             Task::Unpack(x) => x.get_with(),
             Task::User(x) => x.get_with(),
             Task::Wait_For_Host(x) => x.get_with(),
@@ -299,6 +304,7 @@ impl Task {
             Task::Shell(x) => x.evaluate(handle, request, tm),
             Task::Stat(x) => x.evaluate(handle, request, tm),
             Task::Template(x) => x.evaluate(handle, request, tm),
+            Task::Xml(x) => x.evaluate(handle, request, tm),
             Task::Unpack(x) => x.evaluate(handle, request, tm),
             Task::User(x) => x.evaluate(handle, request, tm),
             Task::Wait_For_Host(x) => x.evaluate(handle, request, tm),
@@ -356,6 +362,7 @@ impl Task {
             Task::Shell(x) => x.generated_name(&context),
             Task::Stat(x) => x.generated_name(&context),
             Task::Template(x) => x.generated_name(&context),
+            Task::Xml(x) => x.generated_name(&context),
             Task::Unpack(x) => x.generated_name(&context),
             Task::User(x) => x.generated_name(&context),
             Task::Wait_For_Host(x) => x.generated_name(&context),
@@ -401,6 +408,7 @@ impl Task {
             Task::Shell(x) => x.name_variable_writes(),
             Task::Stat(x) => x.name_variable_writes(),
             Task::Template(x) => x.name_variable_writes(),
+            Task::Xml(x) => x.name_variable_writes(),
             Task::Unpack(x) => x.name_variable_writes(),
             Task::User(x) => x.name_variable_writes(),
             Task::Wait_For_Host(x) => x.name_variable_writes(),
@@ -455,7 +463,8 @@ impl Task {
             | Task::Move(_)
             | Task::Stat(_)
             | Task::Template(_)
-            | Task::Unpack(_) => "files",
+            | Task::Unpack(_)
+            | Task::Xml(_) => "files",
             Task::Github_Release(_) | Task::Http(_) => "integrations",
             Task::Instantiate(_) => "inventory",
             Task::Proxmox_Lxc(_) | Task::Proxmox_Migrate(_) | Task::Proxmox_Node(_) => "proxmox",
