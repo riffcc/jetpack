@@ -349,7 +349,7 @@ impl PlaybookContext {
     }
 
     pub fn set_task(&mut self, task: &crate::registry::list::Task) {
-        self.task = Some(format!("{:?}", task));
+        self.task = Some(task.get_display_name());
     }
 
     pub fn increment_task_count(&mut self) {

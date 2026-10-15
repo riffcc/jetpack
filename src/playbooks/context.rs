@@ -50,6 +50,8 @@ pub struct PlaybookContext {
 
     pub task_count: usize,
     pub task: Option<String>,
+    /// Display-only snapshot for multi-batch plays; never used for execution.
+    pub naming_variables: Option<serde_yaml::Mapping>,
 
     seen_hosts: HashMap<String, Arc<RwLock<Host>>>,
     targetted_hosts: HashMap<String, Arc<RwLock<Host>>>,
@@ -97,6 +99,7 @@ impl PlaybookContext {
             play: None,
             role: None,
             task: None,
+            naming_variables: None,
             play_count: 0,
             play_index: 0,
             role_count: 0,
@@ -208,6 +211,7 @@ impl PlaybookContext {
 
     pub fn set_play(&mut self, play: &Play) {
         self.play = Some(play.name.clone());
+        self.naming_variables = None;
         self.play_count += 1;
     }
 

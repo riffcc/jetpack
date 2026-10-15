@@ -37,6 +37,24 @@ struct SetAction {
 }
 
 impl IsTask for SetTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        match &self.vars {
+            None => crate::tasks::naming::NameVariableWrites::None,
+            Some(vars) => match vars
+                .keys()
+                .map(|key| key.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>()
+            {
+                Some(keys) => crate::tasks::naming::NameVariableWrites::Keys(keys),
+                None => crate::tasks::naming::NameVariableWrites::Unknown,
+            },
+        }
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some("Set variables".into())
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

@@ -54,6 +54,10 @@ pub struct WaitForOthersAction {
 }
 
 impl IsTask for WaitForOthersTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

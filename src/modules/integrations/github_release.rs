@@ -65,6 +65,18 @@ struct GithubAsset {
 }
 
 impl IsTask for GithubReleaseTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        if self.save.is_some() {
+            crate::tasks::naming::NameVariableWrites::Unknown
+        } else {
+            crate::tasks::naming::NameVariableWrites::saved(self.set.as_deref())
+        }
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Find release for", &self.repo, "Find GitHub release"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

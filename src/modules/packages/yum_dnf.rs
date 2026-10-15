@@ -156,6 +156,14 @@ struct YumDnfAction {
 }
 
 impl IsTask for YumDnfTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.packages(&self.package, &self.remove, &self.update))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

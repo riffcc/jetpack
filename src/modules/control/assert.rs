@@ -50,6 +50,14 @@ struct AssertAction {
 }
 
 impl IsTask for AssertTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some("Check assertions".into())
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

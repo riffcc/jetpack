@@ -41,6 +41,14 @@ struct StatAction {
 }
 
 impl IsTask for StatTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(Some(&self.save))
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Inspect", &self.path, "Inspect files"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

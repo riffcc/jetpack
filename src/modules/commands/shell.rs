@@ -49,6 +49,14 @@ struct ShellAction {
 }
 
 impl IsTask for ShellTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(self.save.as_deref())
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(format!("Run {}", self.cmd))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

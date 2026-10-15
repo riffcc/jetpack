@@ -68,6 +68,50 @@ struct ServiceDetails {
 }
 
 impl IsTask for SystemdServiceTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        let flags = (
+            context.flag(&self.enabled, false),
+            context.flag(&self.started, false),
+            context.flag(&self.reload, false),
+            context.flag(&self.restart, false),
+        );
+        let operation = if let (Some(enabled), Some(started), Some(reload), Some(restart)) = flags {
+            if (reload && restart) || (self.started.is_some() && !started && (reload || restart)) {
+                "Manage service".to_owned()
+            } else {
+                let mut operations = Vec::new();
+                if self.enabled.is_some() {
+                    operations.push(if enabled { "enable" } else { "disable" });
+                }
+                if restart {
+                    operations.push("restart");
+                } else if reload {
+                    operations.push("reload");
+                } else if self.started.is_some() {
+                    operations.push(if started { "start" } else { "stop" });
+                }
+                if operations.is_empty() {
+                    "Manage service".into()
+                } else {
+                    let joined = operations.join(" and ");
+                    format!("{}{}", joined[..1].to_uppercase(), &joined[1..])
+                }
+            }
+        } else {
+            "Manage service".into()
+        };
+        let fallback = if operation == "Manage service" {
+            "Manage services".to_owned()
+        } else {
+            format!("{operation} services")
+        };
+        Some(context.resource(&operation, &self.service, &fallback))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }

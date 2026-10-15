@@ -208,6 +208,17 @@ impl HttpCheck {
 }
 
 impl IsTask for HttpTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(self.save.as_deref())
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(crate::tasks::naming::http_label(
+            self.method.as_deref(),
+            &self.url,
+        ))
+    }
+
     fn get_module(&self) -> String {
         "http".into()
     }
