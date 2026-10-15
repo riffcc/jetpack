@@ -4,6 +4,8 @@ use jetpack::tasks::*;
 #[test]
 fn test_template_task_basic() {
     let task = TemplateTask {
+        validate: None,
+        chdir: None,
         delay: None,
         retry: None,
 
@@ -31,6 +33,8 @@ fn test_template_task_with_attributes() {
     };
 
     let task = TemplateTask {
+        validate: None,
+        chdir: None,
         delay: None,
         retry: None,
 

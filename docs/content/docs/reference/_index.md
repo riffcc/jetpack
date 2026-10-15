@@ -60,7 +60,7 @@ This section is **auto-generated** from the source (`src/registry/list.rs` and `
 | [`!git`](modules/git) | Clone or update a git repository on the target. Idempotent — compares local HEAD/branch against remote and updates only when needed. SSH key auth only. |
 | [`!move`](modules/move) | Move/rename a file on the target. Optionally backs up an existing destination first. Supports force-overwrite and post-move permission/ownership changes. |
 | [`!stat`](modules/stat) | Stat a remote path and save the result (exists, is_dir, mode, owner, group) into a host variable for later use. Read-only; never modifies the target. |
-| [`!template`](modules/template) | Render a local template (resolved through the templates/ lookup) with variables and write the result to a remote path. Idempotent via SHA-512 of rendered output. |
+| [`!template`](modules/template) | Render a local template, optionally composing sorted include_dir fragments, and install it atomically on the execution target. Preserve existing file metadata unless explicitly overridden. |
 | [`!unpack`](modules/unpack) | Extract an archive (tar.gz/tgz/tar.bz2/tar.xz/tar/zip, or single-file gz/bz2/xz) on the target into a destination directory. Source archive must exist on the target. |
 
 ### integrations

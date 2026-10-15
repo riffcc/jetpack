@@ -32,5 +32,6 @@ pub mod traversal;
 pub mod visitor;
 
 // New library-friendly versions
+pub(crate) mod composition;
 pub mod context_new;
 pub mod visitor_new;
