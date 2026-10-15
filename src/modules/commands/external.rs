@@ -103,6 +103,9 @@ impl IsTask for ExternalTask {
                     ) {
                         Ok(x) => x,
                         Err(y) => {
+                            if y.status == TaskStatus::IsDeferred {
+                                return Err(y);
+                            }
                             return Err(handle.response.is_failed(
                                 request,
                                 &format!("unable to template parameters: {:?}", y),

@@ -31,6 +31,11 @@ pub(super) fn evaluate_with_path_check(
     ))
     .map_err(|e| e.to_string())?;
     let context = Context::wraps(data).map_err(|e| e.to_string())?;
+    let mut combined_check = |path: &handlebars::Path| {
+        super::plan_dependencies::check_path(path, data)?;
+        path_check(path)
+    };
+    let path_check = &mut combined_check;
     // Keep the outer #if intact, preserving its truthiness, missing-variable
     // behavior and options such as includeZero. Only reduce expression nodes.
     for element in &mut template.elements {
