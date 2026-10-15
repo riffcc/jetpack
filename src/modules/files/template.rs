@@ -18,7 +18,6 @@ use crate::handle::file_transaction::{self, Snapshot, Validator};
 use crate::handle::handle::TaskHandle;
 use crate::handle::template::BlendTarget;
 use crate::tasks::fields::Field;
-use crate::tasks::files::Recurse;
 use crate::tasks::*;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -150,13 +149,7 @@ impl IsAction for TemplateAction {
                     if old.content != data {
                         changes.push(Field::Content);
                     }
-                    handle.remote.query_common_file_attributes(
-                        request,
-                        &dest,
-                        &self.attributes,
-                        &mut changes,
-                        Recurse::No,
-                    )?;
+                    old.attribute_changes(&self.attributes, &mut changes);
                 }
                 let absent = snapshot.is_none();
                 *self.prepared.lock().unwrap() = Some((dest, snapshot, data));
@@ -210,7 +203,7 @@ mod transaction_tests {
         let _lock = crate::test_support::ENV_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
         let src = root.path().join("source");
-        let dest = root.path().join("live file");
+        let dest = root.path().join("live file's.conf");
         std::fs::write(&src, "desired\n").unwrap();
         let marker = root.path().join("validated");
         let validator = root.path().join("validator");

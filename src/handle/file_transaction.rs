@@ -5,6 +5,7 @@
 //! or validator output is emitted through the command visitor.
 use crate::handle::handle::TaskHandle;
 use crate::inventory::hosts::HostOSType;
+use crate::tasks::fields::Field;
 use crate::tasks::{FileAttributesEvaluated, TaskRequest, TaskResponse};
 use std::path::Path;
 use std::sync::Arc;
@@ -21,6 +22,42 @@ pub(crate) struct Snapshot {
 impl Snapshot {
     fn fields(&self) -> Vec<&str> {
         self.metadata.split_whitespace().collect()
+    }
+
+    pub(crate) fn attribute_changes(
+        &self,
+        attributes: &Option<FileAttributesEvaluated>,
+        changes: &mut Vec<Field>,
+    ) {
+        let Some(attributes) = attributes else { return };
+        let fields = self.fields();
+        let same_identity = |value: &str, numeric: &str, name: &str| {
+            value == name
+                || value
+                    .parse::<u64>()
+                    .ok()
+                    .zip(numeric.parse::<u64>().ok())
+                    .is_some_and(|(a, b)| a == b)
+        };
+        if attributes
+            .owner
+            .as_ref()
+            .is_some_and(|v| !same_identity(v, fields[1], fields[7]))
+        {
+            changes.push(Field::Owner);
+        }
+        if attributes
+            .group
+            .as_ref()
+            .is_some_and(|v| !same_identity(v, fields[2], fields[8]))
+        {
+            changes.push(Field::Group);
+        }
+        if attributes.mode.as_ref().is_some_and(|v| {
+            u32::from_str_radix(v, 8).ok() != u32::from_str_radix(fields[0], 8).ok()
+        }) {
+            changes.push(Field::Mode);
+        }
     }
 }
 
@@ -108,13 +145,13 @@ pub(crate) fn snapshot(
     absolute_path(path).map_err(|e| fail(handle, request, &e))?;
     let path = quote(path);
     let stat = match handle.remote.get_os_type() {
-        HostOSType::MacOS => format!("stat -f '%Lp %u %g %i %z %m %c' {path}"),
-        _ => format!("stat -c '%a %u %g %i %s %Y %Z' {path}"),
+        HostOSType::MacOS => format!("stat -f '%Lp %u %g %i %z %m %c %Su %Sg' {path}"),
+        _ => format!("stat -c '%a %u %g %i %s %Y %Z %U %G' {path}"),
     };
-    // cat followed by a sentinel retains trailing newlines trimmed by connection
-    // implementations. The suffix length is known, so content cannot spoof it.
+    // A hex transfer preserves exact bytes across connection output trimming
+    // and detects invalid UTF-8 rather than silently replacing it over SSH.
     let script = format!(
-        "if test -L {path}; then exit 40; fi\nif ! test -e {path}; then exit 44; fi\ntest -f {path} || exit 41\n{stat} || exit 42\ncat {path} || exit 43\nprintf '\\nJETPACK-SNAPSHOT-END\\n'\n{stat}"
+        "if test -L {path}; then exit 40; fi\nif ! test -e {path}; then exit 44; fi\ntest -f {path} || exit 41\n{stat} || exit 42\nod -An -v -tx1 {path} || exit 43\nprintf '\\nJETPACK-SNAPSHOT-END\\n'\n{stat}"
     );
     let (rc, output) = handle.remote.file_command(request, &script, true)?;
     if rc == 44 {
@@ -133,11 +170,15 @@ pub(crate) fn snapshot(
     let (content, after) = rest
         .rsplit_once("\nJETPACK-SNAPSHOT-END\n")
         .ok_or_else(|| fail(handle, request, "incomplete target file read"))?;
-    if metadata != after.trim_end() || metadata.split_whitespace().count() != 7 {
+    if metadata != after.trim_end() || metadata.split_whitespace().count() != 9 {
         return Err(fail(handle, request, "target file changed while reading"));
     }
+    let bytes = hex::decode(content.split_whitespace().collect::<String>())
+        .map_err(|_| fail(handle, request, "cannot decode target file"))?;
+    let content =
+        String::from_utf8(bytes).map_err(|_| fail(handle, request, "target file must be UTF-8"))?;
     Ok(Some(Snapshot {
-        content: content.into(),
+        content,
         metadata: metadata.into(),
     }))
 }
@@ -438,5 +479,60 @@ mod connection_tests {
                 .unwrap()
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod exact_read_tests {
+    use super::tests::local_handle;
+    use super::*;
+    use crate::test_support::query_request;
+    #[test]
+    fn file_reads_preserve_unicode_whitespace_and_reject_non_utf8() {
+        let _lock = crate::test_support::ENV_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("contents");
+        let handle = local_handle();
+        let request = query_request();
+        let content = "\n  🦀 café\r\n\n ";
+        std::fs::write(&path, content).unwrap();
+        assert_eq!(
+            snapshot(&handle, &request, path.to_str().unwrap())
+                .unwrap()
+                .unwrap()
+                .content,
+            content
+        );
+        std::fs::write(&path, [0xff, 0x00]).unwrap();
+        assert!(snapshot(&handle, &request, path.to_str().unwrap()).is_err());
+    }
+    #[test]
+    fn metadata_comparison_accepts_named_and_numeric_identities_and_octal_modes() {
+        let snapshot = Snapshot {
+            content: String::new(),
+            metadata: "640 1000 100 42 0 1 1 deploy staff".into(),
+        };
+        for (owner, group, mode) in [("deploy", "staff", "0640"), ("1000", "0100", "640")] {
+            let mut changes = Vec::new();
+            snapshot.attribute_changes(
+                &Some(FileAttributesEvaluated {
+                    owner: Some(owner.into()),
+                    group: Some(group.into()),
+                    mode: Some(mode.into()),
+                }),
+                &mut changes,
+            );
+            assert!(changes.is_empty());
+        }
+        let mut changes = Vec::new();
+        snapshot.attribute_changes(
+            &Some(FileAttributesEvaluated {
+                owner: Some("other".into()),
+                group: Some("other".into()),
+                mode: Some("600".into()),
+            }),
+            &mut changes,
+        );
+        assert_eq!(changes, vec![Field::Owner, Field::Group, Field::Mode]);
     }
 }
