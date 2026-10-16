@@ -1,6 +1,6 @@
 ---
 title: zypper
-weight: 38
+weight: 39
 description: "Manage packages with zypper (openSUSE/SUSE). Uses zypper search --details for version comparison."
 ---
 

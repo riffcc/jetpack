@@ -1,6 +1,6 @@
 ---
 title: yum
-weight: 37
+weight: 38
 description: "Manage packages with yum or dnf (RHEL-family). Same module as !dnf — the backend is auto-detected per host (prefers /usr/bin/dnf, falls back to /usr/bin/yum)."
 ---
 
