@@ -247,7 +247,10 @@ impl IsTask for HttpTask {
                 .read()
                 .unwrap()
                 .render_template(input, &handle.host, BlendTarget::NotTemplateModule, tm)
-                .map_err(|_| {
+                .map_err(|e| {
+                    if crate::playbooks::plan_dependencies::is_deferred_error(&e) {
+                        return handle.response.is_deferred();
+                    }
                     handle
                         .response
                         .is_failed(request, &format!("http: cannot template {field}"))
@@ -422,9 +425,14 @@ impl HttpResult {
                 }
                 let mut data = variables.clone();
                 data.insert("response".into(), Value::Mapping(self.results()));
-                matcher
-                    .test(&data)
-                    .map_err(|_| "http: invalid check.matches structural matcher".into())
+                crate::playbooks::plan_dependencies::clear(&mut data, "response");
+                matcher.test(&data).map_err(|e| {
+                    if crate::playbooks::plan_dependencies::is_deferred_error(&e) {
+                        e
+                    } else {
+                        "http: invalid check.matches structural matcher".into()
+                    }
+                })
             }
         }
     }
@@ -455,6 +463,7 @@ impl HttpResult {
         // Replace the whole binding, rather than merging in stale response
         // fields from inventory, previous saves, or another item iteration.
         data.insert("response".into(), Value::Mapping(self.results()));
+        crate::playbooks::plan_dependencies::clear(&mut data, "response");
         let mut json_error = None;
         let mut path_check = |path: &handlebars::Path| {
             if response_json_path(path)
@@ -467,7 +476,13 @@ impl HttpResult {
         };
         Templar::new()
             .test_condition_with_path_check(expression, data, &mut path_check)
-            .map_err(|_| json_error.unwrap_or_else(|| format!("http: invalid {field} condition")))
+            .map_err(|e| {
+                if crate::playbooks::plan_dependencies::is_deferred_error(&e) {
+                    e
+                } else {
+                    json_error.unwrap_or_else(|| format!("http: invalid {field} condition"))
+                }
+            })
     }
 }
 

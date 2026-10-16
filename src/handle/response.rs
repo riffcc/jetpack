@@ -62,10 +62,29 @@ impl Response {
     }
 
     pub fn is_failed(&self, _request: &Arc<TaskRequest>, msg: &str) -> Arc<TaskResponse> {
+        if crate::playbooks::plan_dependencies::is_deferred_error(msg)
+            && self.run_state.visitor.read().unwrap().is_check_mode()
+            && !self.host.read().unwrap().plan_unavailable.is_empty()
+        {
+            return self.is_deferred();
+        }
         Arc::new(TaskResponse {
             status: TaskStatus::Failed,
+            deferred: false,
             changes: Vec::new(),
             msg: Some(msg.to_string()),
+            command_result: Arc::new(None),
+            with: Arc::new(None),
+            and: Arc::new(None),
+        })
+    }
+
+    pub(crate) fn is_deferred(&self) -> Arc<TaskResponse> {
+        Arc::new(TaskResponse {
+            status: TaskStatus::IsDeferred,
+            deferred: true,
+            changes: Vec::new(),
+            msg: Some(crate::playbooks::plan_dependencies::MESSAGE.into()),
             command_result: Arc::new(None),
             with: Arc::new(None),
             and: Arc::new(None),
@@ -96,6 +115,7 @@ impl Response {
         }
         Arc::new(TaskResponse {
             status: TaskStatus::Failed,
+            deferred: false,
             changes: Vec::new(),
             msg: Some(String::from("command failed")),
             command_result: Arc::clone(result),
@@ -122,6 +142,7 @@ impl Response {
         }
         Arc::new(TaskResponse {
             status: TaskStatus::IsExecuted,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::clone(result),
@@ -138,6 +159,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::IsSkipped,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -157,6 +179,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::IsMatched,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -173,6 +196,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::IsCreated,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -190,6 +214,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::IsExecuted,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -206,6 +231,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::IsRemoved,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -223,6 +249,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::IsPassive,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -243,6 +270,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::IsModified,
+            deferred: false,
             changes,
             msg: None,
             command_result: Arc::new(None),
@@ -259,6 +287,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::NeedsCreation,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -280,6 +309,7 @@ impl Response {
         assert!(!changes.is_empty(), "changes must not be empty");
         Arc::new(TaskResponse {
             status: TaskStatus::NeedsModification,
+            deferred: false,
             changes: changes.to_vec(),
             msg: None,
             command_result: Arc::new(None),
@@ -296,6 +326,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::NeedsRemoval,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -313,6 +344,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::NeedsExecution,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),
@@ -329,6 +361,7 @@ impl Response {
         );
         Arc::new(TaskResponse {
             status: TaskStatus::NeedsPassive,
+            deferred: false,
             changes: Vec::new(),
             msg: None,
             command_result: Arc::new(None),

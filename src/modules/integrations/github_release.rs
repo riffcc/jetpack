@@ -351,6 +351,7 @@ impl GithubReleaseAction {
         sorted_releases.first().copied().ok_or_else(|| {
             Arc::from(TaskResponse {
                 status: TaskStatus::Failed,
+                deferred: false,
                 changes: Vec::new(),
                 msg: Some(String::from("No matching releases found")),
                 command_result: Arc::new(None),

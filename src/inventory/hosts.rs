@@ -50,6 +50,7 @@ pub struct Host {
     pub package_preference: Option<PackagePreference>,
     notified_handlers: HashMap<usize, HashSet<String>>,
     pub provision: Option<ProvisionConfig>,
+    pub(crate) plan_unavailable: HashSet<String>,
 }
 
 impl Host {
@@ -66,6 +67,7 @@ impl Host {
             notified_handlers: HashMap::new(),
             package_preference: None,
             provision: None,
+            plan_unavailable: HashSet::new(),
         }
     }
 
@@ -207,6 +209,9 @@ impl Host {
 
     pub fn update_variables(&mut self, mapping: serde_yaml::Mapping) {
         for (k, v) in mapping.iter() {
+            if let Some(key) = k.as_str() {
+                self.plan_unavailable.remove(key);
+            }
             self.variables.insert(k.clone(), v.clone());
         }
     }
@@ -280,10 +285,13 @@ impl Host {
 
     pub fn update_facts(&mut self, mapping: &Arc<RwLock<serde_yaml::Mapping>>) {
         let map = mapping.read().unwrap().clone();
-        blend_variables(&mut self.facts, serde_yaml::Value::Mapping(map));
+        self.update_facts2(map);
     }
 
     pub fn update_facts2(&mut self, mapping: serde_yaml::Mapping) {
+        for key in mapping.keys().filter_map(|k| k.as_str()) {
+            self.plan_unavailable.remove(key);
+        }
         blend_variables(&mut self.facts, serde_yaml::Value::Mapping(mapping));
     }
 

@@ -156,6 +156,7 @@ impl Template {
         let result = self.string(request, tm, field, template.as_ref().unwrap());
         match result {
             Ok(x) => Ok(Some(x)),
+            Err(y) if y.status == crate::tasks::TaskStatus::IsDeferred => Err(y),
             Err(y) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) template error: {:?}", field, y),

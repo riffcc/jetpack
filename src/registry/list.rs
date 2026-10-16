@@ -130,6 +130,31 @@ pub enum Task {
 }
 
 impl Task {
+    /// Declared variable writes, before task evaluation. Save names may be
+    /// templated; set keys are literal. Used only to invalidate unavailable
+    /// outputs when plan cannot execute their producer.
+    pub(crate) fn plan_output_names(&self) -> Vec<&str> {
+        let save = match self {
+            Task::Command(t) => t.save.as_deref(),
+            Task::Shell(t) => t.save.as_deref(),
+            Task::External(t) => t.save.as_deref(),
+            Task::Http(t) => t.save.as_deref(),
+            Task::Github_Release(t) => t.save.as_deref(),
+            Task::Proxmox_Node(t) => t.save_to.as_deref(),
+            Task::Stat(t) => Some(t.save.as_str()),
+            Task::Self_Locate(t) => Some(t.save.as_str()),
+            Task::Set(t) => {
+                return t
+                    .vars
+                    .as_ref()
+                    .map(|v| v.keys().filter_map(|k| k.as_str()).collect())
+                    .unwrap_or_default();
+            }
+            _ => None,
+        };
+        save.into_iter().collect()
+    }
+
     pub fn get_module(&self) -> String {
         // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
         match self {

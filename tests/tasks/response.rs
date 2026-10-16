@@ -9,6 +9,7 @@ use jetpack::tasks::logic::{PreLogicEvaluated, PostLogicEvaluated};
 fn test_task_response_creation() {
     let response = TaskResponse {
         status: TaskStatus::IsCreated,
+            deferred: false,
         changes: Vec::new(),
         msg: Some("Test message".to_string()),
         command_result: Arc::new(None),
@@ -26,6 +27,7 @@ fn test_task_response_with_changes() {
     let changes = vec![Field::new("test_field".to_string(), "test_value".to_string())];
     let response = TaskResponse {
         status: TaskStatus::IsModified,
+            deferred: false,
         changes,
         msg: None,
         command_result: Arc::new(None),
@@ -42,6 +44,7 @@ fn test_task_response_with_changes() {
 fn test_task_response_failed() {
     let response = TaskResponse {
         status: TaskStatus::Failed,
+            deferred: false,
         changes: Vec::new(),
         msg: Some("Error occurred".to_string()),
         command_result: Arc::new(None),
@@ -96,6 +99,7 @@ fn test_task_response_with_command_result() {
     
     let response = TaskResponse {
         status: TaskStatus::IsExecuted,
+            deferred: false,
         changes: Vec::new(),
         msg: None,
         command_result: Arc::new(Some(command_result)),

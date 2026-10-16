@@ -40,6 +40,7 @@ fn test_forward_enum() {
 fn test_cmd_info() {
     let response = TaskResponse {
         status: TaskStatus::IsExecuted,
+        deferred: false,
         changes: vec![],
         msg: None,
         command_result: Arc::new(Some(CommandResult {
@@ -62,6 +63,7 @@ fn test_cmd_info() {
 fn test_cmd_info_with_error() {
     let response = TaskResponse {
         status: TaskStatus::Failed,
+        deferred: false,
         changes: vec![],
         msg: Some("Command failed".to_string()),
         command_result: Arc::new(Some(CommandResult {
@@ -85,6 +87,7 @@ fn test_cmd_info_with_error() {
 fn test_cmd_info_without_command_result() {
     let response = TaskResponse {
         status: TaskStatus::IsPassive,
+        deferred: false,
         changes: vec![],
         msg: None,
         command_result: Arc::new(None),

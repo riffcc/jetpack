@@ -162,6 +162,10 @@ pub fn template_items(
                 .read()
                 .unwrap()
                 .get_complete_blended_variables(&handle.host, BlendTarget::NotTemplateModule);
+            if let Ok(path) = handlebars::Path::parse(x) {
+                crate::playbooks::plan_dependencies::check_path(&path, &blended)
+                    .map_err(|e| handle.response.is_failed(request, &e))?;
+            }
             match blended.contains_key(x) {
                 true => {
                     let value: serde_yaml::Value = blended.get(x).unwrap().clone();

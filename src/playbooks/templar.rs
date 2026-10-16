@@ -30,6 +30,7 @@ static HANDLEBARS: Lazy<Handlebars> = Lazy::new(|| {
     hb.register_escape_fn(handlebars::no_escape);
     hb.set_strict_mode(true);
     register_helpers(&mut hb);
+    super::plan_dependencies::register_lookup(&mut hb);
     hb
 });
 
@@ -69,6 +70,7 @@ impl Templar {
             TemplateMode::Off => Ok(String::from("empty")),
             TemplateMode::Strict => {
                 let mut rendered = template.to_string();
+                super::plan_dependencies::check_template(&rendered, &data)?;
                 for _ in 0..8 {
                     let next = HANDLEBARS
                         .render_template(&rendered, &data)
@@ -111,6 +113,7 @@ impl Templar {
                 if expansions >= 8 {
                     return Err("exceeded typed template render limit".into());
                 }
+                super::plan_dependencies::check_template(text, data)?;
                 let template = Template::compile(text).map_err(|e| e.to_string())?;
                 if let [
                     TemplateElement::Expression(helper) | TemplateElement::HtmlExpression(helper),
@@ -158,6 +161,9 @@ impl Templar {
         data: &serde_yaml::Mapping,
     ) -> Result<Option<serde_json::Value>, String> {
         let path = handlebars::template::Parameter::Path(self.parse_value_path(path)?);
+        if let handlebars::template::Parameter::Path(path) = &path {
+            super::plan_dependencies::check_path(path, data)?;
+        }
         let context = handlebars::Context::wraps(data).map_err(|e| e.to_string())?;
         let value = path
             .expand(
