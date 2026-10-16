@@ -15,6 +15,7 @@
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 // Renaming the `handle` module would cascade through every importer; allow the name shadowing.
+pub(crate) mod file_transaction;
 #[allow(clippy::module_inception)]
 pub mod handle;
 pub mod local;

@@ -31,6 +31,7 @@ use std::sync::RwLock;
 // manually. So use the response functions!
 
 pub struct Response {
+    sensitive: bool,
     run_state: Arc<RunState>,
     host: Arc<RwLock<Host>>,
 }
@@ -38,8 +39,17 @@ pub struct Response {
 impl Response {
     pub fn new(run_state_handle: Arc<RunState>, host_handle: Arc<RwLock<Host>>) -> Self {
         Self {
+            sensitive: false,
             run_state: run_state_handle,
             host: host_handle,
+        }
+    }
+
+    pub(crate) fn sensitive(run_state: Arc<RunState>, host: Arc<RwLock<Host>>) -> Self {
+        Self {
+            sensitive: true,
+            run_state,
+            host,
         }
     }
 
@@ -74,14 +84,16 @@ impl Response {
         result: &Arc<Option<CommandResult>>,
     ) -> Arc<TaskResponse> {
         // used internally by run functions in remote.rs when commands fail, suitable for use as a final module response
-        self.get_visitor()
-            .read()
-            .expect("read visitor")
-            .on_command_failed(
-                &self.get_context(),
-                &Arc::clone(&self.host),
-                &Arc::clone(result),
-            );
+        if !self.sensitive {
+            self.get_visitor()
+                .read()
+                .expect("read visitor")
+                .on_command_failed(
+                    &self.get_context(),
+                    &Arc::clone(&self.host),
+                    &Arc::clone(result),
+                );
+        }
         Arc::new(TaskResponse {
             status: TaskStatus::Failed,
             changes: Vec::new(),
@@ -98,14 +110,16 @@ impl Response {
         result: &Arc<Option<CommandResult>>,
     ) -> Arc<TaskResponse> {
         // used internally by run functions in remote.rs when commands succeed, suitable for use as a final module response
-        self.get_visitor()
-            .read()
-            .expect("read visitor")
-            .on_command_ok(
-                &self.get_context(),
-                &Arc::clone(&self.host),
-                &Arc::clone(result),
-            );
+        if !self.sensitive {
+            self.get_visitor()
+                .read()
+                .expect("read visitor")
+                .on_command_ok(
+                    &self.get_context(),
+                    &Arc::clone(&self.host),
+                    &Arc::clone(result),
+                );
+        }
         Arc::new(TaskResponse {
             status: TaskStatus::IsExecuted,
             changes: Vec::new(),

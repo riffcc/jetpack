@@ -344,3 +344,7 @@ mod typed_tests {
         }
     }
 }
+
+pub(crate) fn file_registry() -> Handlebars<'static> {
+    HANDLEBARS.clone()
+}

@@ -80,6 +80,99 @@ impl Remote {
         }
     }
 
+    fn prepare_file_command(
+        &self,
+        request: &Arc<TaskRequest>,
+        script: &str,
+        sudo: bool,
+    ) -> Result<String, Arc<TaskResponse>> {
+        let prepared = super::working_directory::prepare(
+            &format!("sh -c {}", super::file_transaction::quote(script)),
+            if sudo { request.chdir.as_deref() } else { None },
+        )
+        .map_err(|_| {
+            self.response
+                .is_failed(request, "invalid file operation directory")
+        })?;
+        if sudo {
+            self.template
+                .add_sudo_details(request, &prepared.command)
+                .map_err(|_| {
+                    self.response
+                        .is_failed(request, "cannot prepare privileged file operation")
+                })
+        } else {
+            Ok(prepared.command)
+        }
+    }
+
+    /// Internal file transactions must not print configuration or validator output,
+    /// even at -vvv. All dynamic arguments in these scripts are shell-quoted.
+    /// Connection-owned upload setup/cleanup never enters the task's directory.
+    pub(crate) fn file_command(
+        &self,
+        request: &Arc<TaskRequest>,
+        script: &str,
+        sudo: bool,
+    ) -> Result<(i32, String), Arc<TaskResponse>> {
+        let command = self.prepare_file_command(request, script, sudo)?;
+        let response = Arc::new(Response::sensitive(
+            self.run_state.clone(),
+            self.host.clone(),
+        ));
+        let result = self
+            .connection
+            .lock()
+            .unwrap()
+            .run_command(&response, request, &command, Forward::No)
+            .map_err(|_| {
+                self.response
+                    .is_failed(request, "target file operation failed (output withheld)")
+            })?;
+        Ok(cmd_info(&result))
+    }
+
+    /// The connection identity opens its private upload as stdin before switching
+    /// identities. Only the task identity opens the candidate for writing. This
+    /// avoids granting another account access to the private upload directory.
+    pub(crate) fn stage_private_upload(
+        &self,
+        request: &Arc<TaskRequest>,
+        source: &str,
+        candidate: &str,
+    ) -> Result<(i32, String), Arc<TaskResponse>> {
+        let writer = self.prepare_file_command(
+            request,
+            &format!("cat > {}", super::file_transaction::quote(candidate)),
+            true,
+        )?;
+        self.file_command(
+            request,
+            &format!("{writer} < {}", super::file_transaction::quote(source)),
+            false,
+        )
+    }
+
+    pub(crate) fn upload_private(
+        &self,
+        request: &Arc<TaskRequest>,
+        data: &str,
+        path: &str,
+    ) -> Result<(), Arc<TaskResponse>> {
+        let response = Arc::new(Response::sensitive(
+            self.run_state.clone(),
+            self.host.clone(),
+        ));
+        self.connection
+            .lock()
+            .unwrap()
+            .write_data(&response, request, data, path)
+            .map_err(|_| {
+                self.response
+                    .is_failed(request, "candidate transfer failed (output withheld)")
+            })
+    }
+
     // who is the remote user?
     pub fn get_whoami(&self) -> Result<String, String> {
         return self.connection.lock().unwrap().whoami();

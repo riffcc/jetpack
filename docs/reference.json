@@ -249,10 +249,12 @@
       "examples": [ "- !stat\n  path: /usr/local/bin/app\n  save: app_binary" ]
     },
     "template": {
-      "description": "Render a local template (resolved through the templates/ lookup) with variables and write the result to a remote path. Idempotent via SHA-512 of rendered output.",
+      "description": "Render a local template, optionally composing sorted include_dir fragments, and install it atomically on the execution target. Preserve existing file metadata unless explicitly overridden.",
       "parameters": [
         { "name": "src", "type": "string", "required": true, "description": "Local template filename (looked up under the templates directory)." },
         { "name": "dest", "type": "path", "required": true, "description": "Remote destination path for the rendered file." },
+        { "name": "validate", "type": "string", "required": false, "description": "Target-side validator command with exactly one standalone {} candidate argument; no shell syntax. Plan never runs it." },
+        { "name": "chdir", "type": "path", "required": false, "description": "Absolute execution-target working directory for validation and file operations." },
         { "name": "attributes", "type": "map", "required": false, "description": "File attributes applied to the rendered file: owner, group, mode." }
       ],
       "examples": [ "- !template\n  src: nginx.conf.j2\n  dest: /etc/nginx/nginx.conf" ]
