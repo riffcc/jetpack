@@ -4,8 +4,11 @@ use jetpack::tasks::*;
 #[test]
 fn test_apt_task_basic() {
     let task = AptTask {
+        delay: None,
+        retry: None,
+
         name: Some("Install nginx".to_string()),
-        package: "nginx".to_string(),
+        package: "nginx".to_string().into(),
         version: None,
         update: None,
         upgrade: None,
@@ -24,8 +27,11 @@ fn test_apt_task_basic() {
 #[test]
 fn test_apt_task_with_version() {
     let task = AptTask {
+        delay: None,
+        retry: None,
+
         name: None,
-        package: "postgresql".to_string(),
+        package: "postgresql".to_string().into(),
         version: Some("14".to_string()),
         update: None,
         upgrade: None,
@@ -42,8 +48,11 @@ fn test_apt_task_with_version() {
 #[test]
 fn test_apt_task_remove() {
     let task = AptTask {
+        delay: None,
+        retry: None,
+
         name: Some("Remove old package".to_string()),
-        package: "apache2".to_string(),
+        package: "apache2".to_string().into(),
         version: None,
         update: None,
         upgrade: None,
@@ -59,8 +68,11 @@ fn test_apt_task_remove() {
 #[test]
 fn test_apt_task_with_update() {
     let task = AptTask {
+        delay: None,
+        retry: None,
+
         name: Some("Install latest vim".to_string()),
-        package: "vim".to_string(),
+        package: "vim".to_string().into(),
         version: None,
         update: Some("yes".to_string()),
         upgrade: None,
@@ -124,7 +136,7 @@ and:
     assert!(task.is_ok());
 
     let task = task.unwrap();
-    assert!(task.package.contains("{{ package_name }}"));
+    assert_eq!(task.package, "{{ package_name }}");
     assert!(task.with.is_some());
     assert!(task.and.is_some());
 }

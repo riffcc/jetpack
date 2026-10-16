@@ -54,6 +54,7 @@ pub struct HostStats {
     pub unreachable: usize,
     pub failed: usize,
     pub skipped: usize,
+    pub deferred: usize,
 }
 
 pub struct LogData {
@@ -164,6 +165,7 @@ impl PlaybookVisitor {
                 unreachable: stat.unreachable,
                 failed: stat.failed,
                 skipped: stat.skipped,
+                deferred: stat.deferred,
             };
             self.output_handler.on_recap(recap);
         }
@@ -256,7 +258,11 @@ impl PlaybookVisitor {
         let host_stat = stats.entry(host.name.clone()).or_default();
 
         use crate::tasks::response::TaskStatus;
+        if response.deferred {
+            host_stat.deferred += 1;
+        }
         match &response.status {
+            TaskStatus::IsDeferred => {}
             TaskStatus::IsSkipped => {
                 host_stat.skipped += 1;
             }

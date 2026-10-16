@@ -50,6 +50,8 @@ pub struct PlaybookContext {
 
     pub task_count: usize,
     pub task: Option<String>,
+    /// Display-only snapshot for multi-batch plays; never used for execution.
+    pub naming_variables: Option<serde_yaml::Mapping>,
 
     seen_hosts: HashMap<String, Arc<RwLock<Host>>>,
     targetted_hosts: HashMap<String, Arc<RwLock<Host>>>,
@@ -64,6 +66,8 @@ pub struct PlaybookContext {
     passive_count_for_host: HashMap<String, usize>,
     matched_count_for_host: HashMap<String, usize>,
     skipped_count_for_host: HashMap<String, usize>,
+    deferred_count_for_host: HashMap<String, usize>,
+    deferred_only_count_for_host: HashMap<String, usize>,
     failed_count_for_host: HashMap<String, usize>,
 
     // TODO: some of these don't need to be pub.
@@ -97,6 +101,7 @@ impl PlaybookContext {
             play: None,
             role: None,
             task: None,
+            naming_variables: None,
             play_count: 0,
             play_index: 0,
             role_count: 0,
@@ -115,6 +120,8 @@ impl PlaybookContext {
             matched_count_for_host: HashMap::new(),
             failed_count_for_host: HashMap::new(),
             skipped_count_for_host: HashMap::new(),
+            deferred_count_for_host: HashMap::new(),
+            deferred_only_count_for_host: HashMap::new(),
             connection_cache: RwLock::new(ConnectionCache::new()),
             templar: RwLock::new(Templar::new()),
             defaults_storage: RwLock::new(serde_yaml::Mapping::new()),
@@ -208,6 +215,7 @@ impl PlaybookContext {
 
     pub fn set_play(&mut self, play: &Play) {
         self.play = Some(play.name.clone());
+        self.naming_variables = None;
         self.play_count += 1;
     }
 
@@ -265,7 +273,7 @@ impl PlaybookContext {
         let src1ar = src1r.deref();
         blend_variables(&mut blended, serde_yaml::Value::Mapping(src1ar.clone()));
 
-        let src2 = host.read().unwrap().get_blended_variables();
+        let src2 = host.read().unwrap().get_template_variables();
         blend_variables(&mut blended, serde_yaml::Value::Mapping(src2));
 
         let src3 = self.vars_storage.read().unwrap();
@@ -303,6 +311,7 @@ impl PlaybookContext {
                 serde_yaml::Value::String("jet_play_hosts".to_string()),
                 serde_yaml::Value::Sequence(hosts_seq),
             );
+            super::plan_dependencies::annotate(mapping, &host.read().unwrap().plan_unavailable);
         }
 
         blended
@@ -372,7 +381,16 @@ impl PlaybookContext {
     ) -> Result<bool, String> {
         let mut vars =
             self.get_complete_blended_variables_as_value(host, BlendTarget::NotTemplateModule);
+        let overrides: Vec<_> = vars_input
+            .keys()
+            .filter_map(|k| k.as_str().map(str::to_owned))
+            .collect();
         blend_variables(&mut vars, serde_yaml::Value::Mapping(vars_input));
+        if let serde_yaml::Value::Mapping(data) = &mut vars {
+            for key in overrides {
+                super::plan_dependencies::clear(data, &key);
+            }
+        }
         match vars {
             serde_yaml::Value::Mapping(x) => {
                 self.templar.read().unwrap().test_condition(expr, x, tm)
@@ -605,6 +623,35 @@ impl PlaybookContext {
             .skipped_count_for_host
             .entry(host.to_string())
             .or_insert(0) += 1;
+    }
+
+    pub fn increment_deferred_for_host(&mut self, host: &str, only: bool) {
+        *self.deferred_count_for_host.entry(host.into()).or_default() += 1;
+        if only {
+            *self
+                .deferred_only_count_for_host
+                .entry(host.into())
+                .or_default() += 1;
+        }
+    }
+    pub fn get_total_deferred_count(&self) -> usize {
+        self.deferred_count_for_host.values().sum()
+    }
+    pub fn get_hosts_deferred_count(&self) -> usize {
+        self.deferred_count_for_host.len()
+    }
+    pub fn get_total_deferred_only_count(&self) -> usize {
+        self.deferred_only_count_for_host.values().sum()
+    }
+    pub fn get_hosts_unchanged_count(&self) -> usize {
+        self.seen_hosts
+            .keys()
+            .filter(|host| {
+                !self.adjusted_count_for_host.contains_key(*host)
+                    && !self.deferred_count_for_host.contains_key(*host)
+                    && !self.failed_count_for_host.contains_key(*host)
+            })
+            .count()
     }
 
     pub fn get_total_attempted_count(&self) -> usize {

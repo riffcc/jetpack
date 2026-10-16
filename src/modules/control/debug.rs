@@ -29,6 +29,8 @@ pub struct DebugTask {
     pub name: Option<String>,
     pub vars: Option<Vec<String>>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -39,6 +41,14 @@ struct DebugAction {
 }
 
 impl IsTask for DebugTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some("Inspect variables".into())
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -61,7 +71,14 @@ impl IsTask for DebugTask {
                 vars: self.vars.clone(),
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

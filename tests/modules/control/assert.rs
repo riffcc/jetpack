@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_assert_task_basic() {
     let task = AssertTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test Assert".to_string()),
         msg: Some("Test message".to_string()),
         r#true: Some("{{ test_true }}".to_string()),
@@ -23,6 +26,9 @@ fn test_assert_task_basic() {
 #[test]
 fn test_assert_task_with_lists() {
     let task = AssertTask {
+        delay: None,
+        retry: None,
+
         name: None,
         msg: None,
         r#true: None,

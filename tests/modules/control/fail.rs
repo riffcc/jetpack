@@ -4,6 +4,9 @@ use jetpack::tasks::*;
 #[test]
 fn test_fail_task_basic() {
     let task = FailTask {
+        delay: None,
+        retry: None,
+
         name: Some("Test Fail".to_string()),
         msg: Some("Custom failure message".to_string()),
         with: None,
@@ -18,6 +21,9 @@ fn test_fail_task_basic() {
 #[test]
 fn test_fail_task_no_message() {
     let task = FailTask {
+        delay: None,
+        retry: None,
+
         name: None,
         msg: None,
         with: None,

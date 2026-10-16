@@ -54,13 +54,11 @@ pub struct PreLogicEvaluated {
     pub skip_if_exists: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PostLogicInput {
     pub notify: Option<String>,
     pub ignore_errors: Option<String>,
-    pub retry: Option<String>,
-    pub delay: Option<String>,
 }
 
 #[derive(Debug)]
@@ -106,11 +104,14 @@ impl PostLogicInput {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
         input: &Option<Self>,
+        retry: &Option<String>,
+        delay: &Option<String>,
     ) -> Result<Option<PostLogicEvaluated>, Arc<TaskResponse>> {
-        if input.is_none() {
+        if input.is_none() && retry.is_none() && delay.is_none() {
             return Ok(None);
         }
-        let input2 = input.as_ref().unwrap();
+        let defaults = Self::default();
+        let input2 = input.as_ref().unwrap_or(&defaults);
         Ok(Some(PostLogicEvaluated {
             notify: handle.template.string_option_trim(
                 request,
@@ -123,7 +124,7 @@ impl PostLogicInput {
                 request,
                 tm,
                 &String::from("delay"),
-                &input2.delay,
+                delay,
                 1,
             )?,
             ignore_errors: handle.template.boolean_option_default_false(
@@ -136,7 +137,7 @@ impl PostLogicInput {
                 request,
                 tm,
                 &String::from("retry"),
-                &input2.retry,
+                retry,
                 0,
             )?,
         }))
@@ -161,6 +162,10 @@ pub fn template_items(
                 .read()
                 .unwrap()
                 .get_complete_blended_variables(&handle.host, BlendTarget::NotTemplateModule);
+            if let Ok(path) = handlebars::Path::parse(x) {
+                crate::playbooks::plan_dependencies::check_path(&path, &blended)
+                    .map_err(|e| handle.response.is_failed(request, &e))?;
+            }
             match blended.contains_key(x) {
                 true => {
                     let value: serde_yaml::Value = blended.get(x).unwrap().clone();
@@ -241,5 +246,116 @@ mod tests {
             input.skip_if_exists,
             Some("/home/{{ user }}/.config".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    use crate::registry::list::Task;
+    use crate::test_support::{RecordingConnection, query_request, test_handle};
+    use std::sync::Mutex;
+
+    fn evaluate(yaml: &str) -> Option<PostLogicEvaluated> {
+        let task: Task = serde_yaml::from_str(yaml).unwrap();
+        let handle = test_handle(Arc::new(Mutex::new(RecordingConnection::new())));
+        let evaluated = task
+            .evaluate(&handle, &query_request(), TemplateMode::Strict)
+            .unwrap();
+        Arc::try_unwrap(evaluated.and).unwrap()
+    }
+
+    #[test]
+    fn retry_controls_work_without_and_on_different_module_categories() {
+        for yaml in [
+            "!http\nurl: https://example.com\nretry: 3\ndelay: 0",
+            "!command\ncmd: true\nretry: 3\ndelay: 0",
+            "!apt\npackage: example\nretry: 3\ndelay: 0",
+            "!file\npath: /tmp/example\nretry: 3\ndelay: 0",
+            "!self_locate\nsave: location\nretry: 3\ndelay: 0",
+        ] {
+            let result = evaluate(yaml).unwrap();
+            assert_eq!((result.retry, result.delay), (3, 0), "{yaml}");
+            assert!(!result.ignore_errors);
+            assert!(result.notify.is_none());
+        }
+    }
+
+    #[test]
+    fn retry_controls_preserve_defaults_and_other_post_logic() {
+        assert!(evaluate("!command\ncmd: true").is_none());
+        let result = evaluate(
+            "!command\ncmd: true\nretry: 2\nand:\n  notify: restart\n  ignore_errors: true",
+        )
+        .unwrap();
+        assert_eq!((result.retry, result.delay), (2, 1));
+        assert!(result.ignore_errors);
+        assert_eq!(result.notify.as_deref(), Some("restart"));
+        let result = evaluate("!command\ncmd: true\ndelay: 7").unwrap();
+        assert_eq!((result.retry, result.delay), (0, 7));
+    }
+
+    #[test]
+    fn old_nested_retry_controls_are_rejected() {
+        for field in ["retry", "delay"] {
+            let yaml = format!("!command\ncmd: true\nand:\n  {field}: 2");
+            let error = serde_yaml::from_str::<Task>(&yaml).unwrap_err().to_string();
+            assert!(error.contains("unknown field"), "{error}");
+        }
+    }
+
+    #[test]
+    fn retry_controls_defer_validation_and_render_per_host_and_item() {
+        let task: Task =
+            serde_yaml::from_str("!command\ncmd: true\nretry: '{{ item }}'\ndelay: '{{ pause }}'")
+                .unwrap();
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                std::thread::spawn(move || {
+                    let task: Task = serde_yaml::from_str(
+                        "!command\ncmd: true\nretry: '{{ item }}'\ndelay: '{{ pause }}'",
+                    )
+                    .unwrap();
+                    let handle = test_handle(Arc::new(Mutex::new(RecordingConnection::new())));
+                    assert!(
+                        task.evaluate(&handle, &query_request(), TemplateMode::Off)
+                            .is_ok()
+                    );
+                    for item in [n, n + 8] {
+                        handle.host.write().unwrap().update_facts2(
+                            serde_yaml::from_str(&format!("item: {item}\npause: {n}")).unwrap(),
+                        );
+                        let evaluated = task
+                            .evaluate(&handle, &query_request(), TemplateMode::Strict)
+                            .unwrap();
+                        let result = evaluated.and.as_ref().as_ref().unwrap();
+                        assert_eq!((result.retry, result.delay), (item, n));
+                    }
+                })
+            })
+            .collect();
+        let handle = test_handle(Arc::new(Mutex::new(RecordingConnection::new())));
+        assert!(
+            task.evaluate(&handle, &query_request(), TemplateMode::Strict)
+                .is_err()
+        );
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        for field in ["retry", "delay"] {
+            for value in ["-1", "1.5", "invalid"] {
+                let task: Task =
+                    serde_yaml::from_str(&format!("!command\ncmd: true\n{field}: '{value}'"))
+                        .unwrap();
+                assert!(
+                    task.evaluate(&handle, &query_request(), TemplateMode::Off)
+                        .is_ok()
+                );
+                assert!(
+                    task.evaluate(&handle, &query_request(), TemplateMode::Strict)
+                        .is_err()
+                );
+            }
+        }
     }
 }

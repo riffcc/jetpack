@@ -1,6 +1,6 @@
 ---
 title: proxmox_lxc
-weight: 22
+weight: 23
 description: "Manage a Proxmox LXC container via the API (create/remove). Self-signed certs accepted. Idempotent on state."
 ---
 

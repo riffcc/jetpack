@@ -75,6 +75,7 @@ pub struct RecapData {
     pub unreachable: usize,
     pub failed: usize,
     pub skipped: usize,
+    pub deferred: usize,
 }
 
 /// A no-op output handler for when output is not needed
@@ -144,13 +145,23 @@ impl OutputHandler for TerminalOutputHandler {
             TaskStatus::Failed => {
                 format!("{color_red}FAILED{color_reset}")
             }
+            TaskStatus::IsDeferred => format!("{color_yellow}DEFERRED{color_reset}"),
             TaskStatus::IsSkipped => {
                 format!("{color_yellow}SKIPPED{color_reset}")
             }
             _ => format!("{color_green}OK{color_reset}"),
         };
 
-        println!("{} => {}", status, host.name);
+        println!(
+            "{} => {}{}",
+            status,
+            host.name,
+            if response.deferred && response.status != TaskStatus::IsDeferred {
+                " (partly deferred)"
+            } else {
+                ""
+            }
+        );
 
         if (self.verbosity > 0 || response.status == TaskStatus::Failed)
             && let Some(msg) = &response.msg
@@ -172,13 +183,14 @@ impl OutputHandler for TerminalOutputHandler {
         println!();
         crate::util::terminal::banner(&String::from("RECAP"));
         println!(
-            "{} : ok={} changed={} unreachable={} failed={} skipped={}",
+            "{} : ok={} changed={} unreachable={} failed={} skipped={} deferred={}",
             recap_data.host,
             recap_data.ok,
             recap_data.changed,
             recap_data.unreachable,
             recap_data.failed,
-            recap_data.skipped
+            recap_data.skipped,
+            recap_data.deferred
         );
     }
 

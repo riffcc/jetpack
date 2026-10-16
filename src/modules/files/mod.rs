@@ -25,3 +25,5 @@ pub mod r#move;
 pub mod stat;
 pub mod template;
 pub mod unpack;
+pub mod xml;
+pub(crate) mod xml_edit;

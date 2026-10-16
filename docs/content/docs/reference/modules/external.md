@@ -12,12 +12,17 @@ description: "Run an external (user-supplied) program module on the target. The 
 
 Run an external (user-supplied) program module on the target. The module binary is uploaded and invoked with the JSON params piped to stdin; it must emit a YAML/JSON map on stdout.
 
+## Notes
+
+- chdir follows the same absolute target-path rules as !command and !shell. It applies only to the module invocation; uploads, staging, and cleanup retain their usual directory. Directory entry happens inside the sudo context and failures cannot be suppressed by failed_when.
+
 ## Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `use` | string | yes | Name/path of the external module program to locate and upload. |
 | `params` | map | yes | Free-form parameter map, serialized to JSON and fed to the module stdin. |
+| `chdir` | path | no | Absolute working directory on the execution target (templated). Omission preserves the target's default directory. |
 | `save` | string | no | Variable name to save the parsed response map (always includes rc). |
 | `failed_when` | condition | no | Expression overriding fail-when-rc-nonzero. |
 | `changed_when` | condition | no | Expression overriding always-changed. |

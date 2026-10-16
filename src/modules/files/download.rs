@@ -34,6 +34,8 @@ pub struct DownloadTask {
     pub group: Option<String>,
     pub force: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -47,6 +49,14 @@ struct DownloadAction {
 }
 
 impl IsTask for DownloadTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Download to", &self.dest, "Download files"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -117,7 +127,14 @@ impl IsTask for DownloadTask {
                 force,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

@@ -58,9 +58,11 @@ use crate::modules::files::r#move::MoveTask;
 use crate::modules::files::stat::StatTask;
 use crate::modules::files::template::TemplateTask;
 use crate::modules::files::unpack::UnpackTask;
+use crate::modules::files::xml::XmlTask;
 
 // integrations
 use crate::modules::integrations::github_release::GithubReleaseTask;
+use crate::modules::integrations::http::HttpTask;
 
 // inventory
 use crate::modules::inventory::instantiate::InstantiateTask;
@@ -104,6 +106,7 @@ pub enum Task {
     Github_Release(GithubReleaseTask),
     Group(GroupTask),
     Homebrew(HomebrewTask),
+    Http(HttpTask),
     Instantiate(InstantiateTask),
     Move(MoveTask),
     Pacman(PacmanTask),
@@ -121,11 +124,37 @@ pub enum Task {
     Wait_For_Host(WaitForHostTask),
     Wait_For_Http(WaitForHttpTask),
     Wait_For_Others(WaitForOthersTask),
+    Xml(XmlTask),
     Yum(YumDnfTask),
     Zypper(ZypperTask),
 }
 
 impl Task {
+    /// Declared variable writes, before task evaluation. Save names may be
+    /// templated; set keys are literal. Used only to invalidate unavailable
+    /// outputs when plan cannot execute their producer.
+    pub(crate) fn plan_output_names(&self) -> Vec<&str> {
+        let save = match self {
+            Task::Command(t) => t.save.as_deref(),
+            Task::Shell(t) => t.save.as_deref(),
+            Task::External(t) => t.save.as_deref(),
+            Task::Http(t) => t.save.as_deref(),
+            Task::Github_Release(t) => t.save.as_deref(),
+            Task::Proxmox_Node(t) => t.save_to.as_deref(),
+            Task::Stat(t) => Some(t.save.as_str()),
+            Task::Self_Locate(t) => Some(t.save.as_str()),
+            Task::Set(t) => {
+                return t
+                    .vars
+                    .as_ref()
+                    .map(|v| v.keys().filter_map(|k| k.as_str()).collect())
+                    .unwrap_or_default();
+            }
+            _ => None,
+        };
+        save.into_iter().collect()
+    }
+
     pub fn get_module(&self) -> String {
         // ADD NEW MODULES HERE, KEEP ALPHABETIZED BY NAME
         match self {
@@ -146,6 +175,7 @@ impl Task {
             Task::Github_Release(x) => x.get_module(),
             Task::Group(x) => x.get_module(),
             Task::Homebrew(x) => x.get_module(),
+            Task::Http(x) => x.get_module(),
             Task::Instantiate(x) => x.get_module(),
             Task::Move(x) => x.get_module(),
             Task::Pacman(x) => x.get_module(),
@@ -159,6 +189,7 @@ impl Task {
             Task::Shell(x) => x.get_module(),
             Task::Stat(x) => x.get_module(),
             Task::Template(x) => x.get_module(),
+            Task::Xml(x) => x.get_module(),
             Task::Unpack(x) => x.get_module(),
             Task::User(x) => x.get_module(),
             Task::Wait_For_Host(x) => x.get_module(),
@@ -189,6 +220,7 @@ impl Task {
             Task::Github_Release(x) => x.get_name(),
             Task::Group(x) => x.get_name(),
             Task::Homebrew(x) => x.get_name(),
+            Task::Http(x) => x.get_name(),
             Task::Instantiate(x) => x.get_name(),
             Task::Move(x) => x.get_name(),
             Task::Pacman(x) => x.get_name(),
@@ -202,6 +234,7 @@ impl Task {
             Task::Shell(x) => x.get_name(),
             Task::Stat(x) => x.get_name(),
             Task::Template(x) => x.get_name(),
+            Task::Xml(x) => x.get_name(),
             Task::Unpack(x) => x.get_name(),
             Task::User(x) => x.get_name(),
             Task::Wait_For_Host(x) => x.get_name(),
@@ -232,6 +265,7 @@ impl Task {
             Task::Github_Release(x) => x.get_with(),
             Task::Group(x) => x.get_with(),
             Task::Homebrew(x) => x.get_with(),
+            Task::Http(x) => x.get_with(),
             Task::Instantiate(x) => x.get_with(),
             Task::Move(x) => x.get_with(),
             Task::Pacman(x) => x.get_with(),
@@ -245,6 +279,7 @@ impl Task {
             Task::Shell(x) => x.get_with(),
             Task::Stat(x) => x.get_with(),
             Task::Template(x) => x.get_with(),
+            Task::Xml(x) => x.get_with(),
             Task::Unpack(x) => x.get_with(),
             Task::User(x) => x.get_with(),
             Task::Wait_For_Host(x) => x.get_with(),
@@ -280,6 +315,7 @@ impl Task {
             Task::Github_Release(x) => x.evaluate(handle, request, tm),
             Task::Group(x) => x.evaluate(handle, request, tm),
             Task::Homebrew(x) => x.evaluate(handle, request, tm),
+            Task::Http(x) => x.evaluate(handle, request, tm),
             Task::Instantiate(x) => x.evaluate(handle, request, tm),
             Task::Move(x) => x.evaluate(handle, request, tm),
             Task::Pacman(x) => x.evaluate(handle, request, tm),
@@ -293,6 +329,7 @@ impl Task {
             Task::Shell(x) => x.evaluate(handle, request, tm),
             Task::Stat(x) => x.evaluate(handle, request, tm),
             Task::Template(x) => x.evaluate(handle, request, tm),
+            Task::Xml(x) => x.evaluate(handle, request, tm),
             Task::Unpack(x) => x.evaluate(handle, request, tm),
             Task::User(x) => x.evaluate(handle, request, tm),
             Task::Wait_For_Host(x) => x.evaluate(handle, request, tm),
@@ -306,10 +343,106 @@ impl Task {
     // ==== END MODULE REGISTRY CONFIG ====
 
     pub fn get_display_name(&self) -> String {
-        match self.get_name() {
-            Some(x) => x,
-            _ => self.get_module(),
+        self.get_display_name_with(&serde_yaml::Mapping::new())
+    }
+
+    pub fn get_display_name_with(&self, variables: &serde_yaml::Mapping) -> String {
+        if let Some(name) = self.get_name() {
+            return name;
         }
+        let with = self.get_with();
+        let context = crate::tasks::naming::NamingContext::new(
+            variables,
+            with.as_ref().and_then(|with| with.items.as_ref()),
+        );
+        let label = match self {
+            Task::Apt(x) => x.generated_name(&context),
+            Task::Assert(x) => x.generated_name(&context),
+            Task::Copy(x) => x.generated_name(&context),
+            Task::Debug(x) => x.generated_name(&context),
+            Task::Fetch(x) => x.generated_name(&context),
+            Task::Directory(x) => x.generated_name(&context),
+            Task::Dnf(x) => x.generated_name(&context),
+            Task::Echo(x) => x.generated_name(&context),
+            Task::External(x) => x.generated_name(&context),
+            Task::Facts(x) => x.generated_name(&context),
+            Task::Fail(x) => x.generated_name(&context),
+            Task::Download(x) => x.generated_name(&context),
+            Task::File(x) => x.generated_name(&context),
+            Task::Git(x) => x.generated_name(&context),
+            Task::Github_Release(x) => x.generated_name(&context),
+            Task::Group(x) => x.generated_name(&context),
+            Task::Homebrew(x) => x.generated_name(&context),
+            Task::Http(x) => x.generated_name(&context),
+            Task::Instantiate(x) => x.generated_name(&context),
+            Task::Move(x) => x.generated_name(&context),
+            Task::Pacman(x) => x.generated_name(&context),
+            Task::Proxmox_Lxc(x) => x.generated_name(&context),
+            Task::Proxmox_Migrate(x) => x.generated_name(&context),
+            Task::Proxmox_Node(x) => x.generated_name(&context),
+            Task::Sd_Service(x) => x.generated_name(&context),
+            Task::Self_Locate(x) => x.generated_name(&context),
+            Task::Set(x) => x.generated_name(&context),
+            Task::Command(x) => x.generated_name(&context),
+            Task::Shell(x) => x.generated_name(&context),
+            Task::Stat(x) => x.generated_name(&context),
+            Task::Template(x) => x.generated_name(&context),
+            Task::Xml(x) => x.generated_name(&context),
+            Task::Unpack(x) => x.generated_name(&context),
+            Task::User(x) => x.generated_name(&context),
+            Task::Wait_For_Host(x) => x.generated_name(&context),
+            Task::Wait_For_Http(x) => x.generated_name(&context),
+            Task::Wait_For_Others(x) => x.generated_name(&context),
+            Task::Yum(x) => x.generated_name(&context),
+            Task::Zypper(x) => x.generated_name(&context),
+        }
+        .unwrap_or_else(|| self.get_module());
+        crate::tasks::naming::bounded(&label)
+    }
+
+    pub fn forget_name_variables(&self, variables: &mut serde_yaml::Mapping) {
+        match self {
+            Task::Apt(x) => x.name_variable_writes(),
+            Task::Assert(x) => x.name_variable_writes(),
+            Task::Copy(x) => x.name_variable_writes(),
+            Task::Debug(x) => x.name_variable_writes(),
+            Task::Fetch(x) => x.name_variable_writes(),
+            Task::Directory(x) => x.name_variable_writes(),
+            Task::Dnf(x) => x.name_variable_writes(),
+            Task::Echo(x) => x.name_variable_writes(),
+            Task::External(x) => x.name_variable_writes(),
+            Task::Facts(x) => x.name_variable_writes(),
+            Task::Fail(x) => x.name_variable_writes(),
+            Task::Download(x) => x.name_variable_writes(),
+            Task::File(x) => x.name_variable_writes(),
+            Task::Git(x) => x.name_variable_writes(),
+            Task::Github_Release(x) => x.name_variable_writes(),
+            Task::Group(x) => x.name_variable_writes(),
+            Task::Homebrew(x) => x.name_variable_writes(),
+            Task::Http(x) => x.name_variable_writes(),
+            Task::Instantiate(x) => x.name_variable_writes(),
+            Task::Move(x) => x.name_variable_writes(),
+            Task::Pacman(x) => x.name_variable_writes(),
+            Task::Proxmox_Lxc(x) => x.name_variable_writes(),
+            Task::Proxmox_Migrate(x) => x.name_variable_writes(),
+            Task::Proxmox_Node(x) => x.name_variable_writes(),
+            Task::Sd_Service(x) => x.name_variable_writes(),
+            Task::Self_Locate(x) => x.name_variable_writes(),
+            Task::Set(x) => x.name_variable_writes(),
+            Task::Command(x) => x.name_variable_writes(),
+            Task::Shell(x) => x.name_variable_writes(),
+            Task::Stat(x) => x.name_variable_writes(),
+            Task::Template(x) => x.name_variable_writes(),
+            Task::Xml(x) => x.name_variable_writes(),
+            Task::Unpack(x) => x.name_variable_writes(),
+            Task::User(x) => x.name_variable_writes(),
+            Task::Wait_For_Host(x) => x.name_variable_writes(),
+            Task::Wait_For_Http(x) => x.name_variable_writes(),
+            Task::Wait_For_Others(x) => x.name_variable_writes(),
+            Task::Yum(x) => x.name_variable_writes(),
+            Task::Zypper(x) => x.name_variable_writes(),
+        }
+        .forget(variables);
     }
 
     /// Returns true if this task is a `wait_for_others` barrier task.
@@ -355,8 +488,9 @@ impl Task {
             | Task::Move(_)
             | Task::Stat(_)
             | Task::Template(_)
-            | Task::Unpack(_) => "files",
-            Task::Github_Release(_) => "integrations",
+            | Task::Unpack(_)
+            | Task::Xml(_) => "files",
+            Task::Github_Release(_) | Task::Http(_) => "integrations",
             Task::Instantiate(_) => "inventory",
             Task::Proxmox_Lxc(_) | Task::Proxmox_Migrate(_) | Task::Proxmox_Node(_) => "proxmox",
             Task::Apt(_)

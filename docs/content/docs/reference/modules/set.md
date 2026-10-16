@@ -1,6 +1,6 @@
 ---
 title: set
-weight: 27
+weight: 28
 description: "Set one or more host variables. Top-level string values are template-expanded; non-string values are copied verbatim."
 ---
 

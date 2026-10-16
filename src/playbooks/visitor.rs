@@ -421,6 +421,22 @@ impl PlaybookVisitor {
         {
             let mut context2 = context.write().unwrap();
             context2.increment_attempted_for_host(&host2.name);
+            if task_response.deferred {
+                context2.increment_deferred_for_host(
+                    &host2.name,
+                    task_response.status == TaskStatus::IsDeferred,
+                );
+                if !quiet {
+                    println!(
+                        "{color_yellow}… {} => deferred: {}{color_reset}",
+                        host2.name,
+                        task_response
+                            .msg
+                            .as_deref()
+                            .unwrap_or("depends on output unavailable until apply")
+                    );
+                }
+            }
             match &task_response.status {
                 TaskStatus::IsCreated => {
                     if !quiet {
@@ -464,6 +480,7 @@ impl PlaybookVisitor {
                     }
                     context2.increment_matched_for_host(&host2.name);
                 }
+                TaskStatus::IsDeferred => { /* reported separately from matched/skipped */ }
                 TaskStatus::IsSkipped => {
                     if !quiet {
                         println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name);
@@ -506,6 +523,22 @@ impl PlaybookVisitor {
         {
             let mut context2 = context.write().unwrap();
             context2.increment_attempted_for_host(&host2.name);
+            if task_response.deferred {
+                context2.increment_deferred_for_host(
+                    &host2.name,
+                    task_response.status == TaskStatus::IsDeferred,
+                );
+                if !quiet {
+                    println!(
+                        "{color_yellow}… {} => deferred: {}{color_reset}",
+                        host2.name,
+                        task_response
+                            .msg
+                            .as_deref()
+                            .unwrap_or("depends on output unavailable until apply")
+                    );
+                }
+            }
             match &task_response.status {
                 TaskStatus::NeedsCreation => {
                     if !quiet {
@@ -549,6 +582,7 @@ impl PlaybookVisitor {
                     }
                     context2.increment_matched_for_host(&host2.name);
                 }
+                TaskStatus::IsDeferred => { /* reported separately from matched/skipped */ }
                 TaskStatus::IsSkipped => {
                     if !quiet {
                         println!("{color_yellow}✓ {} => skipped {color_reset}", &host2.name);
@@ -761,14 +795,24 @@ impl PlaybookVisitor {
         let skipped_hosts = ctx.get_hosts_skipped_count();
         let adjusted_ct = ctx.get_total_adjusted_count();
         let adjusted_hosts = ctx.get_hosts_adjusted_count();
-        let unchanged_hosts = seen_hosts - adjusted_hosts;
-        let unchanged_ct = action_ct - adjusted_ct;
+        let deferred_ct = ctx.get_total_deferred_count();
+        let deferred_hosts = ctx.get_hosts_deferred_count();
+        let unchanged_hosts = ctx.get_hosts_unchanged_count();
+        let unchanged_ct = action_ct
+            .saturating_sub(adjusted_ct)
+            .saturating_sub(ctx.get_total_deferred_only_count());
         let failed_ct = ctx.get_total_failed_count();
         let failed_hosts = ctx.get_hosts_failed_count();
 
         let summary = match failed_hosts {
+            0 if deferred_ct > 0 => format!(
+                "{color_yellow}(?) Plan incomplete: some outcomes are deferred until apply.{color_reset}"
+            ),
             0 => match adjusted_hosts {
                 0 => format!("{color_green}(✓) Perfect. All hosts matched policy.{color_reset}"),
+                _ if self.is_check_mode() => {
+                    format!("{color_blue}(✓) Changes would be applied.{color_reset}")
+                }
                 _ => format!("{color_blue}(✓) Actions were applied.{color_reset}"),
             },
             _ => format!("{color_red}(X) Failures have occured.{color_reset}"),
@@ -788,6 +832,7 @@ impl PlaybookVisitor {
                           | Executed | {executed_ct} | {executed_hosts}\n\
                           | Passive | {passive_ct} | {passive_hosts}\n\
                           | Skipped | {skipped_ct} | {skipped_hosts}\n\
+                          | Deferred | {deferred_ct} | {deferred_hosts}\n\
                           | --- | --- | ---\n\
                           | Unchanged | {unchanged_ct} | {unchanged_hosts}\n\
                           | Changed | {adjusted_ct} | {adjusted_hosts}\n\
@@ -811,6 +856,8 @@ impl PlaybookVisitor {
         map.insert(String::from("executed_hosts"), json!(executed_hosts));
         map.insert(String::from("passive_ct"), json!(passive_ct));
         map.insert(String::from("passive_hosts"), json!(passive_hosts));
+        map.insert(String::from("deferred_ct"), json!(deferred_ct));
+        map.insert(String::from("deferred_hosts"), json!(deferred_hosts));
         map.insert(String::from("skipped_ct"), json!(skipped_ct));
         map.insert(String::from("skipped_hosts"), json!(skipped_hosts));
         map.insert(String::from("unchanged_ct"), json!(unchanged_ct));

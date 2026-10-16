@@ -15,7 +15,7 @@
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::inventory::dependencies::{DependencyBuilder, DependencyReader, VirtualizationType};
-use crate::inventory::groups::Group;
+use crate::inventory::groups::{Group, blend_group_variables};
 use crate::provisioners::ProvisionConfig;
 use crate::util::yaml::blend_variables;
 use serde_yaml;
@@ -42,6 +42,7 @@ pub struct Host {
     pub name: String,
     pub groups: HashMap<String, Arc<RwLock<Group>>>,
     pub variables: serde_yaml::Mapping,
+    inventory_extra_vars: serde_yaml::Value,
     pub os_type: Option<HostOSType>,
     checksum_cache: HashMap<String, String>,
     checksum_cache_task_id: usize,
@@ -49,6 +50,7 @@ pub struct Host {
     pub package_preference: Option<PackagePreference>,
     notified_handlers: HashMap<usize, HashSet<String>>,
     pub provision: Option<ProvisionConfig>,
+    pub(crate) plan_unavailable: HashSet<String>,
 }
 
 impl Host {
@@ -56,6 +58,7 @@ impl Host {
         Self {
             name: name.to_string(),
             variables: serde_yaml::Mapping::new(),
+            inventory_extra_vars: serde_yaml::Value::Null,
             groups: HashMap::new(),
             os_type: None,
             checksum_cache: HashMap::new(),
@@ -64,6 +67,7 @@ impl Host {
             notified_handlers: HashMap::new(),
             package_preference: None,
             provision: None,
+            plan_unavailable: HashSet::new(),
         }
     }
 
@@ -194,6 +198,7 @@ impl Host {
         self.get_ancestor_groups(20usize).keys().cloned().collect()
     }
 
+    /// Explicit host declarations and runtime updates, without inherited data.
     pub fn get_variables(&self) -> serde_yaml::Mapping {
         self.variables.clone()
     }
@@ -204,21 +209,48 @@ impl Host {
 
     pub fn update_variables(&mut self, mapping: serde_yaml::Mapping) {
         for (k, v) in mapping.iter() {
+            if let Some(key) = k.as_str() {
+                self.plan_unavailable.remove(key);
+            }
             self.variables.insert(k.clone(), v.clone());
         }
     }
 
-    pub fn get_blended_variables(&self) -> serde_yaml::Mapping {
-        let mut blended: serde_yaml::Value = serde_yaml::Value::from(serde_yaml::Mapping::new());
-        let ancestors = self.get_ancestor_groups(20);
-        for (_k, v) in ancestors.iter() {
-            let theirs: serde_yaml::Value =
-                serde_yaml::Value::from(v.read().unwrap().get_variables());
-            blend_variables(&mut blended, theirs);
-        }
+    fn blend_inventory_declarations(&self) -> serde_yaml::Value {
+        let mut blended = blend_group_variables(self.get_ancestor_groups(20));
         let mine = serde_yaml::Value::from(self.get_variables());
         blend_variables(&mut blended, mine);
+        blended
+    }
+
+    /// Resolved inventory for DNS/provisioning, including CLI overrides once.
+    /// Do not write this view back into host declarations.
+    pub fn get_inventory_variables(&self) -> serde_yaml::Mapping {
+        let mut blended = self.blend_inventory_declarations();
+        blend_variables(&mut blended, self.inventory_extra_vars.clone());
+        blended.as_mapping().unwrap().clone()
+    }
+
+    pub(crate) fn set_inventory_extra_vars(&mut self, extra_vars: serde_yaml::Value) {
+        self.inventory_extra_vars = extra_vars;
+    }
+
+    pub fn get_blended_variables(&self) -> serde_yaml::Mapping {
+        self.blend_host_variables(true)
+    }
+
+    pub(crate) fn get_template_variables(&self) -> serde_yaml::Mapping {
+        self.blend_host_variables(false)
+    }
+
+    fn blend_host_variables(&self, include_extra_vars: bool) -> serde_yaml::Mapping {
+        // PlaybookContext applies extra-vars after play/role vars. Including
+        // them here as well would append sequence values a second time.
+        let mut blended = self.blend_inventory_declarations();
         blend_variables(&mut blended, self.facts.clone());
+        if include_extra_vars {
+            blend_variables(&mut blended, self.inventory_extra_vars.clone());
+        }
 
         // Magic variables. jet_hostname (the inventory identity, verbatim — the
         // connection target is the separate jet_ssh_hostname) and
@@ -253,10 +285,13 @@ impl Host {
 
     pub fn update_facts(&mut self, mapping: &Arc<RwLock<serde_yaml::Mapping>>) {
         let map = mapping.read().unwrap().clone();
-        blend_variables(&mut self.facts, serde_yaml::Value::Mapping(map));
+        self.update_facts2(map);
     }
 
     pub fn update_facts2(&mut self, mapping: serde_yaml::Mapping) {
+        for key in mapping.keys().filter_map(|k| k.as_str()) {
+            self.plan_unavailable.remove(key);
+        }
         blend_variables(&mut self.facts, serde_yaml::Value::Mapping(mapping));
     }
 

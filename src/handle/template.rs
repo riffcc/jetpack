@@ -156,6 +156,7 @@ impl Template {
         let result = self.string(request, tm, field, template.as_ref().unwrap());
         match result {
             Ok(x) => Ok(Some(x)),
+            Err(y) if y.status == crate::tasks::TaskStatus::IsDeferred => Err(y),
             Err(y) => Err(self.response.is_failed(
                 request,
                 &format!("field ({}) template error: {:?}", field, y),
@@ -181,6 +182,31 @@ impl Template {
                 BlendTarget::NotTemplateModule,
             )?)),
         }
+    }
+
+    /// Render a target-side absolute directory per invocation. Off mode must
+    /// defer this until the engine has considered the task's skip condition.
+    pub fn chdir(
+        &self,
+        request: &Arc<TaskRequest>,
+        tm: TemplateMode,
+        input: &Option<String>,
+    ) -> Result<Option<String>, Arc<TaskResponse>> {
+        if tm == TemplateMode::Off {
+            return Ok(None);
+        }
+        let Some(input) = input else {
+            return Ok(None);
+        };
+        let rendered = self
+            .get_context()
+            .read()
+            .unwrap()
+            .render_template(input, &self.host, BlendTarget::NotTemplateModule, tm)
+            .map_err(|e| self.response.is_failed(request, &format!("chdir: {e}")))?;
+        super::working_directory::validate(&rendered)
+            .map_err(|e| self.response.is_failed(request, &e))?;
+        Ok(Some(rendered))
     }
 
     pub fn string(

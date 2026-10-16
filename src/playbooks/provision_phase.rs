@@ -63,7 +63,7 @@ where
             h.name.clone(),
             h.needs_provisioning(),
             h.get_provision().cloned(),
-            h.get_variables(),
+            h.get_inventory_variables(),
         )
     };
 
@@ -123,7 +123,7 @@ where
 
             if let Some(ip_addr) = ip {
                 let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                if !vars.contains_key(&key) {
+                if !h.get_inventory_variables().contains_key(&key) {
                     vars.insert(key, serde_yaml::Value::String(ip_addr));
                     changed = true;
                 }
@@ -131,7 +131,7 @@ where
 
             if let Some(ssh_user) = &config.ssh_user {
                 let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                if !vars.contains_key(&key) {
+                if !h.get_inventory_variables().contains_key(&key) {
                     vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
                     changed = true;
                 }

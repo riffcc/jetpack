@@ -28,6 +28,8 @@ pub struct SetTask {
     pub name: Option<String>,
     pub vars: Option<serde_yaml::Mapping>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 struct SetAction {
@@ -35,6 +37,24 @@ struct SetAction {
 }
 
 impl IsTask for SetTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        match &self.vars {
+            None => crate::tasks::naming::NameVariableWrites::None,
+            Some(vars) => match vars
+                .keys()
+                .map(|key| key.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>()
+            {
+                Some(keys) => crate::tasks::naming::NameVariableWrites::Keys(keys),
+                None => crate::tasks::naming::NameVariableWrites::Unknown,
+            },
+        }
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some("Set variables".into())
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -56,7 +76,14 @@ impl IsTask for SetTask {
                 vars: self.vars.clone(), /* templating will happen below */
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

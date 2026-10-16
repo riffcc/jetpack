@@ -130,7 +130,7 @@ package: vim
 fn test_zypper_task_get_module() {
     let task = ZypperTask {
         name: None,
-        package: "vim".to_string(),
+        package: "vim".to_string().into(),
         version: None,
         update: None,
         remove: None,
@@ -144,7 +144,7 @@ fn test_zypper_task_get_module() {
 fn test_zypper_task_get_name() {
     let task = ZypperTask {
         name: Some("Install vim editor".to_string()),
-        package: "vim".to_string(),
+        package: "vim".to_string().into(),
         version: None,
         update: None,
         remove: None,
@@ -158,7 +158,7 @@ fn test_zypper_task_get_name() {
 fn test_zypper_task_get_with() {
     let task = ZypperTask {
         name: None,
-        package: "vim".to_string(),
+        package: "vim".to_string().into(),
         version: None,
         update: None,
         remove: None,
@@ -172,7 +172,7 @@ fn test_zypper_task_get_with() {
 fn test_zypper_task_evaluate() {
     let task = ZypperTask {
         name: Some("Install vim".to_string()),
-        package: "vim".to_string(),
+        package: "vim".to_string().into(),
         version: Some("8.2.5226".to_string()),
         update: Some("false".to_string()),
         remove: Some("false".to_string()),

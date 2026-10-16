@@ -39,15 +39,41 @@ pub trait IsTask: Send + Sync {
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>>;
 
+    /// Modules describe only their operation and public resource fields.
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        None
+    }
+
+    /// Values potentially written by this module cannot describe later async
+    /// declarations from a snapshot taken before those writes happen.
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::Unknown
+    }
+
     fn get_display_name(&self) -> String {
-        match self.get_name() {
-            Some(x) => x,
-            _ => self.get_module(),
+        if let Some(name) = self.get_name() {
+            return name;
         }
+        let variables = serde_yaml::Mapping::new();
+        let with = self.get_with();
+        let context = crate::tasks::naming::NamingContext::new(
+            &variables,
+            with.as_ref().and_then(|with| with.items.as_ref()),
+        );
+        let label = self
+            .generated_name(&context)
+            .unwrap_or_else(|| self.get_module());
+        crate::tasks::naming::bounded(&label)
     }
 }
 
 pub trait IsAction: Send + Sync {
+    /// Target-side working directory for this evaluated invocation. Modules
+    /// opt in by exposing a top-level chdir field and overriding this getter.
+    fn chdir(&self) -> Option<&str> {
+        None
+    }
+
     fn dispatch(
         &self,
         handle: &Arc<TaskHandle>,

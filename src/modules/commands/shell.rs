@@ -30,21 +30,33 @@ pub struct ShellTask {
     pub name: Option<String>,
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     pub shell: Option<String>, // optional shell to use (bash, zsh, sh)
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 struct ShellAction {
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     pub shell: String,
 }
 
 impl IsTask for ShellTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(self.save.as_deref())
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(format!("Run {}", self.cmd))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -63,6 +75,7 @@ impl IsTask for ShellTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         Ok(EvaluatedTask {
             action: Arc::new(ShellAction {
+                chdir: handle.template.chdir(request, tm, &self.chdir)?,
                 cmd: handle.template.string_unsafe_for_shell(
                     request,
                     tm,
@@ -98,12 +111,23 @@ impl IsTask for ShellTask {
                 },
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }
 
 impl IsAction for ShellAction {
+    fn chdir(&self) -> Option<&str> {
+        self.chdir.as_deref()
+    }
+
     fn dispatch(
         &self,
         handle: &Arc<TaskHandle>,

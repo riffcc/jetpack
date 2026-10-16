@@ -106,7 +106,7 @@ remove: false
 fn test_pacman_task_get_module() {
     let task = PacmanTask {
         name: None,
-        package: "vim".to_string(),
+        package: "vim".to_string().into(),
         version: None,
         update: None,
         remove: None,
@@ -120,7 +120,7 @@ fn test_pacman_task_get_module() {
 fn test_pacman_task_get_name() {
     let task = PacmanTask {
         name: Some("Install vim editor".to_string()),
-        package: "vim".to_string(),
+        package: "vim".to_string().into(),
         version: None,
         update: None,
         remove: None,

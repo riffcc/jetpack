@@ -17,11 +17,13 @@
 pub mod async_exec;
 pub mod async_ui;
 pub mod barrier;
+mod conditions;
 pub mod context;
 pub mod language;
 pub mod provision_phase;
 pub mod ref_collector;
 pub mod role_tree;
+pub mod structural;
 pub mod t_helpers;
 pub mod task_fsm;
 pub mod templar;
@@ -30,5 +32,7 @@ pub mod traversal;
 pub mod visitor;
 
 // New library-friendly versions
+pub(crate) mod composition;
 pub mod context_new;
+pub(crate) mod plan_dependencies;
 pub mod visitor_new;

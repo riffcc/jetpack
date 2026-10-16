@@ -254,7 +254,50 @@ fn get_actual_connection(
     }
 }
 
+fn mark_plan_outputs(run_state: &Arc<RunState>, host: &Arc<RwLock<Host>>, task: &Task) {
+    let names = task
+        .plan_output_names()
+        .into_iter()
+        .filter_map(|name| {
+            run_state
+                .context
+                .read()
+                .unwrap()
+                .render_template(
+                    name,
+                    host,
+                    BlendTarget::NotTemplateModule,
+                    TemplateMode::Strict,
+                )
+                .ok()
+        })
+        .collect::<Vec<_>>();
+    host.write().unwrap().plan_unavailable.extend(names);
+}
+
 fn run_task_on_host(
+    run_state: &Arc<RunState>,
+    input_connection: Arc<Mutex<dyn Connection>>,
+    host: &Arc<RwLock<Host>>,
+    play: &Play,
+    task: &Task,
+    are_handlers: HandlerMode,
+) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+    let plan = run_state.visitor.read().unwrap().is_check_mode();
+    if !plan {
+        host.write().unwrap().plan_unavailable.clear();
+    }
+    let result = run_task_on_host_impl(run_state, input_connection, host, play, task, are_handlers);
+    match result {
+        Err(response) if plan && response.status == TaskStatus::IsDeferred => {
+            mark_plan_outputs(run_state, host, task);
+            Ok(response)
+        }
+        other => other,
+    }
+}
+
+fn run_task_on_host_impl(
     run_state: &Arc<RunState>,
     input_connection: Arc<Mutex<dyn Connection>>,
     host: &Arc<RwLock<Host>>,
@@ -339,9 +382,8 @@ fn run_task_on_host(
     // mapping to store the 'item' variable when using 'with_items'
     let mut mapping = serde_yaml::Mapping::new();
 
-    // storing the last result of the items loop so we always have something to return
-    // if a failure occurs it will be returned immediately
-    let mut last: Option<Result<Arc<TaskResponse>, Arc<TaskResponse>>> = None;
+    let mut aggregate: Option<Arc<TaskResponse>> = None;
+    let plan = run_state.visitor.read().unwrap().is_check_mode();
 
     // even if we are not iterating over a list of items, make a list of one item to simplify the logic
     let evaluated_items = template_items(&handle, &validate, TemplateMode::Strict, items_input)?;
@@ -356,61 +398,14 @@ fn run_task_on_host(
         host.write().unwrap().update_facts2(mapping.clone());
 
         // re-evaluate the task, allowing the 'items' to be plugged in.
-        let evaluated = task.evaluate(&handle, &validate, TemplateMode::Strict)?;
-
-        // Check skip_if_exists AFTER proper templating
-        if let Some(original_with) = task.get_with()
-            && let Some(ref skip_path_raw) = original_with.skip_if_exists
-        {
-            // Import needed types
-            use crate::handle::template::BlendTarget;
-
-            // Template the path using the context directly
-            let template_result = handle.run_state.context.read().unwrap().render_template(
-                skip_path_raw,
-                &handle.host,
-                BlendTarget::NotTemplateModule,
-                TemplateMode::Strict,
-            );
-
-            match template_result {
-                Ok(templated) => {
-                    // Check if template was fully resolved
-                    if templated.contains("{{") {
-                        // Template variable not found - FAIL FAST
-                        return Err(handle.response.is_failed(
-                            &validate,
-                            &format!(
-                                "skip_if_exists: undefined variable in template '{}'",
-                                skip_path_raw
-                            ),
-                        ));
-                    }
-
-                    // Screen the templated result for illegal path characters
-                    let skip_path = match crate::tasks::cmd_library::screen_path(&templated) {
-                        Ok(path) => path,
-                        Err(e) => {
-                            return Err(handle.response.is_failed(
-                                &validate,
-                                &format!("skip_if_exists path invalid: {}", e),
-                            ));
-                        }
-                    };
-
-                    use std::path::Path;
-                    if Path::new(&skip_path).exists() {
-                        return Ok(handle.response.is_skipped(&Arc::clone(&validate)));
-                    }
-                }
-                Err(e) => {
-                    // Template error - FAIL FAST
-                    return Err(handle
-                        .response
-                        .is_failed(&validate, &format!("skip_if_exists template error: {}", e)));
-                }
+        let evaluated = match task.evaluate(&handle, &validate, TemplateMode::Strict) {
+            Err(response) if plan && response.status == TaskStatus::IsDeferred => {
+                mark_plan_outputs(run_state, host, task);
+                aggregate = Some(crate::tasks::response::aggregate(aggregate, response));
+                continue;
             }
-        }
+            other => other?,
+        };
 
         // see if there is any retry or delay logic in the task
         let mut retries = match evaluated.and.as_ref().is_some() {
@@ -437,6 +432,11 @@ fn run_task_on_host(
                 &validate,
                 &evaluated,
             ) {
+                Err(e) if plan && e.status == TaskStatus::IsDeferred => {
+                    mark_plan_outputs(run_state, host, task);
+                    aggregate = Some(crate::tasks::response::aggregate(aggregate, e));
+                    break;
+                }
                 Err(e) => match retries {
                     // retries are used up
                     0 => {
@@ -458,7 +458,7 @@ fn run_task_on_host(
                     }
                 },
                 Ok(x) => {
-                    last = Some(Ok(x));
+                    aggregate = Some(crate::tasks::response::aggregate(aggregate, x));
                     break;
                 }
             }
@@ -467,8 +467,8 @@ fn run_task_on_host(
 
     // looping over a list of no items should be impossible unless someone passed in a variable that was
     // an empty list
-    match last {
-        Some(last) => last,
+    match aggregate {
+        Some(result) => Ok(result),
         None => Err(handle
             .response
             .is_failed(&validate, &String::from("with/items contained no entries"))),
@@ -483,7 +483,7 @@ fn run_task_on_host_inner(
     _connection: &Arc<Mutex<dyn Connection>>,
     host: &Arc<RwLock<Host>>,
     play: &Play,
-    _task: &Task,
+    task: &Task,
     are_handlers: HandlerMode,
     handle: &Arc<TaskHandle>,
     validate: &Arc<TaskRequest>,
@@ -536,7 +536,42 @@ fn run_task_on_host_inner(
     // don't return the wrong states, even when returning an error, to prevent
     // unpredictability in the program
 
-    let query = TaskRequest::query(&sudo_details);
+    let query = TaskRequest::query(&sudo_details).with_chdir(action.chdir());
+
+    // Probe through the selected connection, in the same sudo/directory
+    // context as the task. Returning here skips this item, not the entire loop.
+    if let Some(with) = task.get_with()
+        && let Some(path) = with.skip_if_exists
+    {
+        let rendered = run_state
+            .context
+            .read()
+            .unwrap()
+            .render_template(
+                &path,
+                host,
+                BlendTarget::NotTemplateModule,
+                TemplateMode::Strict,
+            )
+            .map_err(|e| {
+                handle
+                    .response
+                    .is_failed(&query, &format!("skip_if_exists template error: {e}"))
+            })?;
+        if rendered.contains("{{") {
+            return Err(handle
+                .response
+                .is_failed(&query, "skip_if_exists: undefined variable in template"));
+        }
+        let path = crate::tasks::cmd_library::screen_path(&rendered).map_err(|e| {
+            handle
+                .response
+                .is_failed(&query, &format!("skip_if_exists path invalid: {e}"))
+        })?;
+        if handle.remote.file_exists(&query, &path)? {
+            return Ok(handle.response.is_skipped(validate));
+        }
+    }
 
     // invoke the resource and see what actions it thinks need to be performed
     let qrc = action.dispatch(handle, &query);
@@ -549,9 +584,14 @@ fn run_task_on_host_inner(
     {
         match qrc_ok.status {
             TaskStatus::NeedsPassive => { /* allow modules like !facts or set to execute */ }
-            _ => {
+            TaskStatus::NeedsCreation
+            | TaskStatus::NeedsModification
+            | TaskStatus::NeedsRemoval
+            | TaskStatus::NeedsExecution => {
+                mark_plan_outputs(run_state, host, task);
                 return qrc;
             }
+            _ => return qrc,
         }
     }
 
@@ -564,7 +604,7 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsCreation => match modify_mode {
                 true => {
-                    let req = TaskRequest::create(&sudo_details);
+                    let req = TaskRequest::create(&sudo_details).with_chdir(action.chdir());
                     let crc = action.dispatch(handle, &req);
                     match crc {
                         Ok(ref crc_ok) => match crc_ok.status {
@@ -575,7 +615,7 @@ fn run_task_on_host_inner(
                             }
                         },
                         Err(ref crc_err) => match crc_err.status {
-                            TaskStatus::Failed => crc,
+                            TaskStatus::Failed | TaskStatus::IsDeferred => crc,
                             _ => {
                                 panic!("module internal fsm state invalid (on create), {:?}", crc);
                             }
@@ -587,7 +627,7 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsRemoval => match modify_mode {
                 true => {
-                    let req = TaskRequest::remove(&sudo_details);
+                    let req = TaskRequest::remove(&sudo_details).with_chdir(action.chdir());
                     let rrc = action.dispatch(handle, &req);
                     match rrc {
                         Ok(ref rrc_ok) => match rrc_ok.status {
@@ -597,7 +637,7 @@ fn run_task_on_host_inner(
                             }
                         },
                         Err(ref rrc_err) => match rrc_err.status {
-                            TaskStatus::Failed => rrc,
+                            TaskStatus::Failed | TaskStatus::IsDeferred => rrc,
                             _ => {
                                 panic!("module internal fsm state invalid (on remove): {:?}", rrc);
                             }
@@ -609,7 +649,8 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsModification => match modify_mode {
                 true => {
-                    let req = TaskRequest::modify(&sudo_details, qrc_ok.changes.clone());
+                    let req = TaskRequest::modify(&sudo_details, qrc_ok.changes.clone())
+                        .with_chdir(action.chdir());
                     let mrc = action.dispatch(handle, &req);
                     match mrc {
                         Ok(ref mrc_ok) => match mrc_ok.status {
@@ -619,7 +660,7 @@ fn run_task_on_host_inner(
                             }
                         },
                         Err(ref mrc_err) => match mrc_err.status {
-                            TaskStatus::Failed => mrc,
+                            TaskStatus::Failed | TaskStatus::IsDeferred => mrc,
                             _ => {
                                 panic!("module internal fsm state invalid (on modify): {:?}", mrc);
                             }
@@ -633,7 +674,7 @@ fn run_task_on_host_inner(
 
             TaskStatus::NeedsExecution => match modify_mode {
                 true => {
-                    let req = TaskRequest::execute(&sudo_details);
+                    let req = TaskRequest::execute(&sudo_details).with_chdir(action.chdir());
                     let erc = action.dispatch(handle, &req);
                     match erc {
                         Ok(ref erc_ok) => match erc_ok.status {
@@ -644,7 +685,7 @@ fn run_task_on_host_inner(
                             }
                         },
                         Err(ref erc_err) => match erc_err.status {
-                            TaskStatus::Failed => erc,
+                            TaskStatus::Failed | TaskStatus::IsDeferred => erc,
                             _ => {
                                 panic!("module internal fsm state invalid (on execute): {:?}", erc);
                             }
@@ -655,7 +696,7 @@ fn run_task_on_host_inner(
             },
 
             TaskStatus::NeedsPassive => {
-                let req = TaskRequest::passive(&sudo_details);
+                let req = TaskRequest::passive(&sudo_details).with_chdir(action.chdir());
                 let prc = action.dispatch(handle, &req);
                 match prc {
                     Ok(ref prc_ok) => match prc_ok.status {
@@ -665,7 +706,7 @@ fn run_task_on_host_inner(
                         }
                     },
                     Err(ref prc_err) => match prc_err.status {
-                        TaskStatus::Failed => prc,
+                        TaskStatus::Failed | TaskStatus::IsDeferred => prc,
                         _ => {
                             panic!("module internal fsm state invalid (on passive): {:?}", prc);
                         }
@@ -684,7 +725,7 @@ fn run_task_on_host_inner(
             }
         },
         Err(x) => match x.status {
-            TaskStatus::Failed => Err(x),
+            TaskStatus::Failed | TaskStatus::IsDeferred => Err(x),
             _ => {
                 panic!("module returned a non-failure code inside an Err: {:?}", x);
             }
@@ -697,6 +738,9 @@ fn run_task_on_host_inner(
     let result = match prelim_result {
         Ok(x) => Ok(x),
         Err(y) => {
+            if y.status == TaskStatus::IsDeferred {
+                return Err(y);
+            }
             if post_logic.is_some() {
                 let logic = post_logic.as_ref().as_ref().unwrap();
                 match logic.ignore_errors {
@@ -737,3 +781,9 @@ fn run_task_on_host_inner(
 
     result
 }
+
+#[cfg(test)]
+mod skip_guard_tests;
+
+#[cfg(test)]
+mod plan_loop_tests;

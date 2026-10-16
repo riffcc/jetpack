@@ -22,19 +22,205 @@ use std::sync::Arc;
 
 const MODULE: &str = "homebrew";
 
+fn brew_batch_command(arguments: &str) -> String {
+    let script = format!(
+        "if command -v brew >/dev/null 2>&1; then brew {arguments}; elif [ -x /opt/homebrew/bin/brew ]; then /opt/homebrew/bin/brew {arguments}; else brew {arguments}; fi"
+    );
+    // Connections prefix commands with LANG=C. Wrap the compound shell
+    // discovery so it remains a valid command after that assignment.
+    format!("sh -c {}", super::batch::quote(&script))
+}
+
+impl super::batch::BatchedPackage for HomebrewAction {
+    fn package_name(&self) -> &str {
+        &self.package
+    }
+    fn query_batch_change(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        installed: Option<PackageDetails>,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+        if self.update
+            && !self.remove
+            && let Some(installed) = &installed
+        {
+            let name = match &self.version {
+                Some(version) => format!("{}@{version}", self.package),
+                None => self.package.clone(),
+            };
+            let command = brew_batch_command(&format!(
+                "info --json=v2 --formula -- {}",
+                super::batch::quote(&name)
+            ));
+            let response = handle
+                .remote
+                .run_unsafe(request, &command, CheckRc::Checked)?;
+            let parsed: serde_json::Value =
+                serde_json::from_str(&cmd_info(&response).1).map_err(|_| {
+                    handle
+                        .response
+                        .is_failed(request, "unable to parse Homebrew repository version")
+                })?;
+            let candidate = parsed["formulas"][0]["versions"]["stable"]
+                .as_str()
+                .ok_or_else(|| {
+                    handle
+                        .response
+                        .is_failed(request, "Homebrew query omitted the stable version")
+                })?;
+            let revision = parsed["formulas"][0]["revision"].as_u64().unwrap_or(0);
+            if candidate.is_empty() {
+                return Err(handle
+                    .response
+                    .is_failed(request, "Homebrew query returned an empty stable version"));
+            }
+            let candidate = if revision == 0 {
+                candidate.to_owned()
+            } else {
+                format!("{candidate}_{revision}")
+            };
+            return Ok(if installed.version == candidate {
+                handle.response.is_matched(request)
+            } else {
+                handle
+                    .response
+                    .needs_modification(request, &[Field::Version])
+            });
+        }
+        self.query_installed_package(handle, request, installed)
+    }
+    fn query_batch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        packages: &[Self],
+    ) -> Result<Vec<Option<PackageDetails>>, Arc<TaskResponse>> {
+        use super::batch::{query_output, quote};
+        let names: Vec<_> = packages
+            .iter()
+            .map(|package| match &package.version {
+                Some(version) => format!("{}@{version}", package.package),
+                None => package.package.clone(),
+            })
+            .collect();
+        let args = names
+            .iter()
+            .map(|name| quote(name))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let command = brew_batch_command(&format!("info --json=v2 --formula -- {args}"));
+        let (_, out) = query_output(handle, request, &command)?;
+        let parsed: serde_json::Value = serde_json::from_str(&out).map_err(|_| {
+            handle
+                .response
+                .is_failed(request, "unable to parse Homebrew batch query output")
+        })?;
+        let formulas = parsed
+            .get("formulas")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                handle.response.is_failed(
+                    request,
+                    "Homebrew batch query did not return formula information",
+                )
+            })?;
+        names
+            .iter()
+            .map(|name| {
+                let formula = formulas
+                    .iter()
+                    .find(|formula| {
+                        formula["name"].as_str() == Some(name.as_str())
+                            || formula["full_name"].as_str() == Some(name.as_str())
+                            || formula["aliases"].as_array().is_some_and(|aliases| {
+                                aliases
+                                    .iter()
+                                    .any(|alias| alias.as_str() == Some(name.as_str()))
+                            })
+                    })
+                    .ok_or_else(|| {
+                        handle
+                            .response
+                            .is_failed(request, "Homebrew batch query omitted a requested formula")
+                    })?;
+                let installed = formula["installed"].as_array().ok_or_else(|| {
+                    handle
+                        .response
+                        .is_failed(request, "Homebrew batch query omitted installed versions")
+                })?;
+                let version = installed
+                    .iter()
+                    .find(|entry| entry["version"] == formula["linked_keg"])
+                    .or_else(|| installed.last());
+                version
+                    .map(|entry| {
+                        entry["version"]
+                            .as_str()
+                            .map(|version| PackageDetails {
+                                name: name.clone(),
+                                version: version.into(),
+                            })
+                            .ok_or_else(|| {
+                                handle.response.is_failed(
+                                    request,
+                                    "Homebrew batch query returned an invalid installed version",
+                                )
+                            })
+                    })
+                    .transpose()
+            })
+            .collect()
+    }
+    fn apply_batch(
+        &self,
+        handle: &Arc<TaskHandle>,
+        request: &Arc<TaskRequest>,
+        packages: &[&Self],
+    ) -> Result<(), Arc<TaskResponse>> {
+        use super::batch::quote;
+        let targets = packages
+            .iter()
+            .map(|package| {
+                quote(&match &package.version {
+                    Some(version) => format!("{}@{version}", package.package),
+                    None => package.package.clone(),
+                })
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let verb = if request.request_type == TaskRequestType::Remove {
+            "uninstall"
+        } else if request.request_type == TaskRequestType::Modify {
+            "upgrade"
+        } else {
+            "install"
+        };
+        handle.remote.run_unsafe(
+            request,
+            &brew_batch_command(&format!("{verb} -- {targets}")),
+            CheckRc::Checked,
+        )?;
+        Ok(())
+    }
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 #[derive(Default)]
 pub struct HomebrewTask {
     pub name: Option<String>,
-    pub package: String,
+    pub package: ResourceInput,
     pub version: Option<String>,
     pub update: Option<String>,
     pub remove: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
+#[derive(Clone)]
 struct HomebrewAction {
     pub package: String,
     pub version: Option<String>,
@@ -43,6 +229,14 @@ struct HomebrewAction {
 }
 
 impl IsTask for HomebrewTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.packages(&self.package, &self.remove, &self.update))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -59,35 +253,50 @@ impl IsTask for HomebrewTask {
         request: &Arc<TaskRequest>,
         tm: TemplateMode,
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
+        let package_names = self
+            .package
+            .template_no_spaces(handle, request, tm, "package")?;
+        let prototype = HomebrewAction {
+            package: String::new(),
+            version: handle.template.string_option_no_spaces(
+                request,
+                tm,
+                &String::from("version"),
+                &self.version,
+            )?,
+            update: handle.template.boolean_option_default_false(
+                request,
+                tm,
+                &String::from("update"),
+                &self.update,
+            )?,
+            remove: handle.template.boolean_option_default_false(
+                request,
+                tm,
+                &String::from("remove"),
+                &self.remove,
+            )?,
+        };
         Ok(EvaluatedTask {
-            action: Arc::new(HomebrewAction {
-                package: handle.template.string_no_spaces(
-                    request,
-                    tm,
-                    &String::from("package"),
-                    &self.package,
-                )?,
-                version: handle.template.string_option_no_spaces(
-                    request,
-                    tm,
-                    &String::from("version"),
-                    &self.version,
-                )?,
-                update: handle.template.boolean_option_default_false(
-                    request,
-                    tm,
-                    &String::from("update"),
-                    &self.update,
-                )?,
-                remove: handle.template.boolean_option_default_false(
-                    request,
-                    tm,
-                    &String::from("remove"),
-                    &self.remove,
-                )?,
-            }),
+            action: super::batch::action(
+                package_names
+                    .into_iter()
+                    .map(|package| HomebrewAction {
+                        package,
+                        ..prototype.clone()
+                    })
+                    .collect(),
+                self.package.is_list(),
+            ),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

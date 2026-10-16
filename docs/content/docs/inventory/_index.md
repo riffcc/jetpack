@@ -20,23 +20,52 @@ jetpack ssh --playbook site.yml -i production
 
 ## Multiple inventory paths
 
-You can pass `-i` more than once. Jetpack loads each path **in order** and blends them — this is how you keep public inventory and secrets separate:
+You can pass `-i` more than once to compose one inventory from multiple sources.
+Each directory can contribute `groups/`, `group_vars/`, `host_vars/`, or any
+combination of them. Executable dynamic inventory sources are also supported.
+Jetpack combines topology from all sources, then applies variables in the
+supplied order, with later sources winning on conflicting declarations.
+
+For example, separate public inventory and secrets:
 
 ```bash
 jetpack ssh -i inventory/public -i ../infra-secrets/london -p site.yml
 ```
 
-### Overlay semantics
+### Combining sources
 
 When the same group or host appears in more than one path, variables are **merged**, with later paths winning on conflicts:
 
 - `group_vars/<group>` from a later path overlays an earlier path's variables for that group.
 - `host_vars/<host>` accumulates across paths.
 
-So a secrets inventory loaded second can add (or override) variables without losing anything declared in the public inventory. "Order of operations saves us" — whichever you load last wins.
+Sources can add hosts, groups, memberships, and variables. Using a later source
+to override selected values gives you an overlay; it uses the same composition
+rules as every other source. A variables-only source can refer to hosts and
+groups declared elsewhere in the combined inventory, including a later source.
 
-> [!NOTE]
-> Each `-i` directory must contain a `groups/` subdirectory (it may be empty), or Jetpack will refuse to load it.
+### Variable resolution
+
+Inherited group declarations remain separate from host declarations. Each
+ancestor group contributes once, including when multiple membership paths reach
+the same ancestor. Parents are applied before descendants; when multiple groups
+are eligible, alphabetical group-name order makes their precedence deterministic.
+Host variables apply after groups, and CLI extra variables have highest
+precedence. Later inventory paths still replace conflicting keys within the same
+group or host declaration.
+
+When resolving different declaration layers, mappings merge recursively and
+lists append in layer order. Intentional repeated list entries are preserved.
+Reading resolved variables repeatedly does not mutate declarations or grow lists.
+
+For Rust consumers, `Host::get_variables()` returns host declarations and runtime
+updates. `get_inventory_variables()` resolves groups, host values, and CLI
+overrides for inventory consumers such as DNS and provisioning. Templates use
+`PlaybookContext`, which adds facts, play/role variables, and CLI overrides in
+their existing order. Standalone `get_blended_variables()` includes facts and
+CLI overrides; the context uses a view without those CLI overrides so they enter
+only at its final precedence layer. Never save a resolved view back into the
+host declaration map.
 
 ## Provision overlays
 

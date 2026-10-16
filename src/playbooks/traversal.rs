@@ -345,6 +345,33 @@ fn handle_play(run_state: &Arc<RunState>, play: &Play) -> Result<(), String> {
     // several passes to do a smaller number of them
     let (_batch_size, batch_count, batches) = get_host_batches(run_state, play, hosts);
 
+    if batch_count > 1 {
+        // One declaration must not acquire a different label just because
+        // heterogeneous hosts were split into smaller execution batches.
+        let all_hosts: Vec<_> = batches
+            .values()
+            .flat_map(|batch| batch.iter().cloned())
+            .collect();
+        let mut variables = task_name_variables(run_state, &all_hosts);
+        // This magic variable describes the execution batch, not a resource
+        // set known to be identical across every batch of the play.
+        variables.remove(serde_yaml::Value::String("jet_play_hosts".into()));
+        // Role files are loaded only during execution. Do not load them a
+        // second time just for labels or assume their outputs are read-only.
+        if play.roles.as_ref().is_some_and(|roles| !roles.is_empty()) {
+            variables.clear();
+        }
+        for task in play
+            .tasks
+            .iter()
+            .flatten()
+            .chain(play.handlers.iter().flatten())
+        {
+            task.forget_name_variables(&mut variables);
+        }
+        run_state.context.write().unwrap().naming_variables = Some(variables);
+    }
+
     let mut failed: bool = false;
     let mut failure_message: String = String::new();
 
@@ -486,7 +513,7 @@ fn handle_batch(
             let host = host_arc.read().unwrap();
             (
                 host.name.clone(),
-                host.get_variables(),
+                host.get_inventory_variables(),
                 host.get_provision().cloned(),
             )
         };
@@ -505,7 +532,8 @@ fn handle_batch(
                     let mut host = host_arc.write().unwrap();
                     let mut vars = host.get_variables();
                     let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                    let current_ip = vars
+                    let current_ip = host
+                        .get_inventory_variables()
                         .get(&key)
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
@@ -703,6 +731,18 @@ fn async_handle_batch(
         return Ok(());
     }
 
+    // Freeze each declaration's label before hosts can advance independently.
+    // No later host/item can overwrite these descriptions.
+    let mut variables = task_name_variables(run_state, hosts);
+    let task_names: Vec<String> = all_tasks
+        .iter()
+        .map(|task| {
+            let name = task.get_display_name_with(&variables);
+            task.forget_name_variables(&mut variables);
+            name
+        })
+        .collect();
+
     // Build host name list and index map
     let host_names: Vec<String> = hosts
         .iter()
@@ -742,7 +782,7 @@ fn async_handle_batch(
                         h.name.clone(),
                         h.needs_provisioning(),
                         h.get_provision().cloned(),
-                        h.get_variables(),
+                        h.get_inventory_variables(),
                     )
                 };
 
@@ -794,7 +834,7 @@ fn async_handle_batch(
 
                             if let Some(ref ip_addr) = ip {
                                 let key = serde_yaml::Value::String("jet_ssh_hostname".to_string());
-                                if !vars.contains_key(&key) {
+                                if !h.get_inventory_variables().contains_key(&key) {
                                     vars.insert(key, serde_yaml::Value::String(ip_addr.clone()));
                                     changed = true;
                                 }
@@ -802,7 +842,7 @@ fn async_handle_batch(
 
                             if let Some(ref ssh_user) = config.ssh_user {
                                 let key = serde_yaml::Value::String("jet_ssh_user".to_string());
-                                if !vars.contains_key(&key) {
+                                if !h.get_inventory_variables().contains_key(&key) {
                                     vars.insert(key, serde_yaml::Value::String(ssh_user.clone()));
                                     changed = true;
                                 }
@@ -878,7 +918,7 @@ fn async_handle_batch(
                     continue;
                 }
 
-                let task_name = task.get_display_name();
+                let task_name = task_names[task_idx].clone();
                 let _ = host_tx.send(HostEvent::TaskStarted {
                     host_idx,
                     task_name: task_name.clone(),
@@ -983,6 +1023,22 @@ fn check_tags(
     false
 }
 
+fn task_name_variables(
+    run_state: &Arc<RunState>,
+    hosts: &[Arc<RwLock<Host>>],
+) -> serde_yaml::Mapping {
+    let context = run_state.context.read().unwrap();
+    if let Some(variables) = &context.naming_variables {
+        return variables.clone();
+    }
+    crate::tasks::naming::common_variables(hosts.iter().map(|host| {
+        context.get_complete_blended_variables(
+            host,
+            crate::handle::template::BlendTarget::NotTemplateModule,
+        )
+    }))
+}
+
 fn process_task(
     run_state: &Arc<RunState>,
     play: &Play,
@@ -1008,7 +1064,11 @@ fn process_task(
     // we will run tasks with the FSM only if not skipped by tags
     let should_run = check_tags(run_state, task, role_invocation);
     if should_run {
-        run_state.context.write().unwrap().set_task(task);
+        let name = task.get_display_name_with(&task_name_variables(
+            run_state,
+            &hosts.values().cloned().collect::<Vec<_>>(),
+        ));
+        run_state.context.write().unwrap().task = Some(name);
         run_state
             .visitor
             .read()

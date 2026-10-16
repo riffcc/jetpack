@@ -37,6 +37,7 @@ cascade:
 | `--check` | yes | — |
 | `--chroot` | yes | — |
 | `--config` | yes | — |
+| `--environment` | yes | — |
 | `--extra-vars` | yes | Inject extra variables from a YAML file or quoted JSON. |
 | `--forward-agent` | no | Enable SSH agent forwarding for specific tasks (e.g. git). |
 | `--groups` | yes | — |
@@ -59,6 +60,7 @@ cascade:
 | `--url` | yes | — |
 | `--user` | yes | SSH user (defaults to $JET_SSH_USER or $USER). |
 | `--version` | yes | — |
+| `-E` | yes | — |
 | `-e` | yes | Inject extra variables from a YAML file or quoted JSON. |
 | `-i` | yes | Inventory path; may be given multiple times (later paths overlay earlier ones). |
 | `-m` | yes | — |

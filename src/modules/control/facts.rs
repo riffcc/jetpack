@@ -30,6 +30,8 @@ pub struct FactsTask {
     pub facter: Option<String>,
     pub ohai: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 struct FactsAction {
@@ -38,6 +40,10 @@ struct FactsAction {
 }
 
 impl IsTask for FactsTask {
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some("Gather facts".into())
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -70,7 +76,14 @@ impl IsTask for FactsTask {
                 )?,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

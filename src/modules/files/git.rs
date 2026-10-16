@@ -38,6 +38,8 @@ pub struct GitTask {
     pub update: Option<String>,
     pub attributes: Option<FileAttributesInput>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -52,6 +54,14 @@ struct GitAction {
 }
 
 impl IsTask for GitTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Checkout", &self.path, "Checkout repository"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -108,7 +118,14 @@ impl IsTask for GitTask {
                 },
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

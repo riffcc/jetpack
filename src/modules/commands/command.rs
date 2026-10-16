@@ -30,22 +30,34 @@ pub struct CommandTask {
     pub name: Option<String>,
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     #[serde(rename = "unsafe")]
     pub unsafe_: Option<String>, /* FIXME: can use r#unsafe instead */
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 struct CommandAction {
     pub cmd: String,
     pub save: Option<String>,
+    pub chdir: Option<String>,
     pub failed_when: Option<String>,
     pub changed_when: Option<String>,
     pub unsafe_: bool,
 }
 
 impl IsTask for CommandTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(self.save.as_deref())
+    }
+
+    fn generated_name(&self, _context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(format!("Run {}", self.cmd))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -64,6 +76,7 @@ impl IsTask for CommandTask {
     ) -> Result<EvaluatedTask, Arc<TaskResponse>> {
         Ok(EvaluatedTask {
             action: Arc::new(CommandAction {
+                chdir: handle.template.chdir(request, tm, &self.chdir)?,
                 unsafe_: {
                     if self.cmd.find("{{").is_none() {
                         // allow all the fancy shell characters unless variables are used, in which case
@@ -104,12 +117,23 @@ impl IsTask for CommandTask {
                 )?,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }
 
 impl IsAction for CommandAction {
+    fn chdir(&self) -> Option<&str> {
+        self.chdir.as_deref()
+    }
+
     fn dispatch(
         &self,
         handle: &Arc<TaskHandle>,

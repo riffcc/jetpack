@@ -33,6 +33,8 @@ pub struct GithubReleaseTask {
     pub save: Option<String>,
     pub set: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -63,6 +65,18 @@ struct GithubAsset {
 }
 
 impl IsTask for GithubReleaseTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        if self.save.is_some() {
+            crate::tasks::naming::NameVariableWrites::Unknown
+        } else {
+            crate::tasks::naming::NameVariableWrites::saved(self.set.as_deref())
+        }
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Find release for", &self.repo, "Find GitHub release"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -138,7 +152,14 @@ impl IsTask for GithubReleaseTask {
                 set_var,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }
@@ -330,6 +351,7 @@ impl GithubReleaseAction {
         sorted_releases.first().copied().ok_or_else(|| {
             Arc::from(TaskResponse {
                 status: TaskStatus::Failed,
+                deferred: false,
                 changes: Vec::new(),
                 msg: Some(String::from("No matching releases found")),
                 command_result: Arc::new(None),

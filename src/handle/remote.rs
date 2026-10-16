@@ -80,6 +80,99 @@ impl Remote {
         }
     }
 
+    fn prepare_file_command(
+        &self,
+        request: &Arc<TaskRequest>,
+        script: &str,
+        sudo: bool,
+    ) -> Result<String, Arc<TaskResponse>> {
+        let prepared = super::working_directory::prepare(
+            &format!("sh -c {}", super::file_transaction::quote(script)),
+            if sudo { request.chdir.as_deref() } else { None },
+        )
+        .map_err(|_| {
+            self.response
+                .is_failed(request, "invalid file operation directory")
+        })?;
+        if sudo {
+            self.template
+                .add_sudo_details(request, &prepared.command)
+                .map_err(|_| {
+                    self.response
+                        .is_failed(request, "cannot prepare privileged file operation")
+                })
+        } else {
+            Ok(prepared.command)
+        }
+    }
+
+    /// Internal file transactions must not print configuration or validator output,
+    /// even at -vvv. All dynamic arguments in these scripts are shell-quoted.
+    /// Connection-owned upload setup/cleanup never enters the task's directory.
+    pub(crate) fn file_command(
+        &self,
+        request: &Arc<TaskRequest>,
+        script: &str,
+        sudo: bool,
+    ) -> Result<(i32, String), Arc<TaskResponse>> {
+        let command = self.prepare_file_command(request, script, sudo)?;
+        let response = Arc::new(Response::sensitive(
+            self.run_state.clone(),
+            self.host.clone(),
+        ));
+        let result = self
+            .connection
+            .lock()
+            .unwrap()
+            .run_command(&response, request, &command, Forward::No)
+            .map_err(|_| {
+                self.response
+                    .is_failed(request, "target file operation failed (output withheld)")
+            })?;
+        Ok(cmd_info(&result))
+    }
+
+    /// The connection identity opens its private upload as stdin before switching
+    /// identities. Only the task identity opens the candidate for writing. This
+    /// avoids granting another account access to the private upload directory.
+    pub(crate) fn stage_private_upload(
+        &self,
+        request: &Arc<TaskRequest>,
+        source: &str,
+        candidate: &str,
+    ) -> Result<(i32, String), Arc<TaskResponse>> {
+        let writer = self.prepare_file_command(
+            request,
+            &format!("cat > {}", super::file_transaction::quote(candidate)),
+            true,
+        )?;
+        self.file_command(
+            request,
+            &format!("{writer} < {}", super::file_transaction::quote(source)),
+            false,
+        )
+    }
+
+    pub(crate) fn upload_private(
+        &self,
+        request: &Arc<TaskRequest>,
+        data: &str,
+        path: &str,
+    ) -> Result<(), Arc<TaskResponse>> {
+        let response = Arc::new(Response::sensitive(
+            self.run_state.clone(),
+            self.host.clone(),
+        ));
+        self.connection
+            .lock()
+            .unwrap()
+            .write_data(&response, request, data, path)
+            .map_err(|_| {
+                self.response
+                    .is_failed(request, "candidate transfer failed (output withheld)")
+            })
+    }
+
     // who is the remote user?
     pub fn get_whoami(&self) -> Result<String, String> {
         return self.connection.lock().unwrap().whoami();
@@ -204,11 +297,17 @@ impl Remote {
             }
         }
 
+        let prepared = super::working_directory::prepare(cmd, request.chdir.as_deref())
+            .map_err(|e| self.response.is_failed(request, &e))?;
+
+        // Enter the directory inside the sudo execution context. The original
+        // user command has already passed screening; paths are literal quoted
+        // arguments in this trusted wrapper, including shell metacharacters.
         // use the sudo template to choose a new command to execute if specified.
         // this doesn't need to be sudo specifically, it's really a generic concept that can wrap a command with another tool
 
         let cmd_out = match use_sudo {
-            UseSudo::Yes => match self.template.add_sudo_details(request, cmd) {
+            UseSudo::Yes => match self.template.add_sudo_details(request, &prepared.command) {
                 Ok(x) => x,
                 Err(y) => {
                     return Err(self.response.is_failed(
@@ -217,7 +316,7 @@ impl Remote {
                     ));
                 }
             },
-            UseSudo::No => cmd.to_string(),
+            UseSudo::No => prepared.command,
         };
 
         self.response
@@ -231,6 +330,23 @@ impl Remote {
                 .lock()
                 .unwrap()
                 .run_command(&self.response, request, &cmd_out, forward);
+
+        // Directory entry failure is an execution-context failure, independent
+        // of the user's failed_when expression or unchecked command exit code.
+        if let Ok(ok_result) = &result
+            && let Some(marker) = &prepared.directory_failure
+            && let Some(command) = ok_result.command_result.as_ref()
+            && command.rc == 125
+            && command.out.lines().any(|line| line.trim() == marker)
+        {
+            return Err(self.response.is_failed(
+                request,
+                &format!(
+                    "cannot enter chdir '{}' on execution target",
+                    request.chdir.as_deref().unwrap()
+                ),
+            ));
+        }
 
         // if requested, turn non-zero return codes into errors
 
@@ -537,12 +653,17 @@ impl Remote {
         request: &Arc<TaskRequest>,
         path: &str,
     ) -> Result<bool, Arc<TaskResponse>> {
-        let get_cmd_result =
-            crate::tasks::cmd_library::get_file_exists_command(self.get_os_type(), path);
+        let get_cmd_result = crate::tasks::cmd_library::get_path_exists_command(path);
         let cmd = self.unwrap_string_result(request, &get_cmd_result)?;
         let result = self.run(request, &cmd, CheckRc::Unchecked)?;
         let (rc, _) = cmd_info(&result);
-        Ok(rc == 0)
+        match rc {
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(self
+                .response
+                .command_failed(request, &result.command_result)),
+        }
     }
 
     // return the (owner,group) tuple for a remote file.  If the command fails this will instead return None

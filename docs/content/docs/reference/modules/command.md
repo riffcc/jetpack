@@ -15,12 +15,14 @@ Run a single command on the target directly, without a shell. Safer than !shell 
 ## Notes
 
 - Forbidden unless unsafe: ; < > & * ? { } [ ] $ backtick — and no pipes or shell builtins.
+- chdir is rendered per host/item after skip conditions and must be an absolute path in the execution target's filesystem. Relative, empty, tilde, and NUL-containing paths are rejected. The path is passed literally, without controller-side resolution. Directory entry happens inside the sudo context and affects only this command. A missing or inaccessible directory fails before the command, regardless of failed_when. Plan validates path syntax without entering the directory.
 
 ## Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `cmd` | string | yes | The command line to execute (templated). |
+| `chdir` | path | no | Absolute working directory on the execution target (templated). Omission preserves the target's default directory. |
 | `save` | string | no | Variable name to save { rc, out } from the run. |
 | `failed_when` | condition | no | Expression overriding the default fail-when-rc-nonzero. |
 | `changed_when` | condition | no | Expression overriding the default always-changed. |

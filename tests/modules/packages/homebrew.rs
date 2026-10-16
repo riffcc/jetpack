@@ -4,8 +4,11 @@ use jetpack::tasks::*;
 #[test]
 fn test_homebrew_task_basic() {
     let task = HomebrewTask {
+        delay: None,
+        retry: None,
+
         name: Some("Install wget".to_string()),
-        package: "wget".to_string(),
+        package: "wget".to_string().into(),
         version: None,
         update: None,
         remove: None,
@@ -23,8 +26,11 @@ fn test_homebrew_task_basic() {
 #[test]
 fn test_homebrew_task_with_version() {
     let task = HomebrewTask {
+        delay: None,
+        retry: None,
+
         name: None,
-        package: "node".to_string(),
+        package: "node".to_string().into(),
         version: Some("18".to_string()),
         update: None,
         remove: None,
@@ -40,8 +46,11 @@ fn test_homebrew_task_with_version() {
 #[test]
 fn test_homebrew_task_remove() {
     let task = HomebrewTask {
+        delay: None,
+        retry: None,
+
         name: Some("Uninstall old tool".to_string()),
-        package: "python@3.9".to_string(),
+        package: "python@3.9".to_string().into(),
         version: None,
         update: None,
         remove: Some("yes".to_string()),
@@ -56,8 +65,11 @@ fn test_homebrew_task_remove() {
 #[test]
 fn test_homebrew_task_with_update() {
     let task = HomebrewTask {
+        delay: None,
+        retry: None,
+
         name: Some("Update git".to_string()),
-        package: "git".to_string(),
+        package: "git".to_string().into(),
         version: None,
         update: Some("yes".to_string()),
         remove: None,
@@ -115,7 +127,7 @@ and:
     assert!(task.is_ok());
 
     let task = task.unwrap();
-    assert!(task.package.contains("{{ tool_name }}"));
+    assert_eq!(task.package, "{{ tool_name }}");
     assert!(task.with.is_some());
     assert!(task.and.is_some());
 }

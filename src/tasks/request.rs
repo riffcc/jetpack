@@ -24,7 +24,7 @@ use std::vec::Vec;
 // modifications, this includes the list (map) of parameters to change
 // as returned by the query request
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TaskRequestType {
     Validate,
     Query,
@@ -35,11 +35,12 @@ pub enum TaskRequestType {
     Passive,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TaskRequest {
     pub request_type: TaskRequestType,
     pub changes: Vec<Field>,
     pub sudo_details: Option<SudoDetails>,
+    pub chdir: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -57,6 +58,7 @@ impl TaskRequest {
             request_type: TaskRequestType::Validate,
             changes: Vec::new(),
             sudo_details: None,
+            chdir: None,
         })
     }
 
@@ -65,6 +67,7 @@ impl TaskRequest {
             request_type: TaskRequestType::Query,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
+            chdir: None,
         })
     }
 
@@ -73,6 +76,7 @@ impl TaskRequest {
             request_type: TaskRequestType::Create,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
+            chdir: None,
         })
     }
 
@@ -81,6 +85,7 @@ impl TaskRequest {
             request_type: TaskRequestType::Remove,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
+            chdir: None,
         })
     }
 
@@ -89,6 +94,7 @@ impl TaskRequest {
             request_type: TaskRequestType::Modify,
             changes,
             sudo_details: Some(sudo_details.clone()),
+            chdir: None,
         })
     }
 
@@ -97,6 +103,7 @@ impl TaskRequest {
             request_type: TaskRequestType::Execute,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
+            chdir: None,
         })
     }
 
@@ -105,7 +112,14 @@ impl TaskRequest {
             request_type: TaskRequestType::Passive,
             changes: Vec::new(),
             sudo_details: Some(sudo_details.clone()),
+            chdir: None,
         })
+    }
+
+    /// Scope execution context to this request, copying only when shared.
+    pub fn with_chdir(mut self: Arc<Self>, chdir: Option<&str>) -> Arc<Self> {
+        Arc::make_mut(&mut self).chdir = chdir.map(str::to_owned);
+        self
     }
 
     pub fn is_sudoing(&self) -> bool {

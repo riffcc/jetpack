@@ -16,3 +16,4 @@
 
 /** ADD MODULES HERE, KEEP ALPHABETIZED **/
 pub mod github_release;
+pub mod http;

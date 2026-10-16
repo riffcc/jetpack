@@ -43,6 +43,8 @@ pub struct UserTask {
     pub remove: Option<String>,
     pub cleanup: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -71,6 +73,14 @@ struct UserDetails {
 }
 
 impl IsTask for UserTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.removable("Ensure user", &self.remove, &self.user, "users"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -172,7 +182,14 @@ impl IsTask for UserTask {
                 )?,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

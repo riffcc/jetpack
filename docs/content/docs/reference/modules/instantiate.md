@@ -1,6 +1,6 @@
 ---
 title: instantiate
-weight: 19
+weight: 20
 description: "Generate inventory host_vars files and group memberships for a fleet of machines (runs on LOCAL inventory). Triggers the provision system by writing a provision block per host. Supports hostname-pattern expansion and round-robin node distribution."
 ---
 

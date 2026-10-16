@@ -29,6 +29,8 @@ pub struct StatTask {
     pub path: String,
     pub save: String,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -39,6 +41,14 @@ struct StatAction {
 }
 
 impl IsTask for StatTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::saved(Some(&self.save))
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Inspect", &self.path, "Inspect files"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -68,7 +78,14 @@ impl IsTask for StatTask {
                 )?,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

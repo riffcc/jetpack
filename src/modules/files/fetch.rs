@@ -49,6 +49,8 @@ pub struct FetchTask {
     /// Leave empty to capture content only via `PlaybookResult.fetched_files`.
     pub dest: Option<String>,
     pub with: Option<PreLogicInput>,
+    pub retry: Option<String>,
+    pub delay: Option<String>,
     pub and: Option<PostLogicInput>,
 }
 
@@ -58,6 +60,14 @@ struct FetchAction {
 }
 
 impl IsTask for FetchTask {
+    fn name_variable_writes(&self) -> crate::tasks::naming::NameVariableWrites {
+        crate::tasks::naming::NameVariableWrites::None
+    }
+
+    fn generated_name(&self, context: &crate::tasks::naming::NamingContext<'_>) -> Option<String> {
+        Some(context.resource("Fetch", &self.src, "Fetch files"))
+    }
+
     fn get_module(&self) -> String {
         String::from(MODULE)
     }
@@ -90,7 +100,14 @@ impl IsTask for FetchTask {
                 dest,
             }),
             with: Arc::new(PreLogicInput::template(handle, request, tm, &self.with)?),
-            and: Arc::new(PostLogicInput::template(handle, request, tm, &self.and)?),
+            and: Arc::new(PostLogicInput::template(
+                handle,
+                request,
+                tm,
+                &self.and,
+                &self.retry,
+                &self.delay,
+            )?),
         })
     }
 }

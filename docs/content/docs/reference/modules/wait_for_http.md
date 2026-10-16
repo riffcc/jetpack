@@ -1,6 +1,6 @@
 ---
 title: wait_for_http
-weight: 34
+weight: 35
 description: "Poll an HTTP endpoint until it responds (optionally with a specific status code), useful for waiting on an API or service to become ready after boot. Fails on timeout."
 ---
 

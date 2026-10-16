@@ -1,6 +1,6 @@
 ---
 title: pacman
-weight: 21
+weight: 22
 description: "Manage packages with pacman (Arch Linux). Accepts repo/name syntax (strips the repo prefix for queries/removal)."
 ---
 
@@ -12,16 +12,25 @@ description: "Manage packages with pacman (Arch Linux). Accepts repo/name syntax
 
 Manage packages with pacman (Arch Linux). Accepts repo/name syntax (strips the repo prefix for queries/removal).
 
+## Notes
+
+- package accepts a scalar or a nonempty list of names. Each list entry is templated per host/item and validated with an indexed error. Lists use one installed-package query and one transaction containing only packages that need installation, a version change, or removal. Duplicate names coalesce within a batch. Scalar syntax retains its existing execution behavior. version and update/upgrade/remove settings apply to all entries. Upgrade checks use repository candidates; pacman list updates target the selected packages without running a full system upgrade. A mixed create/modify batch reports created; an all-modify batch reports modified; an already-correct batch reports matched. Plan checks state without installing/removing packages. with.items remains iteration and can run several separate batches.
+
 ## Parameters
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `package` | string | yes | Package name (optionally repo/name). |
+| `package` | string or list | yes | Package name (optionally repo/name). |
 | `version` | string | no | Pin a version (appended as -version). |
 | `update` | bool | no | Run pacman -Syu upgrade semantics. |
 | `remove` | bool | no | Remove the package (pacman -R). |
 
 ## Examples
+
+```yaml
+- !pacman
+  package: [git, curl]
+```
 
 ```yaml
 - !pacman
