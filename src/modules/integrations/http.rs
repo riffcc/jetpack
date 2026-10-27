@@ -46,6 +46,10 @@ pub struct HttpTask {
 pub struct HttpCheck {
     pub url: String,
     pub method: Option<String>,
+    /// Explicitly declare that a POST check only reads application state.
+    /// GET and HEAD remain implicitly read-only; other methods are rejected.
+    #[serde(default)]
+    pub read_only: bool,
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
     pub body: Option<String>,
@@ -110,6 +114,7 @@ struct HttpAction {
 struct HttpCheckAction {
     request: HttpRequest,
     matches: HttpMatch,
+    read_only: bool,
 }
 
 struct HttpRequest {
@@ -203,6 +208,7 @@ impl HttpCheck {
         Ok::<_, Arc<TaskResponse>>(HttpCheckAction {
             request: preflight,
             matches: self.matches.clone(),
+            read_only: self.read_only,
         })
     }
 }
@@ -314,13 +320,16 @@ impl IsAction for HttpAction {
                 if let Some(check) = &self.check {
                     // Enforce read-only preflight methods before any I/O.
                     // The engine never enters Execute in plan/check mode.
-                    if !matches!(
-                        check.request.method.to_ascii_uppercase().as_str(),
-                        "GET" | "HEAD"
-                    ) {
-                        return Err(handle
-                            .response
-                            .is_failed(request, "http: check method must be GET or HEAD"));
+                    let allowed = match check.request.method.to_ascii_uppercase().as_str() {
+                        "GET" | "HEAD" => true,
+                        "POST" => check.read_only,
+                        _ => false,
+                    };
+                    if !allowed {
+                        return Err(handle.response.is_failed(
+                            request,
+                            "http: check method must be GET or HEAD, or POST with read_only: true",
+                        ));
                     }
                     let result = check.request.send().map_err(|e| {
                         handle.response.is_failed(

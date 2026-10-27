@@ -349,9 +349,123 @@ async fn head_checks_are_supported_and_mutating_check_methods_are_rejected_befor
         let error = run_through_engine(task, handle(), true).await.unwrap_err();
         assert_eq!(
             error.msg.as_deref(),
-            Some("http: check method must be GET or HEAD")
+            Some("http: check method must be GET or HEAD, or POST with read_only: true")
         );
     }
+}
+
+#[tokio::test]
+async fn read_only_post_checks_plan_apply_and_reapply_without_unnecessary_mutations() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let server = MockServer::start().await;
+    let configured = Arc::new(AtomicBool::new(false));
+    let read_state = configured.clone();
+    Mock::given(method("POST"))
+        .and(path("/jmap"))
+        .and(header("authorization", "Bearer private-test-token"))
+        .and(header("content-type", "application/json"))
+        .and(body_string(r#"{"operation":"get"}"#))
+        .respond_with(move |_: &wiremock::Request| {
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "configured": read_state.load(Ordering::SeqCst)
+            }))
+        })
+        .expect(4)
+        .mount(&server)
+        .await;
+    let write_state = configured.clone();
+    Mock::given(method("POST"))
+        .and(path("/jmap"))
+        .and(body_string(r#"{"operation":"set"}"#))
+        .respond_with(move |_: &wiremock::Request| {
+            write_state.store(true, Ordering::SeqCst);
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"changed":true}))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+    for (plan, expected) in [
+        (true, TaskStatus::NeedsExecution),
+        (false, TaskStatus::IsExecuted),
+        (false, TaskStatus::IsMatched),
+        (true, TaskStatus::IsMatched),
+    ] {
+        let mut task = task(&server.uri(), "(eq response.json.configured true)");
+        task.url = format!("{}/jmap", server.uri());
+        task.body = Some(r#"{"operation":"set"}"#.into());
+        task.headers
+            .insert("Authorization".into(), "Bearer private-test-token".into());
+        task.headers
+            .insert("Content-Type".into(), "application/json".into());
+        let check = task.check.as_mut().unwrap();
+        check.url = task.url.clone();
+        check.method = Some("pOsT".into());
+        check.read_only = true;
+        check.body = Some(r#"{"operation":"get"}"#.into());
+        check.matches =
+            serde_yaml::from_str("path: response.json\ncontains:\n  configured: true\n").unwrap();
+        assert_eq!(
+            run_through_engine(task, handle(), plan)
+                .await
+                .unwrap()
+                .status,
+            expected
+        );
+        if plan {
+            assert_eq!(
+                configured.load(Ordering::SeqCst),
+                expected == TaskStatus::IsMatched
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn post_check_opt_in_does_not_allow_other_methods_or_undeclared_posts() {
+    for plan in [true, false] {
+        for (method, read_only) in [
+            ("POST", false),
+            ("PUT", true),
+            ("PATCH", true),
+            ("DELETE", true),
+            ("OPTIONS", true),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(path("/resource"))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(0)
+                .mount(&server)
+                .await;
+            let mut task = task(&server.uri(), "false");
+            task.check.as_mut().unwrap().method = Some(method.into());
+            task.check.as_mut().unwrap().read_only = read_only;
+            let error = run_through_engine(task, handle(), plan).await.unwrap_err();
+            assert_eq!(error.status, TaskStatus::Failed);
+            assert_eq!(
+                error.msg.as_deref(),
+                Some("http: check method must be GET or HEAD, or POST with read_only: true")
+            );
+        }
+    }
+}
+
+#[test]
+fn post_check_read_only_is_an_explicit_yaml_boolean() {
+    let check: HttpCheck = serde_yaml::from_str(
+        "url: https://example.invalid/jmap\nmethod: POST\nread_only: true\nmatches: 'true'\n",
+    )
+    .unwrap();
+    assert!(check.read_only);
+    let check: HttpCheck =
+        serde_yaml::from_str("url: https://example.invalid/jmap\nmethod: POST\nmatches: 'true'\n")
+            .unwrap();
+    assert!(!check.read_only);
+    assert!(
+        serde_yaml::from_str::<HttpCheck>(
+            "url: https://example.invalid/jmap\nread_only: yes\nmatches: 'true'\n"
+        )
+        .is_err()
+    );
 }
 
 #[tokio::test]
