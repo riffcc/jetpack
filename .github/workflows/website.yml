@@ -1,0 +1,39 @@
+name: Website Checks
+
+on:
+  push:
+    branches: [main, dev, staging]
+  pull_request:
+    branches: [main, dev, staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    name: Reference docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run --locked -- gen-reference --check
+
+  hugo:
+    name: Hugo validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: "0.147.7"
+          extended: true
+      - name: Validate website
+        working-directory: docs
+        run: hugo --gc --minify --enableGitInfo
