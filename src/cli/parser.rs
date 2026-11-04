@@ -61,6 +61,8 @@ pub struct CliParser {
     pub show_groups: Vec<String>,
     pub batch_size: Option<usize>,
     pub default_user: String,
+    /// Whether --user was explicitly supplied rather than using the implicit default.
+    pub user_set: bool,
     pub sudo: Option<String>,
     pub default_port: i64,
     pub threads: usize,
@@ -541,6 +543,7 @@ impl CliParser {
             show_hosts: Vec::new(),
             show_groups: Vec::new(),
             batch_size: None,
+            user_set: false,
             default_user: match env::var("JET_SSH_USER") {
                 Ok(x) => {
                     println!("$JET_SSH_USER: {}", x);
@@ -1075,6 +1078,7 @@ impl CliParser {
 
     fn store_default_user(&mut self, value: &str) -> Result<(), String> {
         self.default_user = value.to_string();
+        self.user_set = true;
         Ok(())
     }
 
