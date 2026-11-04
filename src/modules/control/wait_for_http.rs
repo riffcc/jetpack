@@ -200,7 +200,7 @@ fn poll_until_ready(
         .build()
         .map_err(|e| format!("wait_for_http: runtime: {}", e))?;
     let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(!verify_tls)
+        .tls_danger_accept_invalid_certs(!verify_tls)
         .build()
         .map_err(|e| format!("wait_for_http: http client: {}", e))?;
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);

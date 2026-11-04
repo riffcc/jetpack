@@ -582,7 +582,7 @@ impl HttpRequest {
         rt.block_on(async {
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(timeout))
-                .danger_accept_invalid_certs(!verify_tls)
+                .tls_danger_accept_invalid_certs(!verify_tls)
                 // Custom authentication headers must never follow a redirect
                 // to a different endpoint. Capture the 3xx response instead.
                 .redirect(reqwest::redirect::Policy::none())
