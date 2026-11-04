@@ -1,6 +1,6 @@
 FROM debian:trixie-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 ARG TARGETARCH
 COPY jetpack-${TARGETARCH} /usr/local/bin/jetpack

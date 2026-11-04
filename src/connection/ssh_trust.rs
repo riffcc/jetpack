@@ -1,5 +1,5 @@
 //! Shared OpenSSH host trust files; no Jetpack-specific host-key database.
-use super::ssh_config::SshConfig;
+use super::ssh_config::{SshConfig, patterns_match};
 use data_encoding::BASE64;
 use hmac::{Hmac, KeyInit, Mac};
 use russh::keys::{
@@ -14,7 +14,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::process::Command;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -109,8 +110,8 @@ impl HostTrust {
         let lookup = self.lookup_name(host);
         let mut entries = Vec::new();
         for path in self.user_files.iter().chain(&self.global_files) {
-            match File::open(path) {
-                Ok(_) => {}
+            let text = match std::fs::read_to_string(path) {
+                Ok(text) => text,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => {
                     return Err(format!(
@@ -118,31 +119,48 @@ impl HostTrust {
                         path.display()
                     ));
                 }
-            }
-            // Use OpenSSH's hostname-pattern/hashed-name lookup, including
-            // negated patterns, without opening any SSH connection.
-            let output = Command::new("ssh-keygen")
-                .arg("-F")
-                .arg(&lookup)
-                .arg("-f")
-                .arg(path)
-                .output()
-                .map_err(|e| format!("cannot query OpenSSH known hosts: {e}"))?;
-            if output.status.code() == Some(1) {
-                continue;
-            }
-            if !output.status.success() {
-                return Err(format!("cannot query known-hosts file {}", path.display()));
-            }
-            let text =
-                String::from_utf8(output.stdout).map_err(|_| "invalid known-hosts encoding")?;
-            for entry in ssh_key::known_hosts::KnownHosts::new(&text) {
-                entries.push(entry.map_err(|e| {
-                    format!(
-                        "invalid matching known-hosts entry in {}: {e}",
-                        path.display()
-                    )
-                })?);
+            };
+            for line in text
+                .lines()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && !s.starts_with('#'))
+            {
+                let fields: Vec<_> = line.split_whitespace().collect();
+                let index = usize::from(fields[0].starts_with('@'));
+                let Some(patterns) = fields.get(index) else {
+                    continue;
+                };
+                let matched = if patterns.starts_with('|') {
+                    let parts: Vec<_> = patterns.split('|').collect();
+                    if parts.len() != 4 || parts[1] != "1" {
+                        return Err("invalid hashed known-hosts entry".into());
+                    }
+                    let salt = BASE64
+                        .decode(parts[2].as_bytes())
+                        .map_err(|_| "invalid known-hosts salt")?;
+                    let hash = BASE64
+                        .decode(parts[3].as_bytes())
+                        .map_err(|_| "invalid known-hosts hash")?;
+                    if salt.len() != 20 || hash.len() != 20 {
+                        return Err("invalid known-hosts hash length".into());
+                    }
+                    let mut mac = Hmac::<Sha1>::new_from_slice(&salt).map_err(|e| e.to_string())?;
+                    mac.update(lookup.as_bytes());
+                    mac.verify_slice(&hash).is_ok()
+                } else {
+                    patterns_match(patterns.split(','), &lookup)
+                };
+                if matched {
+                    // Normalize field separators for ssh-key's OpenSSH parser;
+                    // unrelated legacy entries cannot affect this connection.
+                    let normalized = fields.join(" ");
+                    entries.push(normalized.parse::<Entry>().map_err(|e| {
+                        format!(
+                            "invalid matching known-hosts entry in {}: {e}",
+                            path.display()
+                        )
+                    })?);
+                }
             }
         }
         Ok(entries)
@@ -223,28 +241,8 @@ impl HostTrust {
         let data = std::fs::read(path)
             .map_err(|e| format!("cannot read RevokedHostKeys {}: {e}", path.display()))?;
         if data.starts_with(b"SSHKRL\n\0") {
-            let key = match offered {
-                PublicKeyOrCertificate::Certificate(c) => c.to_openssh(),
-                _ => offered.public_key().to_openssh(),
-            }
-            .map_err(|e| e.to_string())?;
-            let mut child = Command::new("ssh-keygen")
-                .args(["-Q", "-f"])
-                .arg(path)
-                .arg("/dev/stdin")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|e| e.to_string())?;
-            child
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(format!("{key}\n").as_bytes())
-                .map_err(|e| e.to_string())?;
-            if !child.wait().map_err(|e| e.to_string())?.success() {
-                return Err("SSH host key is revoked or the revocation list is invalid".into());
+            if super::ssh_krl::is_revoked(&data, offered)? {
+                return Err("SSH host key is revoked".into());
             }
         } else {
             let text = std::str::from_utf8(&data).map_err(|_| "invalid RevokedHostKeys file")?;
@@ -290,7 +288,11 @@ impl HostTrust {
                         host, self.port
                     ));
                 }
-                Status::Unknown => unknown.push(host.clone()),
+                Status::Unknown => {
+                    if !unknown.contains(host) {
+                        unknown.push(host.clone());
+                    }
+                }
             }
         }
         if changed {
@@ -422,6 +424,25 @@ mod tests {
                 .unwrap();
             assert!(result.status.success());
         }
+    }
+    #[test]
+    fn native_lookup_honors_patterns_negation_tabs_and_matching_parse_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let trust = trust(root.path(), true, false);
+        let public = key(1).public_key().to_openssh().unwrap();
+        let path = &trust.user_files[0];
+        std::fs::write(path, format!("# comment\n*.unrelated invalid data\n[*.test]:2222,![excluded.test]:2222\t{public}\n")).unwrap();
+        trust.verify(&key(1)).unwrap();
+        let mut excluded = trust.clone();
+        excluded.host = "excluded.test".into();
+        assert!(excluded.verify(&key(1)).unwrap_err().contains("strict"));
+        std::fs::write(path, "[example.test]:2222 invalid data\n").unwrap();
+        assert!(
+            trust
+                .verify(&key(1))
+                .unwrap_err()
+                .contains("invalid matching")
+        );
     }
     #[test]
     fn strict_unknown_hosts_do_not_create_a_trust_file() {

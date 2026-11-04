@@ -42,7 +42,7 @@ regex = "1.10"
 strum = { version = "0.28.0", features = ["derive"] }
 shlex = "2.0.1"
 roxmltree = "0.21"
-# OpenSSH known_hosts interoperability (hashed hostnames and temporary config input).
+# Native OpenSSH known_hosts hashing; temporary config only for explicit agent forwarding.
 data-encoding = "2.11.1"
 hmac = "0.13.0"
 sha1 = "0.11.0"

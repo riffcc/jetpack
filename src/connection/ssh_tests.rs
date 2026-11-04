@@ -235,29 +235,46 @@ fn native_ssh_and_sftp_share_openssh_trust_and_reject_rotation_before_password()
     assert_eq!(server.attempts.load(Ordering::SeqCst), 1);
     let before = std::fs::read(root.path().join("known_hosts")).unwrap();
     assert!(before.starts_with(b"|1|"));
-    let openssh = std::process::Command::new("ssh")
-        .arg("-F")
-        .arg(&config)
-        .args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "PreferredAuthentications=none",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            "--",
-            "test-alias",
-            "true",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        String::from_utf8_lossy(&openssh.stderr)
-            .to_lowercase()
-            .contains("permission denied"),
-        "{}",
-        String::from_utf8_lossy(&openssh.stderr)
-    );
+    if std::env::var_os("JETPACK_TEST_NO_SSH_TOOLS").is_some() {
+        assert_eq!(
+            std::process::Command::new("ssh")
+                .output()
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            std::process::Command::new("ssh-keygen")
+                .output()
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+    } else {
+        let openssh = std::process::Command::new("ssh")
+            .arg("-F")
+            .arg(&config)
+            .args([
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "PreferredAuthentications=none",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "--",
+                "test-alias",
+                "true",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&openssh.stderr)
+                .to_lowercase()
+                .contains("permission denied"),
+            "{}",
+            String::from_utf8_lossy(&openssh.stderr)
+        );
+    }
 
     // Use the actual native command and SFTP implementations.
     let local = crate::test_support::test_handle(Arc::new(Mutex::new(
@@ -358,9 +375,10 @@ fn native_client_trusts_records_enrolled_by_openssh() {
         Some(&path),
     )
     .unwrap();
+    let forwarding = config.forwarding_file().unwrap();
     let result = std::process::Command::new("ssh")
         .arg("-F")
-        .arg(config.file.path())
+        .arg(forwarding.path())
         .args([
             "-o",
             "BatchMode=yes",
@@ -383,5 +401,21 @@ fn native_client_trusts_records_enrolled_by_openssh() {
     assert_eq!(
         std::fs::read(root.path().join("known_hosts")).unwrap(),
         before
+    );
+}
+
+#[test]
+fn native_ssh_sftp_and_trust_work_without_openssh_executables() {
+    let empty = tempfile::tempdir().unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "connection::ssh_tests::native_ssh_and_sftp_share_openssh_trust_and_reject_rotation_before_password", "--nocapture"])
+        .env("PATH", empty.path())
+        .env("JETPACK_TEST_NO_SSH_TOOLS", "1")
+        .output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }

@@ -255,38 +255,55 @@ impl Connection for SshConnection {
 
         let trust = Arc::new(HostTrust::new(&ssh_config, addr.ip().to_string())?);
         let mut config = client::Config::default();
-        if let Some(algorithms) = ssh_config.get("hostkeyalgorithms") {
-            let supported = config.preferred.key.to_vec();
-            let has_authority = trust.has_authority()?;
-            let mut keys = Vec::new();
-            let mut certificates = Vec::new();
-            for name in algorithms.split(',') {
-                let certificate = name.contains("-cert-v01@openssh.com");
-                let parsed = if certificate {
-                    russh::keys::ssh_key::Algorithm::new_certificate(name).ok()
-                } else {
-                    name.parse().ok()
-                };
-                if let Some(algorithm) = parsed
-                    && supported.contains(&algorithm)
-                {
-                    if certificate && has_authority {
-                        certificates.push(algorithm);
-                    } else if !certificate {
-                        keys.push(algorithm);
-                    }
+        let supported = config.preferred.key.to_vec();
+        let has_authority = trust.has_authority()?;
+        let defaults = supported
+            .iter()
+            .flat_map(|algorithm| {
+                let name = algorithm.as_str().to_string();
+                let cert = algorithm.to_certificate_type();
+                [cert, name]
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let configured = ssh_config.get("hostkeyalgorithms");
+        let algorithms = configured.unwrap_or(&defaults);
+        if algorithms.starts_with(['+', '-', '^']) {
+            return Err(
+                "HostKeyAlgorithms list modifiers are not yet supported; specify an explicit list"
+                    .into(),
+            );
+        }
+        let mut keys = Vec::new();
+        let mut certificates = Vec::new();
+        for name in algorithms.split(',') {
+            let certificate = name.contains("-cert-v01@openssh.com");
+            let parsed = if certificate {
+                russh::keys::ssh_key::Algorithm::new_certificate(name).ok()
+            } else {
+                name.parse().ok()
+            };
+            if let Some(algorithm) = parsed
+                && supported.contains(&algorithm)
+            {
+                if certificate && has_authority {
+                    certificates.push(algorithm);
+                } else if !certificate {
+                    keys.push(algorithm);
                 }
             }
-            trust.prefer_known_algorithms(&mut keys)?;
-            if keys.is_empty() && certificates.is_empty() {
-                return Err(
-                    "no configured host-key algorithms are supported by the native SSH client"
-                        .into(),
-                );
-            }
-            config.preferred.key = keys.into();
-            config.preferred.host_key_certificates = certificates.into();
         }
+        // An explicitly configured order must not be reordered.
+        if configured.is_none() {
+            trust.prefer_known_algorithms(&mut keys)?;
+        }
+        if keys.is_empty() && certificates.is_empty() {
+            return Err(
+                "no configured host-key algorithms are supported by the native SSH client".into(),
+            );
+        }
+        config.preferred.key = keys.into();
+        config.preferred.host_key_certificates = certificates.into();
         let config = Arc::new(config);
 
         // Capture fields for the async block
@@ -675,7 +692,8 @@ impl SshConnection {
             .config
             .as_ref()
             .ok_or((500, "SSH configuration not established".into()))?;
-        base.arg("-F").arg(config.file.path());
+        let file = config.forwarding_file().map_err(|e| (500, e))?;
+        base.arg("-F").arg(file.path());
         let port = format!("{}", self.port);
         let cmd2 = format!("LANG=C {} 2>&1", cmd);
         let command = base
