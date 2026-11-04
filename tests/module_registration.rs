@@ -1,5 +1,5 @@
-//! Guard the test module graph: a Rust file under tests must be a Cargo
-//! integration-test root or reachable through an out-of-line mod declaration.
+//! Check textual registration for the conventional layout documented in tests/README.md.
+//! This does not evaluate cfg attributes or prove that every test is compiled/run.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ fn rust_files(directory: &Path, files: &mut BTreeSet<PathBuf>) {
 }
 
 #[test]
-fn every_test_source_is_registered() {
+fn conventional_test_sources_are_registered() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let mut files = BTreeSet::new();
     rust_files(&root, &mut files);

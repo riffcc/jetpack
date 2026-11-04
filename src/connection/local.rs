@@ -26,7 +26,6 @@ use crate::tasks::{TaskRequest, TaskResponse};
 
 use crate::Inventory;
 use crate::util::io::jet_file_open;
-use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -116,12 +115,20 @@ impl LocalConnection {
 
 impl Connection for LocalConnection {
     fn whoami(&self) -> Result<String, String> {
-        // get the currently logged in user.
-        let user_result = env::var("USER");
-        match user_result {
-            Ok(x) => Ok(x),
-            Err(y) => Err(format!("environment variable $USER: {y}")),
+        let output = Command::new("id")
+            .arg("-un")
+            .output()
+            .map_err(|e| format!("cannot determine local process identity: {e}"))?;
+        if !output.status.success() {
+            return Err("id -un failed to determine local process identity".into());
         }
+        let user = std::str::from_utf8(&output.stdout)
+            .map_err(|_| "local process identity is not UTF-8".to_string())?
+            .trim();
+        if user.is_empty() {
+            return Err("local process identity is empty".into());
+        }
+        Ok(user.to_string())
     }
 
     fn connect(&mut self) -> Result<(), String> {

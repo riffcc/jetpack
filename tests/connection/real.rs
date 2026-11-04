@@ -22,10 +22,13 @@ fn test_local_connection_real_whoami() {
     assert!(result.is_ok());
 
     let username = result.unwrap();
-    // Should match the actual system username
-    let expected_username = env::var("USER")
-        .or_else(|_| env::var("USERNAME"))
-        .unwrap_or_else(|_| "unknown".to_string());
+    // Match the effective process identity, independent of USER/USERNAME.
+    let output = std::process::Command::new("id")
+        .arg("-un")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let expected_username = String::from_utf8(output.stdout).unwrap().trim().to_string();
     assert_eq!(username, expected_username);
 }
 
@@ -248,4 +251,24 @@ fn test_local_connection_real_permissions() {
 
     // Clean up
     fs::remove_file(&temp_file).unwrap();
+}
+
+#[test]
+fn test_local_connection_real_whoami_ignores_spoofed_user_environment() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "connection::real::test_local_connection_real_whoami",
+            "--nocapture",
+        ])
+        .env("USER", "not-the-process-user")
+        .env("USERNAME", "not-the-process-user")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

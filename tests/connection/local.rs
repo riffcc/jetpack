@@ -94,7 +94,7 @@ fn test_local_connection_whoami() {
     let host = Arc::new(RwLock::new(Host::new(&hostname)));
     let conn = LocalConnection::new(&host);
 
-    // This should get the current user from $USER env var
+    // This should return the local process identity.
     let result = conn.whoami();
     assert!(result.is_ok());
 
