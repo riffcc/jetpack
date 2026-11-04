@@ -23,9 +23,10 @@ pub(super) fn quote(value: &str) -> Result<String, String> {
 }
 
 // OpenSSH patterns use only * and ?, not regex or filesystem character classes.
-pub(super) fn pattern_matches(pattern: &str, value: &str) -> bool {
+fn pattern_matches(pattern: &str, value: &str, insensitive: bool) -> bool {
     let pattern = format!(
-        "(?i)^{}$",
+        "{}^{}$",
+        if insensitive { "(?i)" } else { "" },
         regex::escape(pattern)
             .replace("\\*", ".*")
             .replace("\\?", ".")
@@ -36,14 +37,21 @@ pub(super) fn patterns_match(
     patterns: impl IntoIterator<Item = impl AsRef<str>>,
     value: &str,
 ) -> bool {
+    patterns_match_case(patterns, value, true)
+}
+fn patterns_match_case(
+    patterns: impl IntoIterator<Item = impl AsRef<str>>,
+    value: &str,
+    insensitive: bool,
+) -> bool {
     let mut positive = false;
     for pattern in patterns {
         let pattern = pattern.as_ref();
         if let Some(negative) = pattern.strip_prefix('!') {
-            if pattern_matches(negative, value) {
+            if pattern_matches(negative, value, insensitive) {
                 return false;
             }
-        } else if pattern_matches(pattern, value) {
+        } else if pattern_matches(pattern, value, insensitive) {
             positive = true;
         }
     }
@@ -197,7 +205,11 @@ impl Evaluation<'_> {
                             .unwrap_or(self.user),
                         _ => self.local_user,
                     };
-                    patterns_match(patterns.split(','), value)
+                    patterns_match_case(
+                        patterns.split(','),
+                        value,
+                        matches!(criterion.as_str(), "host" | "originalhost"),
+                    )
                 }
                 _ => {
                     return Err(format!(
@@ -617,7 +629,7 @@ mod tests {
     fn supported_resolution_agrees_with_openssh() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("config");
-        std::fs::write(&path, "Host * !excluded\n HostName example.test\n User configured\n Port 2200\n HashKnownHosts yes\n CheckHostIP yes\n HostKeyAlias trust-name\nMatch final originalhost alias\n StrictHostKeyChecking yes\n").unwrap();
+        std::fs::write(&path, "Host * !excluded\n HostName example.test\n User configured\n Port 2200\n HashKnownHosts yes\n CheckHostIP yes\n HostKeyAlias trust-name\nMatch user CONFIGURED\n StrictHostKeyChecking no\nMatch final originalhost alias\n StrictHostKeyChecking yes\n").unwrap();
         let native = resolve(&path).unwrap();
         let output = std::process::Command::new("ssh")
             .arg("-G")

@@ -157,6 +157,9 @@ fn key(seed: u8) -> PrivateKey {
 }
 impl TestServer {
     fn start() -> Self {
+        Self::with_certificate(None)
+    }
+    fn with_certificate(certificate: Option<russh::keys::ssh_key::Certificate>) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -176,7 +179,7 @@ impl TestServer {
                         _ = &mut stopped => break,
                         socket = listener.accept() => {
                             let (socket, _) = socket.unwrap();
-                            let config = Arc::new(server::Config { keys: vec![server_key.lock().unwrap().clone()], ..Default::default() });
+                            let config = Arc::new(server::Config { keys: vec![server_key.lock().unwrap().clone()], certificates: certificate.clone().into_iter().collect(), ..Default::default() });
                             let handler = Peer { attempts: server_attempts.clone(), commands: server_commands.clone(), files: files.clone(), channels: HashMap::new() };
                             tasks.spawn(async move { if let Ok(session) = server::run_stream(config, socket, handler).await { let _ = session.await; } });
                         }
@@ -418,4 +421,47 @@ fn native_ssh_sftp_and_trust_work_without_openssh_executables() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn native_certificate_handshake_checks_principal_before_password() {
+    use russh::keys::ssh_key::certificate::{Builder, CertType};
+    let ca = key(7);
+    for principal in ["127.0.0.1", "other.test", ""] {
+        let root = tempfile::tempdir().unwrap();
+        let mut builder = Builder::new(
+            vec![1; 32],
+            key(1).public_key().key_data().clone(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.cert_type(CertType::Host).unwrap();
+        if principal.is_empty() {
+            builder.all_principals_valid().unwrap();
+        } else {
+            builder.valid_principal(principal).unwrap();
+        }
+        let server = TestServer::with_certificate(Some(builder.sign(&ca).unwrap()));
+        let config = server.config(root.path(), true);
+        let path = root.path().join("known_hosts");
+        let record = format!(
+            "@cert-authority [127.0.0.1]:{} {}\n",
+            server.port,
+            ca.public_key().to_openssh().unwrap()
+        );
+        std::fs::write(&path, &record).unwrap();
+        let mut connection = server.connection(&config);
+        let result = connection.connect();
+        assert_eq!(
+            result.is_ok(),
+            principal == "127.0.0.1",
+            "{principal}: {result:?}"
+        );
+        assert_eq!(
+            server.attempts.load(Ordering::SeqCst),
+            usize::from(principal == "127.0.0.1")
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), record);
+    }
 }

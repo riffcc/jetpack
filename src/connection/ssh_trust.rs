@@ -175,15 +175,13 @@ impl HostTrust {
         {
             return false;
         }
-        if !certificate.valid_principals().is_empty()
-            && !certificate.valid_principals().iter().any(|p| {
-                let pattern = format!(
-                    "(?i)^{}$",
-                    regex::escape(p).replace("\\*", ".*").replace("\\?", ".")
-                );
-                regex::Regex::new(&pattern).is_ok_and(|r| r.is_match(&self.host))
-            })
-        {
+        if !certificate.valid_principals().iter().any(|p| {
+            let pattern = format!(
+                "^{}$",
+                regex::escape(p).replace("\\*", ".*").replace("\\?", ".")
+            );
+            regex::Regex::new(&pattern).is_ok_and(|r| r.is_match(&self.host))
+        }) {
             return false;
         }
         certificate
@@ -593,11 +591,12 @@ mod tests {
                 before,
             )
             .unwrap();
-            builder
-                .cert_type(kind)
-                .unwrap()
-                .valid_principal(principal)
-                .unwrap();
+            builder.cert_type(kind).unwrap();
+            if principal.is_empty() {
+                builder.all_principals_valid().unwrap();
+            } else {
+                builder.valid_principal(principal).unwrap();
+            }
             PublicKeyOrCertificate::Certificate(builder.sign(&ca).unwrap())
         };
         trust
@@ -634,6 +633,24 @@ mod tests {
                 ))
                 .is_err()
         );
+        for principal in ["", "EXAMPLE.TEST"] {
+            assert!(
+                trust
+                    .verify(&cert(
+                        principal,
+                        ssh_key::certificate::CertType::Host,
+                        u64::MAX
+                    ))
+                    .is_err()
+            );
+        }
+        trust
+            .verify(&cert(
+                "*.test",
+                ssh_key::certificate::CertType::Host,
+                u64::MAX,
+            ))
+            .unwrap();
         let mut revoked = trust.clone();
         let path = root.path().join("revoked");
         std::fs::write(&path, ca.public_key().to_openssh().unwrap()).unwrap();
