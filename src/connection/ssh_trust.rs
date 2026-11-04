@@ -266,14 +266,15 @@ impl HostTrust {
         }
         Ok(())
     }
-    pub fn verify(&self, offered: &PublicKeyOrCertificate) -> Result<(), String> {
-        self.check_revocations(offered)?;
+    fn unknown_hosts(&self, offered: &PublicKeyOrCertificate) -> Result<Vec<String>, String> {
         let mut unknown = Vec::new();
+        let mut changed = false;
         for host in std::iter::once(&self.host).chain(self.ip.as_ref()) {
             match self.status(host, offered)? {
                 Status::Trusted => {}
                 Status::Changed if self.policy == HostKeyPolicy::Off => {
                     self.changed.store(true, Ordering::SeqCst);
+                    changed = true;
                 }
                 Status::Changed => {
                     return Err(format!(
@@ -292,9 +293,20 @@ impl HostTrust {
                 Status::Unknown => unknown.push(host.clone()),
             }
         }
+        if changed {
+            return Ok(Vec::new());
+        }
+        Ok(unknown)
+    }
+    pub fn verify(&self, offered: &PublicKeyOrCertificate) -> Result<(), String> {
+        self.check_revocations(offered)?;
+        let unknown = self.unknown_hosts(offered)?;
         if unknown.is_empty() {
             return Ok(());
         }
+        self.enroll(offered)
+    }
+    fn enroll(&self, offered: &PublicKeyOrCertificate) -> Result<(), String> {
         if self.policy == HostKeyPolicy::Off && self.user_files.is_empty() {
             return Ok(());
         }
@@ -322,19 +334,11 @@ impl HostTrust {
             file.lock()
                 .map_err(|e| format!("cannot lock known-hosts file: {e}"))?;
         }
-        // Recheck while holding the destination lock: competing first connections
-        // must not enroll different keys for the same host.
+        // Revalidate every name under the lock, including records that were
+        // trusted initially. A tolerated change must never authorize enrollment.
+        self.check_revocations(offered)?;
         let mut records = Vec::new();
-        for host in unknown {
-            match self.status(&host, offered)? {
-                Status::Trusted => continue,
-                Status::Changed => {
-                    return Err(format!(
-                        "SSH host key changed for {host}; refusing authentication"
-                    ));
-                }
-                Status::Unknown => {}
-            }
+        for host in self.unknown_hosts(offered)? {
             let mut name = self.lookup_name(&host);
             if self.hash {
                 let mut salt = [0u8; 20];
@@ -483,6 +487,53 @@ mod tests {
         trust.verify(&key(2)).unwrap();
         assert!(trust.changed.load(Ordering::SeqCst));
         assert_eq!(std::fs::read(&trust.user_files[0]).unwrap(), before);
+    }
+    #[test]
+    fn off_with_changed_hostname_and_unknown_ip_never_enrolls() {
+        for changed_ip in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let mut trust = trust(root.path(), false, false);
+            trust.verify(&key(1)).unwrap();
+            if changed_ip {
+                trust.ip = Some(trust.host.clone());
+                trust.host = "unknown.test".into();
+            } else {
+                trust.ip = Some("192.0.2.1".into());
+            }
+            trust.policy = HostKeyPolicy::Off;
+            let before = std::fs::read(&trust.user_files[0]).unwrap();
+            trust.verify(&key(2)).unwrap();
+            assert!(trust.changed.load(Ordering::SeqCst));
+            assert_eq!(std::fs::read(&trust.user_files[0]).unwrap(), before);
+        }
+    }
+    #[test]
+    fn locked_revalidation_applies_off_policy_without_enrolling_other_names() {
+        for policy in [HostKeyPolicy::Off, HostKeyPolicy::AcceptNew] {
+            let root = tempfile::tempdir().unwrap();
+            let mut trust = trust(root.path(), false, false);
+            trust.policy = policy;
+            trust.ip = Some("192.0.2.1".into());
+            assert_eq!(trust.unknown_hosts(&key(2)).unwrap().len(), 2);
+            // A competing connection enrolls a conflicting hostname after the
+            // first pass but before this connection acquires the file lock.
+            std::fs::write(
+                &trust.user_files[0],
+                format!(
+                    "[example.test]:2222 {}\n",
+                    key(1).public_key().to_openssh().unwrap()
+                ),
+            )
+            .unwrap();
+            let before = std::fs::read(&trust.user_files[0]).unwrap();
+            let result = trust.enroll(&key(2));
+            assert_eq!(result.is_ok(), policy == HostKeyPolicy::Off);
+            assert_eq!(
+                trust.changed.load(Ordering::SeqCst),
+                policy == HostKeyPolicy::Off
+            );
+            assert_eq!(std::fs::read(&trust.user_files[0]).unwrap(), before);
+        }
     }
     #[test]
     fn host_key_alias_is_not_decorated_with_a_port() {
