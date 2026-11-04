@@ -460,6 +460,9 @@ pub(crate) mod tests {
             "tool 'unterminated",
             "tool {} ; evil",
             "tool {} | evil",
+            "tool {} 'bad\0argument'",
+            "tool {} 'bad\nargument'",
+            "tool {} 'bad\rargument'",
         ] {
             assert!(Validator::parse(input).is_err(), "{input}");
         }
