@@ -300,7 +300,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -389,7 +389,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -435,7 +435,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -494,7 +494,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
@@ -627,7 +627,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
@@ -755,7 +755,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .timeout(std::time::Duration::from_secs(300)) // 5 min timeout for download
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
@@ -942,7 +942,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -1165,7 +1165,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -1206,7 +1206,7 @@ impl ProxmoxLxcProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -1243,7 +1243,7 @@ impl ProxmoxLxcProvisioner {
             .map_err(|e| format!("Failed to create async runtime: {}", e))?;
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
             let resp = self
@@ -1296,7 +1296,7 @@ impl ProxmoxLxcProvisioner {
             .map_err(|e| format!("Failed to create async runtime: {}", e))?;
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
             let response = self
@@ -1340,7 +1340,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
             return rt.block_on(async {
                 let client = reqwest::Client::builder()
-                    .danger_accept_invalid_certs(true)
+                    .tls_danger_accept_invalid_certs(true)
                     .build()
                     .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
@@ -1531,7 +1531,7 @@ impl Provisioner for ProxmoxLxcProvisioner {
 
             let result: Result<Option<String>, String> = rt.block_on(async {
                 let client = reqwest::Client::builder()
-                    .danger_accept_invalid_certs(true)
+                    .tls_danger_accept_invalid_certs(true)
                     .timeout(std::time::Duration::from_secs(10))
                     .build()
                     .map_err(|e| format!("Failed to create HTTP client: {}", e))?;

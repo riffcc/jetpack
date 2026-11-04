@@ -63,7 +63,7 @@ impl ProxmoxApiConfig {
         request: &Arc<TaskRequest>,
     ) -> Result<reqwest::Client, Arc<TaskResponse>> {
         reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
+            .tls_danger_accept_invalid_certs(true)
             .build()
             .map_err(|e| {
                 handle

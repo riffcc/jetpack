@@ -227,7 +227,7 @@ impl ProxmoxVmProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let mut params = HashMap::new();
@@ -297,7 +297,7 @@ impl ProxmoxVmProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let resp = self
@@ -334,7 +334,7 @@ impl ProxmoxVmProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let resp = self
@@ -374,7 +374,7 @@ impl ProxmoxVmProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
 
@@ -501,7 +501,7 @@ impl ProxmoxVmProvisioner {
     ) -> Result<Option<String>, String> {
         let url = self.api_url(conn, &format!("/nodes/{}/qemu/{}/config", conn.node, vmid));
         let client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
+            .tls_danger_accept_invalid_certs(true)
             .build()
             .map_err(|e| format!("HTTP: {}", e))?;
 
@@ -549,7 +549,7 @@ impl ProxmoxVmProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let _ = self.apply_auth(conn, client.post(&url)).send().await;
@@ -570,7 +570,7 @@ impl ProxmoxVmProvisioner {
             .map_err(|e| format!("Runtime: {}", e))?;
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let resp = self
@@ -623,7 +623,7 @@ impl ProxmoxVmProvisioner {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
 
@@ -647,7 +647,7 @@ impl ProxmoxVmProvisioner {
         let url = self.api_url(conn, &format!("/nodes/{}/tasks/{}/status", conn.node, upid));
         loop {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| format!("HTTP: {}", e))?;
             let resp = self
@@ -908,7 +908,7 @@ impl Provisioner for ProxmoxVmProvisioner {
 
             return rt.block_on(async {
                 let client = reqwest::Client::builder()
-                    .danger_accept_invalid_certs(true)
+                    .tls_danger_accept_invalid_certs(true)
                     .build()
                     .map_err(|e| format!("HTTP: {}", e))?;
                 let resp = self

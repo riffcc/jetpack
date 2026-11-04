@@ -269,7 +269,7 @@ impl ProxmoxLxcAction {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| {
                     handle
@@ -334,7 +334,7 @@ impl ProxmoxLxcAction {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| {
                     handle
@@ -421,7 +421,7 @@ impl ProxmoxLxcAction {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| {
                     handle
@@ -474,7 +474,7 @@ impl ProxmoxLxcAction {
 
         rt.block_on(async {
             let client = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .tls_danger_accept_invalid_certs(true)
                 .build()
                 .map_err(|e| {
                     handle
