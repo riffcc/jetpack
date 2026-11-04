@@ -486,7 +486,7 @@ fn show_help() {
                        | |\n\
                        | | --batch-size N| fully configure this many hosts before moving to the next batch\n\
                        | |\n\
-                       | | --forward-agent | enables SSH agent forwarding but only on specific tasks (ex: git)\n\
+                       | | --forward-agent | enables SSH agent forwarding for specific tasks (ex: git); requires ssh on the controller\n\
                        | |\n\
                        | | --limit-groups group1:group2 | further limits scope for playbook runs\n\
                        | |\n\
