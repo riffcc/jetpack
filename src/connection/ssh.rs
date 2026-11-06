@@ -15,6 +15,8 @@
 // You should have received a copy of the GNU General Public License
 // long with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use super::ssh_config::SshConfig;
+use super::ssh_trust::HostTrust;
 use crate::Inventory;
 use crate::connection::command::CommandResult;
 use crate::connection::command::Forward;
@@ -27,7 +29,7 @@ use crate::inventory::hosts::Host;
 use crate::playbooks::context::PlaybookContext;
 use crate::tasks::*;
 use std::net::ToSocketAddrs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -37,16 +39,24 @@ use russh::client::{self, AuthResult};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::runtime::Runtime;
 
-// Minimal handler for russh client — accepts all host keys (same as ssh2 default)
-struct SshHandler;
+// Native handshake validation against the operator's OpenSSH trust files.
+struct SshHandler {
+    trust: Arc<HostTrust>,
+}
 
 impl client::Handler for SshHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKeyOrCertificate,
+        server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        self.trust.verify(server_public_key).map_err(|message| {
+            russh::Error::Keys(russh::keys::Error::IO(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                message,
+            )))
+        })?;
         Ok(true)
     }
 }
@@ -133,6 +143,7 @@ impl ConnectionFactory for SshFactory {
             passphrase,
             key_comment,
         );
+        conn.overrides = ctx.ssh_connection_overrides(host);
         match conn.connect() {
             Ok(_) => {
                 let conn2: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(conn));
@@ -163,6 +174,9 @@ pub struct SshConnection {
     // Async runtime bridge — Mutex for Sync compliance (outer Arc<Mutex<Connection>> prevents contention)
     runtime: Mutex<Runtime>,
     handle: Option<client::Handle<SshHandler>>,
+    config: Option<SshConfig>,
+    config_file: Option<PathBuf>,
+    overrides: (bool, bool),
 }
 
 impl SshConnection {
@@ -197,7 +211,15 @@ impl SshConnection {
             key_comment,
             runtime: Mutex::new(runtime),
             handle: None,
+            config: None,
+            config_file: None,
+            overrides: (false, false),
         }
+    }
+    /// Use an existing custom OpenSSH config file (equivalent to ssh -F).
+    pub fn with_ssh_config(mut self, path: impl Into<PathBuf>) -> Self {
+        self.config_file = Some(path.into());
+        self
     }
 }
 
@@ -213,14 +235,76 @@ impl Connection for SshConnection {
 
         assert!(!self.host.read().expect("host read").name.eq("localhost"));
 
-        // Resolve address synchronously
-        let connect_str = format!("{}:{}", self.hostname, self.port);
-        let mut addrs = connect_str
+        let ssh_config = SshConfig::resolve(
+            &self.hostname,
+            &self.username,
+            self.port,
+            self.overrides.0,
+            self.overrides.1,
+            self.config_file.as_deref(),
+        )?;
+        self.username = ssh_config.user.clone();
+        self.port = i64::from(ssh_config.port);
+        let connect_str = format!("{}:{}", ssh_config.hostname, self.port);
+        let mut addrs = (ssh_config.hostname.as_str(), ssh_config.port)
             .to_socket_addrs()
             .map_err(|_| String::from("unable to resolve"))?;
         let addr = addrs
             .next()
             .ok_or_else(|| String::from("unable to resolve(2)"))?;
+
+        let trust = Arc::new(HostTrust::new(&ssh_config, addr.ip().to_string())?);
+        let mut config = client::Config::default();
+        let supported = config.preferred.key.to_vec();
+        let has_authority = trust.has_authority()?;
+        let defaults = supported
+            .iter()
+            .flat_map(|algorithm| {
+                let name = algorithm.as_str().to_string();
+                let cert = algorithm.to_certificate_type();
+                [cert, name]
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let configured = ssh_config.get("hostkeyalgorithms");
+        let algorithms = configured.unwrap_or(&defaults);
+        if algorithms.starts_with(['+', '-', '^']) {
+            return Err(
+                "HostKeyAlgorithms list modifiers are not yet supported; specify an explicit list"
+                    .into(),
+            );
+        }
+        let mut keys = Vec::new();
+        let mut certificates = Vec::new();
+        for name in algorithms.split(',') {
+            let certificate = name.contains("-cert-v01@openssh.com");
+            let parsed = if certificate {
+                russh::keys::ssh_key::Algorithm::new_certificate(name).ok()
+            } else {
+                name.parse().ok()
+            };
+            if let Some(algorithm) = parsed
+                && supported.contains(&algorithm)
+            {
+                if certificate && has_authority {
+                    certificates.push(algorithm);
+                } else if !certificate {
+                    keys.push(algorithm);
+                }
+            }
+        }
+        // An explicitly configured order must not be reordered.
+        if configured.is_none() {
+            trust.prefer_known_algorithms(&mut keys)?;
+        }
+        if keys.is_empty() && certificates.is_empty() {
+            return Err(
+                "no configured host-key algorithms are supported by the native SSH client".into(),
+            );
+        }
+        config.preferred.key = keys.into();
+        config.preferred.host_key_certificates = certificates.into();
+        let config = Arc::new(config);
 
         // Capture fields for the async block
         let username = self.username.clone();
@@ -229,13 +313,12 @@ impl Connection for SshConnection {
         let passphrase = self.passphrase.clone();
         let key_comment = self.key_comment.clone();
         let connect_str_err = connect_str.clone();
+        let forward_agent = self.forward_agent;
 
         let handle = self.runtime.lock().unwrap().block_on(async {
-            let config = Arc::new(client::Config::default());
-
             let mut handle = tokio::time::timeout(
                 Duration::from_secs(10),
-                client::connect(config, addr, SshHandler),
+                client::connect(config, addr, SshHandler { trust: trust.clone() }),
             )
             .await
             .map_err(|_| {
@@ -250,6 +333,14 @@ impl Connection for SshConnection {
                     connect_str_err, e
                 )
             })?;
+
+            // OpenSSH also disables password authentication and agent forwarding
+            // when StrictHostKeyChecking=no accepts a changed key. Fail rather
+            // than exposing credentials or silently dropping requested forwarding.
+            if trust.changed.load(std::sync::atomic::Ordering::SeqCst)
+                && (login_password.is_some() || forward_agent) {
+                return Err("SSH host key changed: password authentication and agent forwarding are disabled even with StrictHostKeyChecking=no".into());
+            }
 
             // Authenticate — try methods in priority order
             if let Some(ref password) = login_password {
@@ -376,6 +467,7 @@ impl Connection for SshConnection {
         })?;
 
         self.handle = Some(handle);
+        self.config = Some(ssh_config);
         self.connected = true;
 
         // OS detection — run uname on first connect
@@ -595,16 +687,23 @@ impl SshConnection {
     fn run_command_with_ssh_a(&self, cmd: &str) -> Result<(i32, String), (i32, String)> {
         // libssh2/russh agent forwarding is unreliable, so shell out to ssh -A
         let mut base = Command::new("ssh");
-        let hostname = &self.host.read().unwrap().name;
+        let hostname = &self.hostname;
+        let config = self
+            .config
+            .as_ref()
+            .ok_or((500, "SSH configuration not established".into()))?;
+        let file = config.forwarding_file().map_err(|e| (500, e))?;
+        base.arg("-F").arg(file.path());
         let port = format!("{}", self.port);
         let cmd2 = format!("LANG=C {} 2>&1", cmd);
         let command = base
-            .arg(hostname)
             .arg("-p")
             .arg(port)
             .arg("-l")
             .arg(self.username.clone())
             .arg("-A")
+            .arg("--")
+            .arg(hostname)
             .arg(cmd2);
         match command.output() {
             Ok(x) => match x.status.code() {
