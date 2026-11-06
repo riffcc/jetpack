@@ -1575,10 +1575,12 @@ name = "jetpack"
 version = "0.5.0"
 dependencies = [
  "chrono",
+ "data-encoding",
  "expanduser",
  "guid-create",
  "handlebars",
  "hex",
+ "hmac",
  "indexmap",
  "inline_colorization",
  "once_cell",
@@ -1593,6 +1595,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_yaml",
+ "sha1",
  "sha2",
  "shlex",
  "strum",

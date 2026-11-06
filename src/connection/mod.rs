@@ -24,3 +24,10 @@ pub mod factory;
 pub mod local;
 pub mod no;
 pub mod ssh;
+
+mod ssh_config;
+mod ssh_krl;
+mod ssh_trust;
+
+#[cfg(test)]
+mod ssh_tests;

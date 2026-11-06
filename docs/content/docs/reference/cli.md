@@ -39,7 +39,7 @@ cascade:
 | `--config` | yes | — |
 | `--environment` | yes | — |
 | `--extra-vars` | yes | Inject extra variables from a YAML file or quoted JSON. |
-| `--forward-agent` | no | Enable SSH agent forwarding for specific tasks (e.g. git). |
+| `--forward-agent` | no | Enable SSH agent forwarding for specific tasks (e.g. git); requires ssh on the controller. |
 | `--groups` | yes | — |
 | `--help` | yes | — |
 | `--inventory` | yes | Inventory path; may be given multiple times (later paths overlay earlier ones). |

@@ -523,7 +523,7 @@
       "--extra-vars": { "description": "Inject extra variables from a YAML file or quoted JSON." },
       "-v": { "description": "Increase verbosity (-v, -vv, -vvv)." },
       "--no-browser": { "description": "(docs mode) Print the local docs URL instead of opening a browser." },
-      "--forward-agent": { "description": "Enable SSH agent forwarding for specific tasks (e.g. git)." },
+      "--forward-agent": { "description": "Enable SSH agent forwarding for specific tasks (e.g. git); requires ssh on the controller." },
       "--async": { "description": "Run tasks asynchronously (per-host parallelism)." }
     }
   }

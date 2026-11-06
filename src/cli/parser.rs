@@ -61,6 +61,8 @@ pub struct CliParser {
     pub show_groups: Vec<String>,
     pub batch_size: Option<usize>,
     pub default_user: String,
+    /// Whether --user was explicitly supplied rather than using the implicit default.
+    pub user_set: bool,
     pub sudo: Option<String>,
     pub default_port: i64,
     pub threads: usize,
@@ -484,7 +486,7 @@ fn show_help() {
                        | |\n\
                        | | --batch-size N| fully configure this many hosts before moving to the next batch\n\
                        | |\n\
-                       | | --forward-agent | enables SSH agent forwarding but only on specific tasks (ex: git)\n\
+                       | | --forward-agent | enables SSH agent forwarding for specific tasks (ex: git); requires ssh on the controller\n\
                        | |\n\
                        | | --limit-groups group1:group2 | further limits scope for playbook runs\n\
                        | |\n\
@@ -541,6 +543,7 @@ impl CliParser {
             show_hosts: Vec::new(),
             show_groups: Vec::new(),
             batch_size: None,
+            user_set: false,
             default_user: match env::var("JET_SSH_USER") {
                 Ok(x) => {
                     println!("$JET_SSH_USER: {}", x);
@@ -1075,6 +1078,7 @@ impl CliParser {
 
     fn store_default_user(&mut self, value: &str) -> Result<(), String> {
         self.default_user = value.to_string();
+        self.user_set = true;
         Ok(())
     }
 
