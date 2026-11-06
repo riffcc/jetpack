@@ -82,6 +82,8 @@ pub struct PlaybookContext {
     pub templar: RwLock<Templar>,
 
     pub ssh_user: String,
+    ssh_user_explicit: bool,
+    ssh_port_explicit: bool,
     pub ssh_port: i64,
     pub sudo: Option<String>,
     extra_vars: serde_yaml::Value,
@@ -130,6 +132,11 @@ impl PlaybookContext {
             role_defaults_storage: RwLock::new(serde_yaml::Mapping::new()),
             env_storage: RwLock::new(serde_yaml::Mapping::new()),
             ssh_user: parser.default_user.clone(),
+            ssh_user_explicit: parser.user_set || env::var("JET_SSH_USER").is_ok(),
+            ssh_port_explicit: parser.port_set
+                || env::var("JET_SSH_PORT")
+                    .ok()
+                    .is_some_and(|v| v.parse::<u16>().is_ok_and(|p| p != 0)),
             ssh_port: parser.default_port,
             sudo: parser.sudo.clone(),
             extra_vars: parser.extra_vars.clone(),
@@ -156,10 +163,12 @@ impl PlaybookContext {
 
     pub fn set_ssh_user(&mut self, ssh_user: &str) {
         self.ssh_user = ssh_user.to_string();
+        self.ssh_user_explicit = true;
     }
 
     pub fn set_ssh_port(&mut self, ssh_port: i64) {
         self.ssh_port = ssh_port;
+        self.ssh_port_explicit = true;
     }
 
     // used in traversal to tell the context what the current set of possible
@@ -405,6 +414,15 @@ impl PlaybookContext {
     // already on the context or check some variables in inventory.
 
     // FIXME: this should return a struct
+
+    /// Explicit Jetpack connection settings override SSH config; implicit defaults do not.
+    pub(crate) fn ssh_connection_overrides(&self, host: &Arc<RwLock<Host>>) -> (bool, bool) {
+        let vars = self.get_complete_blended_variables(host, BlendTarget::NotTemplateModule);
+        (
+            self.ssh_user_explicit || vars.get("jet_ssh_user").and_then(|v| v.as_str()).is_some(),
+            self.ssh_port_explicit || vars.get("jet_ssh_port").is_some(),
+        )
+    }
 
     pub fn get_ssh_connection_details(
         &self,
