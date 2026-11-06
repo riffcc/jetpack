@@ -357,3 +357,106 @@ impl PacmanAction {
         }
     }
 }
+
+#[cfg(test)]
+mod recovered_tests {
+    use super::*;
+    #[test]
+    fn test_pacman_action_get_actual_package() {
+        let action = PacmanAction {
+            package: "vim".to_string(),
+            version: None,
+            update: false,
+            remove: false,
+        };
+        assert_eq!(action.get_actual_package(), "vim");
+    }
+
+    #[test]
+    fn test_pacman_action_get_actual_package_with_repo() {
+        let action = PacmanAction {
+            package: "extra/vim".to_string(),
+            version: None,
+            update: false,
+            remove: false,
+        };
+        assert_eq!(action.get_actual_package(), "vim");
+    }
+
+    #[test]
+    fn test_pacman_action_get_actual_package_multiple_slashes() {
+        let action = PacmanAction {
+            package: "community/extra/vim".to_string(),
+            version: None,
+            update: false,
+            remove: false,
+        };
+        assert_eq!(action.get_actual_package(), "vim");
+    }
+
+    #[test]
+    fn test_pacman_action_is_update() {
+        let action = PacmanAction {
+            package: "vim".to_string(),
+            version: None,
+            update: true,
+            remove: false,
+        };
+        assert!(action.is_update());
+    }
+
+    #[test]
+    fn test_pacman_action_is_remove() {
+        let action = PacmanAction {
+            package: "vim".to_string(),
+            version: None,
+            update: false,
+            remove: true,
+        };
+        assert!(action.is_remove());
+    }
+
+    #[test]
+    fn test_pacman_action_get_version() {
+        let action = PacmanAction {
+            package: "vim".to_string(),
+            version: Some("9.0.1234-1".to_string()),
+            update: false,
+            remove: false,
+        };
+        assert_eq!(action.get_version(), Some("9.0.1234-1".to_string()));
+    }
+
+    #[test]
+    fn test_pacman_action_parse_package_details() {
+        let action = PacmanAction {
+            package: "vim".to_string(),
+            version: None,
+            update: false,
+            remove: false,
+        };
+
+        let output = "Name            : vim\nVersion         : 9.0.1234-1\nDescription     : Vi Improved, a highly configurable text editor\n";
+        let details = action.parse_package_details(&output.to_string());
+
+        assert!(details.is_some());
+        let details = details.unwrap();
+        assert_eq!(details.name, "vim");
+        assert_eq!(details.version, "9.0.1234-1");
+    }
+
+    #[test]
+    fn test_pacman_action_parse_package_details_not_found() {
+        let action = PacmanAction {
+            package: "notfound".to_string(),
+            version: None,
+            update: false,
+            remove: false,
+        };
+
+        let output = "";
+        let details = action.parse_package_details(&output.to_string());
+
+        assert!(details.is_none());
+    }
+}

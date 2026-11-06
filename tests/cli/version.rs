@@ -1,4 +1,4 @@
-use jetpack::cli::version::*;
+use jetpack::cli::parser::{BUILD_TIME, GIT_BRANCH, GIT_VERSION};
 
 #[test]
 fn test_git_version_is_not_empty() {
@@ -11,7 +11,11 @@ fn test_git_version_is_not_empty() {
 fn test_git_branch_is_not_empty() {
     assert!(!GIT_BRANCH.is_empty());
     // Branch name should contain valid characters
-    assert!(GIT_BRANCH.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/' || c == '.'));
+    assert!(GIT_BRANCH.chars().all(|c| c.is_alphanumeric()
+        || c == '-'
+        || c == '_'
+        || c == '/'
+        || c == '.'));
 }
 
 #[test]
@@ -43,7 +47,7 @@ fn test_version_constants_consistency() {
     assert!(GIT_VERSION.len() > 0);
     assert!(GIT_BRANCH.len() > 0);
     assert!(BUILD_TIME.len() > 0);
-    
+
     // They should all be &str types
     let _v: &str = GIT_VERSION;
     let _b: &str = GIT_BRANCH;

@@ -1,73 +1,33 @@
-use jetpack::connection::cache::*;
+use jetpack::connection::{cache::ConnectionCache, connection::Connection, local::LocalConnection};
 use jetpack::inventory::hosts::Host;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 #[test]
-fn test_connection_cache_new() {
-    let cache = ConnectionCache::new();
-    assert_eq!(cache.size(), 0);
+fn cache_reuses_connections_by_host_name_and_clear_removes_them() {
+    let host = Arc::new(RwLock::new(Host::new("one")));
+    let same_name = Arc::new(RwLock::new(Host::new("one")));
+    let other = Arc::new(RwLock::new(Host::new("two")));
+    let connection: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(LocalConnection::new(&host)));
+    let mut cache = ConnectionCache::new();
+    assert!(!cache.has_connection(&host));
+    cache.add_connection(&host, &connection);
+    assert!(cache.has_connection(&same_name));
+    assert!(!cache.has_connection(&other));
+    assert!(Arc::ptr_eq(&cache.get_connection(&same_name), &connection));
+    cache.clear();
+    assert!(!cache.has_connection(&host));
 }
 
 #[test]
-fn test_connection_cache_has_host() {
-    let cache = ConnectionCache::new();
-    let hostname = "testhost".to_string();
-    let host = Arc::new(RwLock::new(Host::new(&hostname)));
-    
-    assert!(!cache.has_host(&host));
-}
-
-#[test]
-fn test_cache_entry_creation() {
-    let entry = CacheEntry {
-        ssh_process: None,
-        connection_type: "ssh".to_string(),
-    };
-    
-    assert!(entry.ssh_process.is_none());
-    assert_eq!(entry.connection_type, "ssh");
-}
-
-#[test]
-fn test_cache_entry_with_process() {
-    let entry = CacheEntry {
-        ssh_process: Some(42), // Mock process ID
-        connection_type: "ssh".to_string(),
-    };
-    
-    assert_eq!(entry.ssh_process, Some(42));
-    assert_eq!(entry.connection_type, "ssh");
-}
-
-#[test]
-fn test_connection_cache_debug() {
-    let cache = ConnectionCache::new();
-    let debug_str = format!("{:?}", cache);
-    assert!(debug_str.contains("ConnectionCache"));
-}
-
-#[test]
-fn test_cache_entry_debug() {
-    let entry = CacheEntry {
-        ssh_process: None,
-        connection_type: "local".to_string(),
-    };
-    let debug_str = format!("{:?}", entry);
-    assert!(debug_str.contains("CacheEntry"));
-    assert!(debug_str.contains("local"));
-}
-
-#[test]
-fn test_connection_cache_multiple_hosts() {
-    let cache = ConnectionCache::new();
-    
-    let hostname1 = "host1".to_string();
-    let host1 = Arc::new(RwLock::new(Host::new(&hostname1)));
-    
-    let hostname2 = "host2".to_string();
-    let host2 = Arc::new(RwLock::new(Host::new(&hostname2)));
-    
-    // Initially both hosts should not be in cache
-    assert!(!cache.has_host(&host1));
-    assert!(!cache.has_host(&host2));
+fn cache_replaces_only_the_requested_hosts_connection() {
+    let host = Arc::new(RwLock::new(Host::new("one")));
+    let other = Arc::new(RwLock::new(Host::new("two")));
+    let first: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(LocalConnection::new(&host)));
+    let second: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(LocalConnection::new(&host)));
+    let mut cache = ConnectionCache::new();
+    cache.add_connection(&host, &first);
+    cache.add_connection(&other, &first);
+    cache.add_connection(&host, &second);
+    assert!(Arc::ptr_eq(&cache.get_connection(&host), &second));
+    assert!(Arc::ptr_eq(&cache.get_connection(&other), &first));
 }
