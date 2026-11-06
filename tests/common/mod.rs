@@ -12,8 +12,6 @@ use std::sync::{Arc, Mutex, RwLock};
 
 // Shared helper used by subdirectory test files that are not compiled as
 // top-level Cargo targets (tests/modules/*, tests/connection/*, ...).
-// Allowed dead_code until those tests are wired into a test target.
-#[allow(dead_code)]
 pub fn create_test_run_state() -> Arc<RunState> {
     let parser = CliParser::new();
     let mut inventory = Inventory::new();
@@ -51,5 +49,12 @@ pub fn create_test_run_state() -> Arc<RunState> {
         async_mode: false,
         playbook_contents: Vec::new(),
         fetched_files: Arc::new(Mutex::new(HashMap::new())),
+    })
+}
+
+pub fn query_request() -> Arc<jetpack::tasks::TaskRequest> {
+    jetpack::tasks::TaskRequest::query(&jetpack::tasks::request::SudoDetails {
+        user: None,
+        template: "sudo -u {{ jet_sudo_user }} {{ jet_command }}".into(),
     })
 }

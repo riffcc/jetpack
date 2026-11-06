@@ -1,12 +1,12 @@
+use jetpack::connection::command::{CommandResult, Forward};
+use jetpack::connection::connection::Connection;
+use jetpack::handle::handle::TaskHandle;
+use jetpack::handle::response::Response;
+use jetpack::inventory::hosts::Host;
 use jetpack::modules::packages::zypper::*;
 use jetpack::tasks::*;
-use jetpack::handle::handle::TaskHandle;
-use jetpack::inventory::hosts::Host;
-use jetpack::connection::connection::Connection;
-use jetpack::connection::command::{CommandResult, Forward};
-use jetpack::handle::response::Response;
-use std::sync::{Arc, RwLock, Mutex};
 use std::path::Path;
+use std::sync::{Arc, Mutex, RwLock};
 
 // Mock connection for testing
 struct MockConnection;
@@ -15,12 +15,18 @@ impl Connection for MockConnection {
     fn whoami(&self) -> Result<String, String> {
         Ok("mockuser".to_string())
     }
-    
+
     fn connect(&mut self) -> Result<(), String> {
         Ok(())
     }
-    
-    fn run_command(&self, response: &Arc<Response>, request: &Arc<TaskRequest>, cmd: &String, _forward: Forward) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
+
+    fn run_command(
+        &self,
+        response: &Arc<Response>,
+        request: &Arc<TaskRequest>,
+        cmd: &str,
+        _forward: Forward,
+    ) -> Result<Arc<TaskResponse>, Arc<TaskResponse>> {
         // Mock different command outputs based on the command
         if cmd.contains("zypper --non-interactive --quiet search --match-exact --details") {
             let output = if cmd.contains("vim") {
@@ -28,37 +34,70 @@ impl Connection for MockConnection {
             } else {
                 ""
             };
-            Ok(response.command_ok(request, &Arc::new(Some(CommandResult {
-                cmd: cmd.clone(),
-                out: output.to_string(),
-                rc: if output.is_empty() { 104 } else { 0 },
-            }))))
+            Ok(response.command_ok(
+                request,
+                &Arc::new(Some(CommandResult {
+                    cmd: cmd.to_string(),
+                    out: output.to_string(),
+                    rc: if output.is_empty() { 104 } else { 0 },
+                })),
+            ))
         } else if cmd.contains("rpm -q") {
             let output = if cmd.contains("vim") && !cmd.contains("grep") {
                 "vim-8.2.5226-1.el8.x86_64"
             } else {
                 "package vim is not installed"
             };
-            Ok(response.command_ok(request, &Arc::new(Some(CommandResult {
-                cmd: cmd.clone(),
-                out: output.to_string(),
-                rc: if output.contains("not installed") { 1 } else { 0 },
-            }))))
+            Ok(response.command_ok(
+                request,
+                &Arc::new(Some(CommandResult {
+                    cmd: cmd.to_string(),
+                    out: output.to_string(),
+                    rc: if output.contains("not installed") {
+                        1
+                    } else {
+                        0
+                    },
+                })),
+            ))
         } else {
-            Ok(response.command_ok(request, &Arc::new(Some(CommandResult {
-                cmd: cmd.clone(),
-                out: "mock output".to_string(),
-                rc: 0,
-            }))))
+            Ok(response.command_ok(
+                request,
+                &Arc::new(Some(CommandResult {
+                    cmd: cmd.to_string(),
+                    out: "mock output".to_string(),
+                    rc: 0,
+                })),
+            ))
         }
     }
-    
-    fn copy_file(&self, _response: &Arc<Response>, _request: &Arc<TaskRequest>, _src: &Path, _remote_path: &String) -> Result<(), Arc<TaskResponse>> {
+
+    fn copy_file(
+        &self,
+        _response: &Arc<Response>,
+        _request: &Arc<TaskRequest>,
+        _src: &Path,
+        _remote_path: &str,
+    ) -> Result<(), Arc<TaskResponse>> {
         Ok(())
     }
-    
-    fn write_data(&self, _response: &Arc<Response>, _request: &Arc<TaskRequest>, _data: &String, _remote_path: &String) -> Result<(), Arc<TaskResponse>> {
+
+    fn write_data(
+        &self,
+        _response: &Arc<Response>,
+        _request: &Arc<TaskRequest>,
+        _data: &str,
+        _remote_path: &str,
+    ) -> Result<(), Arc<TaskResponse>> {
         Ok(())
+    }
+    fn fetch_file(
+        &self,
+        _response: &Arc<Response>,
+        _request: &Arc<TaskRequest>,
+        _path: &str,
+    ) -> Result<Vec<u8>, Arc<TaskResponse>> {
+        Ok(Vec::new())
     }
 }
 
@@ -67,7 +106,7 @@ fn create_test_handle() -> Arc<TaskHandle> {
     let hostname = "testhost".to_string();
     let host = Arc::new(RwLock::new(Host::new(&hostname)));
     let connection: Arc<Mutex<dyn Connection>> = Arc::new(Mutex::new(MockConnection));
-    
+
     Arc::new(TaskHandle::new(run_state, connection, host))
 }
 
@@ -129,6 +168,8 @@ package: vim
 #[test]
 fn test_zypper_task_get_module() {
     let task = ZypperTask {
+        retry: None,
+        delay: None,
         name: None,
         package: "vim".to_string().into(),
         version: None,
@@ -143,6 +184,8 @@ fn test_zypper_task_get_module() {
 #[test]
 fn test_zypper_task_get_name() {
     let task = ZypperTask {
+        retry: None,
+        delay: None,
         name: Some("Install vim editor".to_string()),
         package: "vim".to_string().into(),
         version: None,
@@ -157,6 +200,8 @@ fn test_zypper_task_get_name() {
 #[test]
 fn test_zypper_task_get_with() {
     let task = ZypperTask {
+        retry: None,
+        delay: None,
         name: None,
         package: "vim".to_string().into(),
         version: None,
@@ -171,6 +216,8 @@ fn test_zypper_task_get_with() {
 #[test]
 fn test_zypper_task_evaluate() {
     let task = ZypperTask {
+        retry: None,
+        delay: None,
         name: Some("Install vim".to_string()),
         package: "vim".to_string().into(),
         version: Some("8.2.5226".to_string()),
@@ -179,14 +226,14 @@ fn test_zypper_task_evaluate() {
         with: None,
         and: None,
     };
-    
+
     let handle = create_test_handle();
-    let request = TaskRequest::query("zypper".to_string());
-    
+    let request = crate::common::query_request();
+
     let result = task.evaluate(&handle, &request, TemplateMode::Strict);
     assert!(result.is_ok());
-    
-    let evaluated = result.unwrap();
+
+    let _evaluated = result.unwrap();
     // We can't easily test the action content without making it public,
     // but we can verify the evaluation succeeded
 }

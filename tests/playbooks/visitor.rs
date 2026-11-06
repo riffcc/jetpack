@@ -1,55 +1,34 @@
-use jetpack::playbooks::visitor::*;
+use jetpack::cli::parser::CliParser;
+use jetpack::playbooks::{
+    context::PlaybookContext,
+    visitor::{CheckMode, PlaybookVisitor},
+};
+use std::sync::{Arc, RwLock};
 
 #[test]
-fn test_check_mode_enum() {
-    assert_ne!(CheckMode::Yes, CheckMode::No);
-    assert_eq!(CheckMode::Yes, CheckMode::Yes);
-    assert_eq!(CheckMode::No, CheckMode::No);
+fn visitor_keeps_check_mode_and_unique_run_identity() {
+    let first = PlaybookVisitor::new(CheckMode::Yes);
+    let second = PlaybookVisitor::new(CheckMode::No);
+    assert!(first.check_mode == CheckMode::Yes);
+    assert!(second.check_mode == CheckMode::No);
+    assert_ne!(first.run_id, second.run_id);
+    assert!(first.output_handler.is_none());
 }
 
 #[test]
-fn test_check_mode_debug() {
-    let check_yes = CheckMode::Yes;
-    let check_no = CheckMode::No;
-    
-    assert_eq!(format!("{:?}", check_yes), "Yes");
-    assert_eq!(format!("{:?}", check_no), "No");
-}
-
-#[test]
-fn test_playbook_visitor_new() {
+fn log_entry_captures_playbook_and_task_context() {
     let visitor = PlaybookVisitor::new(CheckMode::No);
-    assert_eq!(visitor.play_count, 0);
-    assert_eq!(visitor.role_count, 0);
-    assert_eq!(visitor.task_count, 0);
-    assert_eq!(visitor.change_count, 0);
-    assert_eq!(visitor.failed_count, 0);
-    assert_eq!(visitor.skipped_count, 0);
-    assert_eq!(visitor.notified_hosts.len(), 0);
-}
-
-#[test]
-fn test_playbook_visitor_with_check_mode() {
-    let visitor = PlaybookVisitor::new(CheckMode::Yes);
-    assert_eq!(visitor.play_count, 0);
-    assert_eq!(visitor.check_mode, CheckMode::Yes);
-}
-
-#[test]
-fn test_playbook_visitor_initial_state() {
-    let visitor = PlaybookVisitor::new(CheckMode::No);
-    
-    // Verify all counters start at zero
-    assert_eq!(visitor.play_count, 0);
-    assert_eq!(visitor.role_count, 0);
-    assert_eq!(visitor.task_count, 0);
-    assert_eq!(visitor.change_count, 0);
-    assert_eq!(visitor.failed_count, 0);
-    assert_eq!(visitor.skipped_count, 0);
-    
-    // Verify collections are empty
-    assert!(visitor.notified_hosts.is_empty());
-    
-    // Verify check mode
-    assert_eq!(visitor.check_mode, CheckMode::No);
+    let mut context = PlaybookContext::new(&CliParser::new());
+    context.playbook_path = Some("playbooks/site.yml".into());
+    context.play = Some("services".into());
+    context.task = Some("install package".into());
+    context.task_count = 7;
+    let entry = visitor.log_entry("task_start", Arc::new(RwLock::new(context)));
+    assert_eq!(entry.event, "task_start");
+    assert_eq!(entry.playbook_path.as_deref(), Some("playbooks/site.yml"));
+    assert_eq!(entry.play.as_deref(), Some("services"));
+    assert_eq!(entry.task.as_deref(), Some("install package"));
+    assert_eq!(entry.task_ct, Some(7));
+    assert!(entry.cmd.is_none());
+    assert!(entry.host.is_none());
 }
